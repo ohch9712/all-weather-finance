@@ -315,7 +315,7 @@ def compute_age_band(birth_year: int, today: date) -> AgeBand
 
 멱등이어야 한다. 순서:
 
-1. 저장소 루트와 현재 브랜치를 구한다. `feature/NN-...`이면 슬롯 `NN`, 아니면 `00`.
+1. 저장소 루트와 현재 브랜치를 구한다. 브랜치 이름이 정규식 `(^|/)feature[/-]([0-9]{2})-`에 맞으면 슬롯은 그 두 자리(`feature/02-allocation`, Orca가 처음 만드는 `ohch9712/feature-02-allocation` 모두 `02`), 아니면 `00`.
 2. `BACKEND_PORT=8000+NN`, `FRONTEND_PORT=3000+NN`, `DB_NAME=finance_NN`.
 3. `docker compose -f <루트>/compose.yaml up -d postgres` 후 헬스체크 통과까지 대기(최대 60초).
 4. DB가 없으면 만든다(`docker compose exec -T postgres psql -U finance -d postgres ...`).

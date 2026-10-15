@@ -42,7 +42,7 @@ flowchart LR
 | 브랜치 | 슬롯 | 백엔드 | 프론트 | DB |
 | --- | --- | --- | --- | --- |
 | `main`, `develop`, 그 밖의 이름 | `00` | 8000 | 3000 | `finance_00` |
-| `feature/NN-<slug>` | `NN` | `8000+NN` | `3000+NN` | `finance_NN` |
+| `feature/NN-<slug>`(Orca가 처음 만드는 `<사용자>/feature-NN-<slug>` 포함) | `NN` | `8000+NN` | `3000+NN` | `finance_NN` |
 
 - 같은 슬롯을 두 워크트리가 동시에 쓰지 않는다. 검증 워커는 구현 워커와 같은 워크트리를 쓰므로 같은 슬롯이다(동시에 돌지 않는다).
 - 설정 스크립트는 `backend/.env`와 `frontend/.env.local`을 만들고(이미 있으면 슬롯 값만 맞춘다), DB를 만들고, `uv sync`, `npm ci`, `uv run alembic upgrade heads`를 실행한다.

@@ -139,6 +139,7 @@ docs/                    # architecture.md, roadmap.md, specs/
 - 브랜치: `main`(릴리스) ← `develop`(통합) ← `feature/<NN>-<slug>`(작업, 스펙 번호와 같음). 작업 브랜치는 항상 그 시점의 `develop`에서 만든다.
 - 작업을 시작하면 먼저 `scripts/worktree-setup.sh`를 실행한다(Orca가 setup으로 이미 실행했다면 다시 실행해도 안전하다).
 - 커밋 메시지는 한국어 한 줄 요약으로 쓴다(예: `자산배분 점수 계산과 리밸런싱 금액 추가`). 작은 단위로 자주 커밋한다.
+- 원격(`origin`)은 HTTPS이고 gh 자격 증명을 쓴다. `gh auth status`가 로그인 상태면 `git push`가 된다.
 - 완료 기준을 모두 통과하면 푸시하고 `gh pr create --base develop`으로 PR을 연다.
   - 제목: `[NN] <작업 제목>`
   - 본문: 요약, 스펙 링크, 완료 기준 체크 결과(실행한 명령과 결과), 변경 경로 요약, 스펙과 다르게 한 점, 남은 일

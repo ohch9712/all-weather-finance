@@ -131,6 +131,14 @@
    2웨이브 이후 브랜치는 앞 웨이브 병합 직후의 `develop`에서 디스패치할 때 만든다. 미리 만들면 시작점이 낡기 때문이다.
 5. 워커 디스패치는 하지 않는다. 디스패치 순서와 명령은 `docs/roadmap.md`에 남긴다.
 
+### 수행 결과와 계획과 달라진 점 (2026-10-16)
+
+- 설계 문서를 `main`에 커밋하고 비공개 저장소 `ohch9712/finance-project`를 만들어 `main`·`develop`을 올렸다. 기본 체크아웃은 `develop`이다.
+- 계획에 적었던 Orca 저장소 id가 틀려(요청 id를 옮겨 적음) 실제 id `5c07c49e-6263-4f45-bf2b-d995226a1433`으로 문서를 고쳤다. Orca 기본 기준 브랜치는 `develop`으로 설정했다.
+- 이 기기의 SSH 키가 암호로 보호돼 에이전트 셸에서 푸시할 수 없어, 이 저장소만 HTTPS 원격 + gh 자격 증명 도우미로 바꿨다(전역 설정은 그대로).
+- Orca가 만든 브랜치 이름이 `ohch9712/feature-01-...` 형식이라 `feature/01-foundation-backend`, `feature/01-foundation-frontend`로 바꾸고 원격에 올렸다. 2웨이브부터의 절차는 `docs/roadmap.md` 4.3에 반영했다.
+- 워커 디스패치는 하지 않았다.
+
 ## 재사용할 기존 코드 (gamja-market, 사용자 본인 프로젝트)
 
 - 백엔드: `backend/app/core/config.py`(psycopg URL 정규화 포함), `core/errors.py`(통일 에러 포맷), `core/security.py`·`core/cookies.py`·`core/cors.py`, `services/auth_service.py`, `repositories/{user,session}_repository.py`, `api/deps.py`(`get_db`, `CurrentUser`, `require_json`), `db/session.py`, `alembic/env.py`, `tests/conftest.py`(트랜잭션 롤백 픽스처). 모듈 우선 구조에 맞게 경로만 옮긴다.
