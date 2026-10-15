@@ -87,7 +87,10 @@ flowchart LR
 
 - 원격: GitHub 비공개 저장소 `ohch9712/finance-project`(`origin`).
 - `main`: 설계 문서 커밋. `develop`: `main`에서 분기, 기본 체크아웃(코디네이터 작업 위치).
-- 1웨이브 워크트리 2개를 Orca로 만들어 두었다(`feature/01-foundation-backend`, `feature/01-foundation-frontend`, 기준 `develop`).
+- 1웨이브 워크트리 2개를 Orca로 만들어 두었다(기준 `develop`, 브랜치 이름을 규칙대로 바꾸고 원격에 올림).
+  - `feature/01-foundation-backend` → `/Users/ochunghwan/orca/workspaces/금융 프로젝트/feature-01-foundation-backend`
+  - `feature/01-foundation-frontend` → `/Users/ochunghwan/orca/workspaces/금융 프로젝트/feature-01-foundation-frontend`
+- 원격 주소는 HTTPS이고, 저장소 로컬 설정에 gh 자격 증명 도우미(`credential.https://github.com.helper = !gh auth git-credential`)를 넣었다. 이 기기의 SSH 키는 암호가 걸려 있어 에이전트 셸에서 푸시할 수 없었기 때문이다. 워커는 `gh auth status`가 로그인 상태이면 그냥 `git push`하면 된다. SSH로 되돌리려면 `git remote set-url origin git@github.com:ohch9712/finance-project.git`.
 - 2웨이브 이후 브랜치는 디스패치할 때 그 시점의 `develop`에서 만든다.
 - Orca 저장소 id: `5c07c49e-6263-4f45-bf2b-d995226a1433`. 기본 기준 브랜치는 `develop`.
 
@@ -114,18 +117,27 @@ orca orchestration task-create --task-title "[NN] <제목> 검증" --spec "<6.2 
 
 ### 4.3 구현 디스패치
 
+Orca는 `--name feature/NN-<slug>`로 워크트리를 만들면 브랜치를 `<git 사용자>/feature-NN-<slug>`(예: `ohch9712/feature-02-allocation`)로 만든다. 그래서 2웨이브부터는 **워크트리를 먼저 만들고 브랜치 이름을 규칙대로 바꾼 뒤** 디스패치한다(`worker-start --worktree new-top-level`은 쓰지 않는다. 워커의 setup이 이름 변경보다 먼저 돌 수 있다).
+
+```bash
+# 1) 워크트리 생성(기준 develop, setup은 워커가 직접 실행)
+orca worktree create --repo id:5c07c49e-6263-4f45-bf2b-d995226a1433 --name feature/NN-<slug> --base-branch develop --no-parent --setup skip --json
+# 2) 브랜치 이름 맞추기, Orca 정보 갱신, 원격 등록
+W="/Users/ochunghwan/orca/workspaces/금융 프로젝트/feature-NN-<slug>"
+git -C "$W" branch -m feature/NN-<slug>
+orca worktree show --worktree "path:$W" --json > /dev/null
+git -C "$W" push -u origin feature/NN-<slug>
+```
+
 ```text
-# 1웨이브(워크트리가 이미 있다)
+# 3) 디스패치(1웨이브 워크트리는 이미 1~2단계를 마쳤다)
 orca orchestration worker-start --task <01a 구현 task id> --worktree branch:feature/01-foundation-backend --agent codex --json
 orca orchestration worker-start --task <01b 구현 task id> --worktree branch:feature/01-foundation-frontend --agent claude --json
-
-# 2웨이브부터(새 워크트리를 develop에서 만든다)
-orca orchestration worker-start --task <NN 구현 task id> --worktree new-top-level --repo id:5c07c49e-6263-4f45-bf2b-d995226a1433 \
-  --name feature/NN-<slug> --base-branch develop --setup run --agent <codex|claude> --json
+orca orchestration worker-start --task <NN 구현 task id> --worktree branch:feature/NN-<slug> --agent <codex|claude> --json
 ```
 
 - 독립 작업은 기다리지 말고 한 번에 모두 띄운 뒤 대기한다.
-- 만든 브랜치 이름이 `feature/NN-<slug>`인지 `git worktree list`로 확인한다. 다르면 워커에게 `git branch -m`으로 맞추라고 알린다.
+- 기존 워크트리로 디스패치하면 Orca가 setup을 다시 돌리지 않는다. 워커가 첫 단계로 `scripts/worktree-setup.sh`를 실행한다(6.1 블록에 포함).
 
 ### 4.4 대기와 처리
 
