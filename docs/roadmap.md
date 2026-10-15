@@ -89,7 +89,7 @@ flowchart LR
 - `main`: 설계 문서 커밋. `develop`: `main`에서 분기, 기본 체크아웃(코디네이터 작업 위치).
 - 1웨이브 워크트리 2개를 Orca로 만들어 두었다(`feature/01-foundation-backend`, `feature/01-foundation-frontend`, 기준 `develop`).
 - 2웨이브 이후 브랜치는 디스패치할 때 그 시점의 `develop`에서 만든다.
-- Orca 저장소 id: `5c07c49e-10bd-4c28-b5f6-bdf63867ba69`. 기본 기준 브랜치는 `develop`.
+- Orca 저장소 id: `5c07c49e-6263-4f45-bf2b-d995226a1433`. 기본 기준 브랜치는 `develop`.
 
 ## 4. 웨이브 진행 절차 (코디네이터)
 
@@ -120,7 +120,7 @@ orca orchestration worker-start --task <01a 구현 task id> --worktree branch:fe
 orca orchestration worker-start --task <01b 구현 task id> --worktree branch:feature/01-foundation-frontend --agent claude --json
 
 # 2웨이브부터(새 워크트리를 develop에서 만든다)
-orca orchestration worker-start --task <NN 구현 task id> --worktree new-top-level --repo id:5c07c49e-10bd-4c28-b5f6-bdf63867ba69 \
+orca orchestration worker-start --task <NN 구현 task id> --worktree new-top-level --repo id:5c07c49e-6263-4f45-bf2b-d995226a1433 \
   --name feature/NN-<slug> --base-branch develop --setup run --agent <codex|claude> --json
 ```
 

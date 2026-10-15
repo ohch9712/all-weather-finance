@@ -6,7 +6,7 @@
 
 ## Context
 
-- 저장소는 비어 있다. `main`에 빈 Initial commit만 있고, `CLAUDE.md`(미커밋)는 존재하지 않는 `@AGENTS.md`를 가리킨다. 원격 저장소는 없다. Orca에는 등록돼 있다(repo id `5c07c49e-10bd-4c28-b5f6-bdf63867ba69`). GitHub CLI는 `ohch9712` 계정으로 로그인돼 있다(`repo` 권한).
+- 저장소는 비어 있다. `main`에 빈 Initial commit만 있고, `CLAUDE.md`(미커밋)는 존재하지 않는 `@AGENTS.md`를 가리킨다. 원격 저장소는 없다. Orca에는 등록돼 있다(repo id `5c07c49e-6263-4f45-bf2b-d995226a1433`). GitHub CLI는 `ohch9712` 계정으로 로그인돼 있다(`repo` 권한).
 - 만들 제품: 나이대(20~60대)와 투자성향 설문으로 권장 자산배분(주식·채권·금·현금·기타)을 정하고, 보유 자산을 입력하면 배분 일치 점수를 매긴다. 여기에 가계부(카드 명세서 업로드·수동 입력), 주식 매매일지(파일 업로드·수동 입력), 관심종목, AI 자연어 조건검색(키움·토스 API), 상속·증여 플래너(증여재산공제 반영), 주린이 학습 게시판, AI 챗봇 에이전트, 가능하면 마이데이터 자동 수집을 더한다.
 - 사용자가 정한 진행 방식:
   - 설계를 먼저 끝낸다. 이번 세션 범위는 **설계 문서 + 브랜치 준비까지**이고, 워커 디스패치는 설계 검토 후 별도 지시로 한다.
@@ -122,11 +122,11 @@
    - `docs/specs/01-foundation.md` ~ `docs/specs/18-deploy.md`: 작업마다 목표, 범위(포함·제외), 선행 계약, 소유 파일, 기술 결정, DB 스키마와 revision ID, API 계약(경로·JSON·상태코드·에러 코드), 화면 명세, 도메인 규칙, 다른 모듈용 서비스 함수, 테스트·완료 기준, 검증 체크리스트, 다음 단계 연결점. 3웨이브 이후 스펙에는 착수 직전에 실제 코드와 대조해 갱신한다는 표시를 단다.
    - LLM을 쓰는 스펙(01·04·09·10·13·15)은 작성 전에 claude-api 스킬의 Python 문서를 읽고 호출 형태를 옮겨 적는다.
 2. **main 커밋과 GitHub 원격**: `CLAUDE.md`와 문서를 `main`에 커밋한다. `gh repo create ohch9712/finance-project --private --source . --remote origin`으로 비공개 저장소를 만들고 `main`을 푸시한다. 저장소 이름은 폴더 이름 "금융 프로젝트"를 영어로 옮긴 것이다.
-3. **develop**: `main`에서 `develop`을 만들어 푸시하고, 기본 체크아웃을 `develop`으로 바꾼다(gamja-market과 같은 배치). `orca repo set-base-ref --repo id:5c07c49e-10bd-4c28-b5f6-bdf63867ba69 --ref develop --json`으로 Orca 워크트리 기본 기준을 `develop`으로 맞춘다.
+3. **develop**: `main`에서 `develop`을 만들어 푸시하고, 기본 체크아웃을 `develop`으로 바꾼다(gamja-market과 같은 배치). `orca repo set-base-ref --repo id:5c07c49e-6263-4f45-bf2b-d995226a1433 --ref develop --json`으로 Orca 워크트리 기본 기준을 `develop`으로 맞춘다.
 4. **1웨이브 워크트리**: Orca로 2개를 만들고 각 브랜치를 upstream과 함께 푸시한다.
    ```text
-   orca worktree create --repo id:5c07c49e-10bd-4c28-b5f6-bdf63867ba69 --name feature/01-foundation-backend --base-branch develop --no-parent --json
-   orca worktree create --repo id:5c07c49e-10bd-4c28-b5f6-bdf63867ba69 --name feature/01-foundation-frontend --base-branch develop --no-parent --json
+   orca worktree create --repo id:5c07c49e-6263-4f45-bf2b-d995226a1433 --name feature/01-foundation-backend --base-branch develop --no-parent --json
+   orca worktree create --repo id:5c07c49e-6263-4f45-bf2b-d995226a1433 --name feature/01-foundation-frontend --base-branch develop --no-parent --json
    ```
    2웨이브 이후 브랜치는 앞 웨이브 병합 직후의 `develop`에서 디스패치할 때 만든다. 미리 만들면 시작점이 낡기 때문이다.
 5. 워커 디스패치는 하지 않는다. 디스패치 순서와 명령은 `docs/roadmap.md`에 남긴다.
@@ -142,7 +142,7 @@
 
 - **문서 정합성**: `docs/specs/00-master-plan.md`가 이 계획과 같은 내용인지 확인한다. 스크래치 스크립트로 18개 스펙의 필수 절 존재, 로드맵의 브랜치·스펙 링크 유효성, 작업 간 소유 경로 중복 없음, DAG 순환 없음, 스펙의 테이블·엔드포인트·revision ID와 `docs/architecture.md`의 일치를 확인한다.
 - **git·GitHub**: `git log --graph --oneline --all`로 `main`·`develop`·1웨이브 브랜치의 시작점을 확인한다. `git remote -v`, `gh repo view ohch9712/finance-project --json visibility,defaultBranchRef`로 비공개 여부를 확인한다. `git ls-remote --heads origin`으로 `main`·`develop`·1웨이브 브랜치가 원격에 있는지 본다.
-- **Orca**: `orca worktree list --repo id:5c07c49e-10bd-4c28-b5f6-bdf63867ba69 --json`으로 워크트리 2개가 `develop` 커밋에서 시작했는지 확인한다.
+- **Orca**: `orca worktree list --repo id:5c07c49e-6263-4f45-bf2b-d995226a1433 --json`으로 워크트리 2개가 `develop` 커밋에서 시작했는지 확인한다.
 - 코드 테스트는 이번 범위에 없다. 각 작업의 완료 기준과 검증 체크리스트는 스펙에 적고, 실행은 검증 워커가 맡는다.
 
 ## 사용자에게 필요한 것 (구현 단계에서)
