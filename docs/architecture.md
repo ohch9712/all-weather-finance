@@ -282,7 +282,7 @@ features/<module>/
 | --- | --- | --- |
 | 자산군 `AssetClass` | `stock`, `bond`, `gold`, `cash`, `other` | 주식, 채권, 금, 현금성 자산, 기타 |
 | 투자성향 `RiskProfile` | `stable`, `stable_seeking`, `neutral`, `active`, `aggressive` | 안정형, 안정추구형, 위험중립형, 적극투자형, 공격투자형 |
-| 나이대 `AgeBand` | `20s`, `30s`, `40s`, `50s`, `60s` | 20대(20세 미만 포함), 30대, 40대, 50대, 60대 이상 |
+| 나이대 `AgeBand` | `20s`, `30s`, `40s`, `50s`, `60s` | 20대, 30대, 40대, 50대, 60대 이상(`20s`는 20세 미만도 포함하지만 표시명에는 적지 않는다) |
 | 나이 계산 | 기준연도 − 출생연도 | 연 나이 |
 | 자산군 색 토큰 | `--asset-stock`, `--asset-bond`, `--asset-gold`, `--asset-cash`, `--asset-other` | 01b가 `globals.css`에 정의, 모든 차트·카드가 같은 색을 쓴다 |
 
@@ -605,7 +605,7 @@ class BrokerClient(Protocol):
 - 데이터가 필요한 화면은 Client Component이고 `features/<module>/hooks.ts`의 TanStack Query 훅을 쓴다. 인증 쿠키가 API origin에 있으므로 서버 컴포넌트에서 API를 부르지 않는다.
 - 라우트 그룹: `(auth)`는 셸 없는 로그인·가입, `(app)`은 앱 셸 + `RequireAuth` + `OnboardingGate`(출생연도 없으면 `/onboarding`) + 챗봇 위젯.
 - 공용 컴포넌트(01b): shadcn/ui 기본 컴포넌트(`components/ui`), 앱 셸(`components/layout`), 차트 래퍼 `DonutChart`·`BarChart`·`LineChart`(`components/charts`), `PageHeader`·`EmptyState`·`ErrorState`·`LoadingState`·`MoneyText`·`SampleDataBadge`·`Disclaimer`·`ConfirmDialog`·`AiProviderBadge`(`components/common`). AI 공급자 상태는 `lib/ai-status.ts`의 `useAiStatus()`로 읽는다.
-- 형식 함수(`lib/format.ts`): `formatKRW`(1,234,000원), `formatKRWCompact`(123.4만원, 1.2억원), `formatSignedKRW`, `formatPercent`, `formatDate`, `formatDateTime`(KST).
+- 형식 함수(`lib/format.ts`): `formatKRW`(1,234,000원), `formatKRWCompact`(5,670만원, 1.2억원. 규칙은 스펙 01 11.2·9절, 백엔드 `app.core.format.format_krw_compact`와 같다), `formatSignedKRW`, `formatPercent`, `formatDate`, `formatDateTime`(KST).
 - 폼은 react-hook-form + zod, 알림은 shadcn `sonner`.
 - 모바일 360px에서 가로 스크롤이 없어야 한다.
 - Next.js 16은 학습 데이터와 다른 부분이 있다. 코드를 쓰기 전에 `frontend/node_modules/next/dist/docs/`의 해당 가이드를 읽는다.
