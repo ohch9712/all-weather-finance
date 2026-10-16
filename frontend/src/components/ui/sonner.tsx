@@ -36,10 +36,13 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--border-radius": "var(--radius)",
         } as React.CSSProperties
       }
+      // 접근성 문구를 한국어로 둔다(sonner 2 공식 옵션). 영역 이름은 "알림 alt+T"(단축키 표시는 sonner가 붙인다).
+      containerAriaLabel="알림"
       toastOptions={{
         classNames: {
           toast: "cn-toast",
         },
+        closeButtonAriaLabel: "알림 닫기",
       }}
       {...props}
     />

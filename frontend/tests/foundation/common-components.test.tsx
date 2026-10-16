@@ -1,5 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { describe, expect, it, vi } from "vitest";
 import { ComingSoon } from "@/components/common/ComingSoon";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
@@ -10,6 +11,7 @@ import { LoadingState } from "@/components/common/LoadingState";
 import { MoneyText } from "@/components/common/MoneyText";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SampleDataBadge } from "@/components/common/SampleDataBadge";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError, NETWORK_ERROR_MESSAGE } from "@/lib/api-client";
 
@@ -139,5 +141,18 @@ describe("ConfirmDialog", () => {
     await user.click(await screen.findByRole("button", { name: "취소" }));
     expect(onConfirm).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+  });
+});
+
+describe("Toaster", () => {
+  it("알림 영역과 닫기 버튼의 접근성 이름이 한국어다", async () => {
+    render(<Toaster closeButton />);
+    act(() => {
+      toast.success("프로필을 저장했어요.");
+    });
+    expect(await screen.findByText("프로필을 저장했어요.")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "알림 alt+T" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "알림 닫기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Close toast" })).not.toBeInTheDocument();
   });
 });

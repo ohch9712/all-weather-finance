@@ -136,8 +136,16 @@ describe("LoginForm", () => {
     expect(router.replace).not.toHaveBeenCalledWith("/");
   });
 
-  it.each([["//evil.example.com"], ["https://evil.example.com"], ["/\\evil.example.com"]])(
-    "다른 사이트로 가는 next(%s)는 무시하고 /로 간다",
+  it.each([
+    ["//evil.example.com"],
+    ["https://evil.example.com"],
+    ["/\\evil.example.com"],
+    ["/\n/evil.example.com"],
+    ["/\r/evil.example.com"],
+    ["/\t/evil.example.com"],
+    ["javascript:alert(1)"],
+  ])(
+    "다른 사이트로 가는 next(%j)는 무시하고 /로 간다",
     async (next) => {
       server.use(http.post(apiUrl("/api/auth/login"), () => HttpResponse.json(authPayload())));
       const { user, router } = renderWithProviders(<LoginForm />, {
