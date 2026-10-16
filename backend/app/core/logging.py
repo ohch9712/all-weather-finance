@@ -36,8 +36,15 @@ def mask(value):
 class SecretMaskingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.args = mask(record.args)
-        record.msg = mask(record.getMessage())
-        record.args = ()
+        # Uvicorn 접근 포매터는 메시지 틀과 5개 인자를 그대로 사용한다.
+        if record.name == "uvicorn.access":
+            return True
+        message = record.getMessage()
+        masked_message = mask(message)
+        # password=%s처럼 서식을 적용해야 드러나는 비밀값만 최종 문자열에서 가린다.
+        if masked_message != message:
+            record.msg = masked_message
+            record.args = ()
         return True
 
 
