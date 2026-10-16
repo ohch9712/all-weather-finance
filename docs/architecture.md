@@ -544,6 +544,7 @@ return output.model_validate_json(response.message.content or "")
 
 - `FakeStructuredLLM`(`fake.py`): `register(task, handler)`, `set_enabled(task, bool)`, `calls`. 테스트는 `fake_llm` 픽스처로 `get_structured_llm` 의존성을 바꾼다.
 - 어댑터 테스트는 SDK 클라이언트 자리에 가짜 객체를 넣어 호출 인자와 응답 처리만 확인한다. Gemini 응답은 `google.genai.interactions.Interaction.model_validate({...})`, Ollama 응답은 `ollama.ChatResponse(...)`로 만든다. 실제 API나 로컬 Ollama 서버를 부르는 테스트는 만들지 않는다.
+- Gemini 가짜 응답은 `steps`로 만든다(예: `{"id": "test", "status": "completed", "steps": [{"type": "model_output", "content": [{"type": "text", "text": "<JSON 문자열>"}]}]}`). SDK 2.31의 `Interaction` 검증기(`_populate_output_helpers`, `_gaos/types/interactions/interaction.py`)가 `output_text`를 마지막 `model_output` 텍스트로 다시 계산해 넣은 값을 덮어쓰기 때문이다.
 
 ### 9.2 증권사 어댑터 (08, `app/integrations/brokers/`)
 
