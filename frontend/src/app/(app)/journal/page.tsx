@@ -1,8 +1,6 @@
-import type { Metadata } from "next";
-import { ComingSoon } from "@/components/common/ComingSoon";
-
-export const metadata: Metadata = { title: "매매일지" };
-
-export default function JournalPage() {
-  return <ComingSoon title="매매일지" taskId="05" />;
+import { Suspense } from "react";
+import { LoadingState } from "@/components/common/LoadingState";
+import { JournalPage } from "@/features/journal/components/JournalPage";
+export default function Page() {
+  return <Suspense fallback={<LoadingState />}><JournalPage /></Suspense>;
 }
