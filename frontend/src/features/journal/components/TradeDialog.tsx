@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { applyFieldErrors, toSubmitErrors } from "@/lib/form-errors";
 import { useJournalMutations } from "../hooks";
-import type { Trade, TradeInput } from "../types";
+import type { Trade, TradeInput, TradePatch } from "../types";
 import { todayKst } from "../utils";
 import { Field, selectClass } from "./Fields";
 
@@ -23,17 +23,30 @@ const schema = z.object({
   currency: z.enum(["KRW", "USD"]), fee: nonnegative, tax: nonnegative, broker: z.enum(["", "kiwoom", "toss", "other"]), accountLabel: z.string().max(30),
 });
 type Values = z.infer<typeof schema>;
+function toTradeInput(values: Values): TradeInput {
+  return { ...values, tradedTime: values.tradedTime || null, broker: values.broker || null, accountLabel: values.accountLabel || null };
+}
 export function TradeDialog({ trade, onClose }: { trade?: Trade; onClose: () => void }) {
   const mutations = useJournalMutations();
   const [saved, setSaved] = useState<Trade | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const form = useForm<Values>({ resolver: zodResolver(schema), defaultValues: trade ? { ...trade, tradedTime: trade.tradedTime ?? "", broker: trade.broker ?? "", accountLabel: trade.accountLabel ?? "" } : { tradedOn: todayKst(), tradedTime: "", market: "KRX", currency: "KRW", symbolCode: "", symbolName: "", side: "buy", quantity: "", price: "", fee: "0", tax: "0", broker: "", accountLabel: "" } });
+  const [initialValues] = useState<Values>(() => trade ? { ...trade, tradedTime: trade.tradedTime ?? "", broker: trade.broker ?? "", accountLabel: trade.accountLabel ?? "" } : { tradedOn: todayKst(), tradedTime: "", market: "KRX", currency: "KRW", symbolCode: "", symbolName: "", side: "buy", quantity: "", price: "", fee: "0", tax: "0", broker: "", accountLabel: "" });
+  const form = useForm<Values>({ resolver: zodResolver(schema), defaultValues: initialValues });
   const market = useWatch({ control: form.control, name: "market" });
   async function submit(values: Values) {
     setError(null);
     try {
-      const data: TradeInput = { ...values, tradedTime: values.tradedTime || null, broker: values.broker || null, accountLabel: values.accountLabel || null };
-      setSaved(await mutations.saveTrade.mutateAsync({ id: trade?.id, data }));
+      const data = toTradeInput(values);
+      if (trade) {
+        // 화면 표시용으로 반올림된 금액을 변경 없이 다시 보내면 DB 원본을 잃는다.
+        const baseline = toTradeInput(initialValues);
+        const patch = Object.fromEntries(
+          Object.entries(data).filter(([key, value]) => value !== baseline[key as keyof TradeInput]),
+        ) as TradePatch;
+        setSaved(await mutations.saveTrade.mutateAsync({ id: trade.id, data: patch }));
+      } else {
+        setSaved(await mutations.saveTrade.mutateAsync({ data }));
+      }
       toast.success("매매 기록을 저장했어요.");
     } catch (error) {
       const result = toSubmitErrors(error, Object.keys(schema.shape) as (keyof Values)[]);

@@ -7,6 +7,8 @@ export interface TradeInput {
   side: "buy" | "sell"; quantity: string; price: string; currency: Currency; fee: string; tax: string;
   broker: "kiwoom" | "toss" | "other" | null; accountLabel: string | null;
 }
+export type TradePatch = Partial<TradeInput>;
+export type SaveTradeRequest = { id?: undefined; data: TradeInput } | { id: string; data: TradePatch };
 export interface Trade extends TradeInput {
   id: string; tradedAt: string; timeKnown: boolean; source: "manual" | "import" | "kiwoom" | "toss";
   createdAt: string; updatedAt: string;

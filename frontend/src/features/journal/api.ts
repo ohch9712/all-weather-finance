@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api-client";
-import type { Filters, Note, NoteInput, Page, Position, Trade, TradeDetail, TradeInput, TradeStats } from "./types";
+import type { Filters, Note, NoteInput, Page, Position, Trade, TradeDetail, SaveTradeRequest, TradeStats } from "./types";
 
 function query(filters: Filters) {
   const params = new URLSearchParams();
@@ -8,7 +8,7 @@ function query(filters: Filters) {
 }
 export const getTrades = (filters: Filters) => apiFetch<Page<Trade>>(`/api/journal/trades?${query(filters)}`);
 export const getTrade = (id: string) => apiFetch<TradeDetail>(`/api/journal/trades/${id}`);
-export const saveTrade = ({ id, data }: { id?: string; data: TradeInput }) => apiFetch<Trade>(`/api/journal/trades${id ? `/${id}` : ""}`, { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
+export const saveTrade = ({ id, data }: SaveTradeRequest) => apiFetch<Trade>(`/api/journal/trades${id ? `/${id}` : ""}`, { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
 export const deleteTrade = (id: string) => apiFetch<void>(`/api/journal/trades/${id}`, { method: "DELETE" });
 export const getPositions = (includeClosed: boolean) => apiFetch<{ items: Position[] }>(`/api/journal/positions?includeClosed=${includeClosed}`);
 export const getStats = (filters: Filters) => apiFetch<TradeStats>(`/api/journal/stats?${query(filters)}`);
