@@ -409,7 +409,7 @@ def get_ai_status() -> AiStatus              # GET /api/ai/status와 같은 내�
 - `LLM_PERSONAL_PROVIDER=gemini`는 `GEMINI_BILLING_ENABLED=true`일 때만 켜진다. Gemini 무료 등급은 입력과 응답이 Google 제품 개선에 쓰이고 사람이 검토할 수 있으며, 약관이 무료 등급에 민감·개인정보를 보내지 말라고 한다. 조건이 맞지 않으면 개인 작업은 꺼진 상태(`reason: "billing_required"`)로 시작하고 오류 로그를 한 번 남긴다.
 - Gemini 호출은 항상 `store=False`를 명시한다. Interactions API는 기본으로 대화를 서버에 저장한다(유료 55일, 무료 1일).
 - 값이 `gemini`인데 `GEMINI_API_KEY`가 비어 있으면 그 등급은 꺼진다(`reason: "missing_api_key"`). 값이 `disabled`면 `reason: "not_configured"`.
-- `anthropic`은 예약값이다. 지금 설정하면 시작할 때 설정 오류다. Claude를 다시 쓰려면 같은 Protocol의 어댑터를 추가한다(이전 호출 형태는 커밋 `b97b4d0`의 이 절에 있다).
+- `anthropic`은 예약값이다. 지금 설정하면 시작할 때 설정 오류다. Claude를 다시 쓰려면 같은 Protocol의 어댑터를 추가한다(이전 호출 형태는 커밋 `5560c39`의 이 절에 있다).
 
 #### 9.1.2 작업 등록부 (`tasks.py`)
 

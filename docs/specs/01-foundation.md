@@ -626,7 +626,7 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 6. 폰트: `next/font`로 받지 않고 시스템 한글 글꼴 스택(`--font-sans`: Apple SD Gothic Neo, Malgun Gothic, Noto Sans KR …)을 쓴다. 빌드할 때 네트워크가 필요 없고 한글 글리프가 없는 Geist를 쓰지 않기 위해서다. 템플릿의 `src/app/favicon.ico`는 소유 경로인 `public/favicon.ico`로 옮겼다.
 7. 다크 모드는 OS 설정(`prefers-color-scheme`)을 따른다. shadcn의 `dark:` 변형을 미디어 쿼리로 바꿨다(스크립트가 없어 첫 화면 깜빡임·하이드레이션 문제가 없다). 테마 전환 UI는 없다.
 8. 자산군 색은 11.1의 색 계열을 검증기로 고른 값이다. 채권은 금(호박)과 적록 색약에서 구분되도록 청록 쪽 초록(라이트 `#1baf7a`, 다크 `#199e70`)이다. 현금성 자산 회색은 스펙상 중립색이라 채도 기준의 예외다. 3:1 미만인 색(라이트 채권 2.82, 다크 기타 2.81)은 범례·값·숨김 표로 보완한다.
-9. `formatKRWCompact`는 스펙 11.2·9절 규칙(만 단위 정수)이다(코디네이터 확인, architecture 12절 예시 수정 f320063). `AGE_BAND_LABEL`은 짧은 이름이고 "20세 미만 포함"은 주석으로 둔다(코디네이터 확인).
+9. `formatKRWCompact`는 스펙 11.2·9절 규칙(만 단위 정수)이다(코디네이터 확인, architecture 12절 예시 수정 5273cba). `AGE_BAND_LABEL`은 짧은 이름이고 "20세 미만 포함"은 주석으로 둔다(코디네이터 확인).
 10. `apiFetch`는 문자열 본문뿐 아니라 본문 없는 POST·PUT·PATCH·DELETE에도 `Content-Type: application/json`을 붙인다. 01a의 로그아웃이 architecture 4절대로 `require_json`을 걸어, 본문 없는 요청은 422가 났기 때문이다(실제 백엔드 흐름 확인 중 발견). `FormData` 본문(업로드)에는 붙이지 않는다. jsdom·Node에서 `DOMException` realm이 달라 취소 판별은 `instanceof` 대신 이름과 호출자 signal로 한다.
 11. 스펙에 없던 세부(가장 단순한 쪽으로 정함)
     - `AuthProvider` 값에 `error`(`/me`가 401이 아닌 이유로 실패)와 `signedOut`(이 화면에서 로그아웃함)을 더했다. `RequireAuth`는 `error`가 있으면 로그인으로 보내지 않고 오류 상태와 다시 시도를 보여 준다. `logout`은 요청이 실패하면 상태를 유지하고 에러를 던지며, 사용자 메뉴·프로필 화면은 토스트로 알린다. `refresh`는 로그인된 상태에서 실패하면 화면을 유지한다.

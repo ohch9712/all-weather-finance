@@ -160,7 +160,7 @@
 1. 추천 흐름(02): 목표·상황 입력, 목표 반영 권장 배분(층 쌓기), 관리 방향, 추천 이유와 답변별 점수, 온보딩 흐름(출생연도 → 투자성향 → 목표·상황 → 자산 간단 입력 → 추천 결과 → 상세 설명), 테이블 `allocation_situations`·`financial_goals`(revision `allocation_0001`에 포함). 사례 값은 스크립트로 검증했다.
 2. 방향 비교(06 8.1): 네 방향의 총 세금과 가족에게 남는 금액, 10년·5년 사전증여 가산과 금융재산공제 축소까지 반영. 사례 2개를 스크립트로 검증했다. 자산 사전 채움은 02의 `get_asset_breakdown`(지연 import)이다.
 3. 15(도구 `get_recommendation`·`compare_estate_plans`, 카드 `directions`·`comparison`), 16(먼저 할 일, 체크리스트 "목표·상황 입력하기")도 맞췄다.
-4. LLM: 개인 금융 데이터가 들어가는 작업(챗봇, 카드·증권 파일 처리)은 Gemini 무료 등급 약관상 보내면 안 되므로 **로컬 Ollama가 기본**이다. 개인 데이터가 없는 작업(학습 글 초안, 조건 문장 해석)만 Gemini로 보낸다. 결제가 연결된 Gemini 키가 있으면 개인 작업도 Gemini로 바꿀 수 있다. Claude는 예약값으로 남기고, 이전 호출 형태는 커밋 `b97b4d0`에 있다. Anthropic 전용 기능(서버 측 거절 폴백, 캐시 표시, eager 도구 입력 스트리밍)은 함께 뺐다.
+4. LLM: 개인 금융 데이터가 들어가는 작업(챗봇, 카드·증권 파일 처리)은 Gemini 무료 등급 약관상 보내면 안 되므로 **로컬 Ollama가 기본**이다. 개인 데이터가 없는 작업(학습 글 초안, 조건 문장 해석)만 Gemini로 보낸다. 결제가 연결된 Gemini 키가 있으면 개인 작업도 Gemini로 바꿀 수 있다. Claude는 예약값으로 남기고, 이전 호출 형태는 커밋 `5560c39`에 있다. Anthropic 전용 기능(서버 측 거절 폴백, 캐시 표시, eager 도구 입력 스트리밍)은 함께 뺐다.
 5. Gemini 챗봇은 라운드 단위로 받는다. Interactions 스트리밍의 도구 인자 조각 형식이 공식 문서(`arguments`·`partial_arguments`)와 SDK 2.31 소스(`arguments_delta`·`arguments`)에서 달라 이번 범위에서는 쓰지 않는다.
 6. 01a에 `core/format.py`(서버 금액 문장), `GET /api/ai/status`, 의존성 `google-genai`·`ollama`·`pypdfium2`·`pillow`(`anthropic` 제외)를, 01b에 `AiProviderBadge`·`useAiStatus`를 넣었다. 1웨이브 브랜치는 커밋이 없어 이 변경이 든 `develop`으로 빨리 감기(fast-forward)했다.
 
