@@ -200,3 +200,41 @@ def get_monthly_summary(db, user_id, month: date) -> MonthlySummary   # month는
 
 - 10: `ledger_0002`로 컬럼을 더하고 `import_entries`, 가맹점 규칙 학습, 취소 거래 반영, `/ledger/import` 화면을 만든다.
 - 15·16: `get_monthly_summary`를 쓴다.
+
+## 구현 결과
+
+### 구현한 것
+
+- 백엔드 `app/modules/ledger/`: 모델(`LedgerCategory`, `LedgerEntry`), 리포지토리(필터·집계 쿼리), 서비스, 라우터. 5절의 엔드포인트 11개(카테고리 4, 내역 5, 요약, 추이)와 공개 함수 `get_monthly_summary(db, user_id, month: date) -> MonthlySummary`.
+- 마이그레이션 `ledger_0001`(`down_revision="foundation_0001"`, `branch_labels=("ledger",)`): 4절의 두 테이블, CHECK 제약, 부분 유일 인덱스 3개, `(user_id, occurred_on desc)` 인덱스, 기본 카테고리 22개(지출 16·수입 6, 목록 순서대로 `sort_order` 1부터). `downgrade`는 인덱스와 테이블(기본 행 포함)을 지운다.
+- 카테고리 삭제는 내역을 같은 종류의 "기타 지출"/"기타 수입"으로 옮기는 UPDATE와 DELETE를 한 커밋으로 처리하고, 실패하면 둘 다 되돌린다.
+- 프론트 `/ledger`: 월 이동(◀ 2026년 10월 ▶, 다른 달이면 "이번 달" 버튼), "내역 추가"·"카드 명세서 가져오기"(`/ledger/import`) 버튼, 요약 카드 4개, 지출 카테고리 도넛(상위 6 + "그 외"), 일별 지출 막대, 최근 6개월 수입·지출 막대, 자주 쓴 곳 상위 5, 필터(종류 탭·카테고리·검색어 300ms 디바운스, URL `?month=&kind=&categoryId=&q=` 반영), 날짜별 묶음 목록(그날 합계, 수입 `+`·파란색, 지출 `-`, 출처 배지), 이전·다음 페이지 버튼, 추가·수정 다이얼로그(삭제 확인 포함), 카테고리 관리 다이얼로그(추가·이름 변경·삭제 확인 "내역은 기타로 옮겨집니다").
+- 테스트: 백엔드 `tests/ledger/` 70개(8절 항목 전부, 카테고리 삭제 트랜잭션 롤백, KST 월 경계, 사용자 격리 404 포함), 프론트 `tests/ledger/` 28개(MSW 메모리 가짜 서버).
+
+### 스펙에 없어 정한 것
+
+- `MonthlySummary`와 하위 모델은 `schemas.py`에 두고 `service.py`가 import한다. `from app.modules.ledger.service import MonthlySummary, get_monthly_summary`로 쓸 수 있다. `month`에 1일이 아닌 날을 넘기면 그 달로 본다.
+- 정렬 세부: 카테고리 목록의 종류 순서는 지출 → 수입. 내역은 `occurredOn desc, createdAt desc` 뒤에 `id desc`로 동률을 끊는다. `byCategory`는 지출 → 수입, 각 금액 내림차순(같으면 이름). `topMerchants`는 금액 → 건수 → 이름. 비율과 증감률은 사사오입(ROUND_HALF_UP)으로 소수 둘째 자리다.
+- `createdAt`·`updatedAt`은 DB 기본값과 함께 애플리케이션 시각(`now_utc`)을 기본값으로 넣는다. 한 트랜잭션에서 여러 건을 넣어도 입력 순서가 남는다. 새 내 카테고리의 `sortOrder`는 0이다.
+- 쿼리: 빈 값(`kind=&categoryId=&q=`)은 조건 없음이다. `month`는 `YYYY-MM`(1000년 이상)이 아니면 `422`(`field: "month"`), `kind`가 `income`/`expense`가 아니면 `field: "kind"`, `categoryId`가 UUID가 아니면 `field: "categoryId"`, `q`가 100자를 넘으면 `field: "q"`. `q`의 `%`·`_`는 글자 그대로 찾는다. `summary`의 `month`를 빼면 이번 달(KST)이다.
+- 경로의 id가 UUID 형식이 아니면 FastAPI 기본 검증으로 `422`(`field: "categoryId"`/`"entryId"`)다. 형식이 맞는데 없거나 남의 것이면 `404`다.
+- `DELETE`도 다른 상태 변경 요청처럼 `require_json`을 건다(`apiFetch`가 본문 없는 DELETE에 `Content-Type: application/json`을 붙인다).
+- `PATCH /entries/{id}`: 보낸 필드만 바꾼다. `merchant`·`memo`만 `null`로 지울 수 있고 다른 필드의 `null`은 `422`("필수 항목입니다."). 종류만 바꿔 지금 카테고리와 종류가 달라지면 `422`(`field: "categoryId"`). 빈 본문은 바꾸지 않고 `200`이다. `merchant`·`memo`는 앞뒤 공백을 지우고 빈 문자열은 `null`로 저장한다. `amount`는 JSON 정수만 받는다(`12000.0`, `"12000"`은 `422`).
+- `categoryId` 422는 develop에 추가된 `app.core.errors.field_error`로 던진다(검증 체크리스트 2의 응답 형식은 같다).
+- 화면: 날짜 헤더의 그날 합계는 지금 쪽에 보이는 내역으로 계산한다(한 날짜가 두 쪽에 걸치면 쪽마다 부분 합계). 페이지 번호는 URL에 넣지 않고 화면 상태로 두며 필터가 바뀌면 1쪽부터 본다. 최근 6개월 추이는 선택한 달과 상관없이 이번 달(KST) 기준이다(5.4).
+- 화면: 새 내역의 결제수단 기본값은 지출 "카드", 수입 "계좌이체"이고 직접 고르면 바꾸지 않는다. 출처 배지 문구는 `import` "명세서", `codef` "자동 수집"이다. 사용처가 없으면 메모, 메모도 없으면 카테고리 이름을 내역 제목으로 쓴다.
+- 고지: 가계부 화면은 자산배분·종목·세금·AI·Mock 화면이 아니라 `Disclaimer`를 붙이지 않았다.
+- `features/auth`의 `FormAlert`는 다른 모듈 내부 컴포넌트라 쓰지 않고 같은 모양의 `LedgerFormAlert`를 뒀다.
+- `ledger_entries.category_id` 단독 인덱스는 스펙에 없어 만들지 않았다(목록·집계는 `(user_id, occurred_on desc)`를 쓴다).
+
+### 검사 결과
+
+- 백엔드: `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 181개 통과(가계부 70개).
+- 마이그레이션: 빈 DB `finance_03_cycle`에서 `upgrade heads` → `downgrade base` → `upgrade heads` 성공(기본 카테고리 22개 확인) 후 DB 삭제.
+- 프론트: `npm run lint`·`npx tsc --noEmit` 통과, `npm run test` 230개 통과(가계부 28개), `npm run build` 성공.
+- 실제 서버(`scripts/start.sh`, 8003·3003): API로 가입 → 내역 추가(201) → 요약 반영 → 수정(200) → 목록 필터·페이지 → 추이 → 삭제(204, 다시 조회 404)와 에러 코드(422 `categoryId`·`amount`·`month`·`months`, 409 기본 카테고리·중복, 401)를 확인했다. 화면(Orca 내장 브라우저, 360×780)에서 로그인 → `/ledger` → 내역 추가 → 요약 카드 반영을 확인했고, 360px에서 `scrollWidth`가 360(가로 넘침 요소 0개), 추가 다이얼로그 폭 328px이다. 수정·삭제 화면 조작은 Orca 런타임 연결이 끊겨 브라우저로는 마치지 못했고, 같은 흐름을 실제 서버 API와 MSW 화면 테스트로 확인했다. 확인 후 `scripts/stop.sh`로 서버를 멈췄다.
+
+### 남은 일
+
+- 10: `ledger_0002`(카드 컬럼·`ledger_merchant_rules`), `import_entries`, 취소 거래의 요약 반영, `/ledger/import` 화면.
+- 15·16: `get_monthly_summary` 사용.
