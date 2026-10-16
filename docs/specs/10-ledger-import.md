@@ -7,7 +7,7 @@
 ## 1. 목표
 
 - 카드사 홈페이지에서 내려받은 이용내역 파일(CSV·XLSX·XLS·HTML)을 04 엔진으로 읽어 가계부에 자동 기록한다.
-- PDF·이미지 명세서는 Claude로 거래를 추출한 뒤 같은 미리보기·저장 흐름에 태운다(사용자 동의 후).
+- PDF·이미지 명세서는 AI(personal 등급, 기본 로컬 Ollama)로 거래를 추출한 뒤 같은 미리보기·저장 흐름에 태운다(사용자 동의 후).
 - 가맹점 이름으로 카테고리를 자동 분류한다: 내 규칙 → 기본 키워드 규칙 → LLM 일괄 분류 → "기타 지출".
 - 취소 거래를 반영하고, 같은 거래를 두 번 올려도 한 번만 기록한다.
 - 사용자가 분류를 고치면 그 가맹점 규칙을 학습한다.
@@ -97,7 +97,7 @@ UNIQUE `(user_id, merchant_key)`.
 | 생활용품 | 다이소, 올리브영, 이마트, 홈플러스, 롯데마트, 코스트코, 편의점, GS25, CU, 세븐일레븐, 이마트24 |
 | 쇼핑 | 쿠팡, 11번가, G마켓, 지마켓, 옥션, 무신사, SSG, 네이버페이, 카카오페이, 위메프, 티몬, 29CM |
 
-3. LLM 일괄 분류: 1·2로 정하지 못한 **서로 다른 가맹점**을 최대 200개씩 묶어 `llm.generate(task="ledger.categorize", system=…, content=JSON, output=CategorizeOutput, effort="low", max_tokens=8000)`. `content` = `{"categories": [지출 카테고리 이름들], "merchants": [{"merchant": "…", "merchantCategory": "업종" | null}]}`(금액·카드번호·승인번호는 보내지 않는다). 출력 `{"items": [{"merchant": "…", "category": "식비" | null}]}`. 모르는 이름·null은 4로.
+3. LLM 일괄 분류: 1·2로 정하지 못한 **서로 다른 가맹점**을 최대 200개씩 묶어 `llm.generate(task="ledger.categorize", system=…, content=JSON, output=CategorizeOutput)`(personal 등급, effort·max_tokens는 작업 등록부). `content` = `{"categories": [지출 카테고리 이름들], "merchants": [{"merchant": "…", "merchantCategory": "업종" | null}]}`(금액·카드번호·승인번호는 보내지 않는다). 출력 `{"items": [{"merchant": "…", "category": "식비" | null}]}`. 모르는 이름·null은 4로.
 4. "기타 지출".
 
 - LLM이 꺼져 있거나 오류면 3을 건너뛴다. 저장은 실패시키지 않는다.
@@ -120,8 +120,8 @@ UNIQUE `(user_id, merchant_key)`.
 
 ## 8. PDF·이미지 추출
 
-- `POST /api/ledger/import/extract`(multipart): `file`(PDF 10MB·20쪽 이하, PNG·JPEG 5MB 이하), `consent=true`(없으면 `422`, `field: "consent"`, "AI로 전송하는 데 동의해 주세요.").
-- 호출: `llm.generate(task="ledger.extract_statement", system=…, content=[document 또는 image 블록, {"type": "text", "text": 지시}], output=ExtractOutput, effort="medium", max_tokens=16000)`. PDF 블록은 `{"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": …}}`, 이미지는 `{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": …}}`(블록을 텍스트보다 앞에 둔다).
+- `POST /api/ledger/import/extract`(multipart): `file`(PDF 10MB·20쪽 이하, PNG·JPEG 5MB 이하), `consent=true`(없으면 `422`, `field: "consent"`, "AI로 처리하는 데 동의해 주세요."). PDF 쪽 수는 `pypdfium2`로 센다. personal 등급이 꺼져 있으면(`llm.enabled_for("ledger.extract_statement")`가 거짓) `503 LLM_UNAVAILABLE`.
+- 호출: `llm.generate(task="ledger.extract_statement", system=…, content=[DocumentPart(data) 또는 ImagePart(data, mime_type), TextPart(지시)], output=ExtractOutput)`(architecture 9.1.3의 Part 타입, 파일 부분을 텍스트보다 앞에 둔다). 공급자별 변환(Gemini 문서·이미지 입력, Ollama는 PDF 쪽을 PNG로 바꿔 이미지로 보냄)은 01a 계층이 한다.
 - `ExtractOutput`: `{"transactions": [{"occurredOn": "YYYY-MM-DD", "merchant": str, "amount": int, "isCancellation": bool, "cardName": str | null, "approvalNo": str | null}], "warnings": [str]}`.
 - 추출 결과를 04의 `create_job_from_table(db, user_id, kind_key="ledger_card", file_name=…, header=["이용일", "가맹점", "금액", "상태", "카드", "승인번호"], rows=[…])`로 임포트 작업으로 만든다. 응답은 04의 `ImportJob`(같은 매핑·미리보기·커밋 흐름을 그대로 쓴다).
 - 파일은 저장하지 않는다. 용량 초과는 `413 IMPORT_FILE_TOO_LARGE`, 20쪽 초과는 `422`(`field: "file"`, "20쪽 이하의 명세서만 올릴 수 있습니다."), 그 밖의 형식은 `415 IMPORT_FILE_UNSUPPORTED`.
@@ -149,7 +149,7 @@ def import_entries(db, user_id, rows: list[LedgerImportRow], *, source: Literal[
 
 - `/ledger/import`: 탭 두 개
   - "엑셀·CSV 파일": `ImportWizard kind="ledger_card"`. 위에 카드사별 내려받기 안내(카드사 홈페이지 → 이용내역 조회 → 엑셀 저장, 암호 없는 파일로).
-  - "PDF·이미지 명세서(AI)": 파일 선택, "명세서 내용이 AI(Anthropic)로 전송됩니다" 동의 체크, 추출 중 표시, 이후 위저드의 매핑 단계부터 이어진다. LLM이 꺼져 있으면 탭 안에 안내.
+  - "PDF·이미지 명세서(AI)": 파일 선택, `AiProviderBadge scope="personal"`와 처리 위치 문구(로컬: "명세서는 이 서버의 로컬 AI(Ollama)가 처리하고 외부로 보내지 않아요. 몇 분 걸릴 수 있어요.", Gemini: "명세서 내용이 Google Gemini로 전송돼요."), "AI로 명세서를 처리하는 데 동의합니다" 체크, 추출 중 표시, 이후 위저드의 매핑 단계부터 이어진다. LLM이 꺼져 있으면 탭 안에 안내.
 - 저장 후 `/ledger/import/review?batch=<jobId>`로 이동.
 - `/ledger/import/review?batch=<id>`: `GET /api/ledger/entries?importBatchId=<id>`로 이번에 가져온 내역을 카테고리별로 묶어 보여 준다(취소 거래 표시). 행마다 카테고리 선택(바꾸면 규칙 학습), "같은 가맹점 모두 바꾸기" 체크. 임포트 작업이 아직 남아 있으면(24시간 안) 위에 저장·중복·실패 수를 보여 준다.
 
@@ -178,7 +178,7 @@ def import_entries(db, user_id, rows: list[LedgerImportRow], *, source: Literal[
 ## 13. 검증 체크리스트
 
 1. 5절 필드·동의어·중복 키 공식이 같다.
-2. LLM 호출 두 종(분류, 추출)이 래퍼를 거치고 effort가 문서와 같다. 분류 입력에 개인 식별 숫자가 없다.
+2. LLM 호출 두 종이 작업 키 `ledger.categorize`·`ledger.extract_statement`로 architecture 9.1 계층을 거친다. 분류 입력에 개인 식별 숫자가 없다. 동의 문구가 실제 처리 위치(로컬·Gemini)와 같다.
 3. 근거 샘플 없는 카드사 프리셋이 없다.
 4. 취소 거래가 요약에서 순액으로 계산된다.
 5. `import_entries` 시그니처가 9절과 같다(17의 전제).

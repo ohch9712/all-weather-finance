@@ -13,7 +13,7 @@
 
 - 백엔드(FastAPI + uv)와 프론트(Next.js) 프로젝트를 만들고, 모든 모듈이 들어갈 자리를 미리 만든다. 이후 웨이브 워커는 공유 파일을 고치지 않고 자기 자리만 채운다.
 - 이메일·비밀번호 가입, 로그인, 로그아웃(서버 세션 무효화), 현재 사용자 조회, 프로필(출생연도·닉네임)을 제공한다. gamja-market 구현을 이식한다.
-- 모든 LLM 구조화 호출이 쓸 공통 래퍼, 암호화·시간·로그 마스킹 유틸, 공통 에러 형식을 만든다.
+- 모든 LLM 호출이 쓸 공통 계층(데이터 등급별 공급자 선택, Gemini·Ollama 어댑터, 스키마 변환, AI 상태 API), 암호화·시간·로그 마스킹 유틸, 공통 에러 형식을 만든다.
 - 워크트리마다 포트·DB가 분리되는 개발 인프라(`compose.yaml`, `scripts/worktree-setup.sh`, `start.sh`, `stop.sh`, `orca.yaml`)를 만든다.
 - 프론트에 앱 셸, 내비게이션, 디자인 시스템(shadcn/ui, 색 토큰, 차트 래퍼), 형식 함수, API 클라이언트, 인증·온보딩·프로필 화면, 모든 모듈의 자리표시 페이지를 만든다.
 
@@ -28,7 +28,7 @@
 | `users`, `sessions`, `user_profiles` + `foundation_0001` | 색·자산군 토큰, 차트 래퍼, 공용 컴포넌트 |
 | 인증 4개 API + 프로필 2개 API + 헬스체크 | `lib/`(api-client, format, navigation, domain, query) |
 | 관리자 의존성과 `make-admin` CLI | AuthProvider, RequireAuth, OnboardingGate |
-| LLM 공통 래퍼(`integrations/llm`) | 로그인·가입·온보딩·프로필 설정 화면 |
+| LLM 공통 계층(`integrations/llm`)과 `GET /api/ai/status` | 로그인·가입·온보딩·프로필 설정 화면, AI 공급자 배지(`AiProviderBadge`, `useAiStatus`) |
 | 12개 모듈 스텁과 라우터 등록 | 앱 셸(사이드바·모바일 메뉴·사용자 메뉴) |
 | 테스트 픽스처(`client`, `auth_client`, `other_auth_client`, `admin_client`, `fake_llm`) | 모든 모듈 경로의 자리표시 페이지(11.6절), 챗봇 위젯 스텁 |
 | `compose.yaml`, `scripts/*`, `orca.yaml`, 루트 `.gitignore` | Vitest + Testing Library + MSW 설정과 렌더 도우미 |
@@ -80,7 +80,7 @@
 | 이메일 정규화 | 앞뒤 공백 제거 후 전체 소문자 | 정규화 값만 저장 |
 | JSON 표기 | camelCase(`CamelModel`) | architecture 4절 |
 | 암호화 | Fernet(`cryptography`), 키 `APP_ENCRYPTION_KEY` | 08·17이 자격증명 저장에 사용 |
-| LLM | `anthropic` 1.x, `claude-opus-5-5`, 구조화 출력 + 서버 측 폴백 | architecture 9.1 |
+| LLM | 데이터 등급별 공급자. 개인 데이터가 없는 작업은 Gemini(`google-genai` Interactions API, `gemini-3.8-flash`), 개인 금융 데이터는 로컬 Ollama(`ollama`, `gemma4:12b`). 기본값은 둘 다 꺼짐 | architecture 9.1 |
 | 백엔드 린트 | ruff | |
 | 프론트 | `create-next-app` 최신 안정 버전(Next.js 16, React 19, Tailwind 4, ESLint, App Router, `src/`, alias `@/*`), npm | |
 | UI | shadcn/ui(CLI 초기화) + lucide-react + sonner | |
@@ -91,7 +91,7 @@
 
 ### 4.1 설치할 의존성 (이후 작업은 추가하지 않는다)
 
-백엔드 `dependencies`: `fastapi`, `uvicorn[standard]`, `sqlalchemy>=2.0,<2.1`, `psycopg[binary]`, `alembic`, `pydantic[email]`, `pydantic-settings`, `argon2-cffi`, `python-multipart`, `anthropic>=1,<2`, `httpx`, `websockets`, `cryptography`, `pandas`, `openpyxl`, `xlrd`, `lxml`, `charset-normalizer`
+백엔드 `dependencies`: `fastapi`, `uvicorn[standard]`, `sqlalchemy>=2.0,<2.1`, `psycopg[binary]`, `alembic`, `pydantic[email]`, `pydantic-settings`, `argon2-cffi`, `python-multipart`, `google-genai>=2.31,<3`, `ollama>=0.6.3,<0.7`, `pypdfium2>=5.14,<6`, `pillow`, `httpx`, `websockets`, `cryptography`, `pandas`, `openpyxl`, `xlrd`, `lxml`, `charset-normalizer`
 
 백엔드 `dev` 그룹: `pytest`, `respx`, `freezegun`, `ruff`
 
@@ -117,14 +117,16 @@ backend/app/
     time.py               # KST, now_utc(), today_kst()
     logging.py            # configure_logging(), SecretMaskingFilter
     domain.py             # AssetClass, RiskProfile, AgeBand(StrEnum)와 한국어 표시명, AGE_BAND_REPRESENTATIVE_AGE
+    format.py             # format_krw, format_krw_compact(9절). 서버가 만드는 화면 문장·카드용
   db/
     base.py               # Base(DeclarativeBase), 제약 이름 규칙(naming_convention)
     session.py            # engine, SessionLocal(gamja-market 이식)
     models.py             # 모든 모듈의 models 모듈 import(메타데이터 수집용)
   api/
-    router.py             # APIRouter(prefix="/api"): health, auth, profile, 12개 모듈 라우터
+    router.py             # APIRouter(prefix="/api"): health, auth, profile, ai_status, 12개 모듈 라우터
     deps.py               # get_db, DBSession, CurrentUser, AdminUser, require_json, PageQuery
     health.py
+    ai_status.py          # GET /api/ai/status(8절)
   integrations/llm/       # 8절
   modules/
     auth/                 # router.py(auth_router, profile_router), schemas, service, repository, models, cli
@@ -275,27 +277,45 @@ def get_profile(db: Session, user_id: UUID) -> ProfileInfo
 def compute_age_band(birth_year: int, today: date) -> AgeBand
 ```
 
-## 8. LLM 공통 래퍼 (01a, `app/integrations/llm/`)
+### 7.10 `GET /api/ai/status`
 
-호출 형태와 규칙은 `docs/architecture.md` 9.1절이 기준이다. 아래 파일을 만든다.
+- 인증 필요(미인증 `401`). 응답 `200`은 architecture 9.1.3의 `get_ai_status()` 그대로다.
+
+```json
+{ "general":  { "enabled": true,  "provider": "gemini", "location": "cloud", "model": "gemini-3.8-flash", "reason": null },
+  "personal": { "enabled": false, "provider": "gemini", "location": "cloud", "model": "gemini-3.8-flash", "reason": "billing_required" } }
+```
+
+- `reason`: `null`(켜짐), `not_configured`(`disabled`), `missing_api_key`(Gemini 키 없음), `billing_required`(개인 등급을 Gemini로 두었는데 `GEMINI_BILLING_ENABLED=false`). 꺼진 등급의 `provider`·`location`·`model`은 설정값 그대로 보여 주고, `not_configured`면 셋 다 `null`이다.
+- 키, 호스트 주소 같은 값은 넣지 않는다. Ollama 연결 여부는 확인하지 않는다(실제 호출에서 `LLM_UNAVAILABLE`로 알린다).
+
+## 8. LLM 공통 계층 (01a, `app/integrations/llm/`)
+
+호출 형태와 규칙은 `docs/architecture.md` 9.1절이 기준이다. SDK 사용법을 추측하지 않는다. 9.1절에 없는 것이 필요하면 설치된 `google-genai`·`ollama` 패키지 소스를 확인하고 `ask`로 묻는다. 아래 파일을 만든다.
 
 | 파일 | 내용 |
 | --- | --- |
-| `types.py` | `Effort`, `FALLBACK_BETA = "server-side-fallback-2026-07-01"` |
-| `schema.py` | `strict_json_schema(model: type[BaseModel]) -> dict` |
-| `structured.py` | `StructuredLLM` Protocol, `AnthropicStructuredLLM`, `DisabledLLM` |
-| `anthropic_client.py` | `get_anthropic_client()`(lru_cache, `anthropic.Anthropic(timeout=60.0, max_retries=2)`) |
+| `types.py` | `Effort`, `DataClass`, `ProviderName`, `TextPart`, `ImagePart`, `DocumentPart`, `Part` |
+| `tasks.py` | `LLMTask`, `LLM_TASKS`(architecture 9.1.2 표 그대로), `get_task(key) -> LLMTask` |
+| `schema.py` | `portable_json_schema(model) -> dict`(9.1.6) |
+| `clients.py` | `get_gemini_client()`, `get_ollama_client()`(lru_cache, 9.1.3) |
+| `pdf.py` | `pdf_to_png_pages(data: bytes) -> list[bytes]`(`pypdfium2`, `scale=2`, Pillow로 PNG 인코딩) |
+| `gemini_adapter.py` | `GeminiStructuredLLM`(9.1.4) |
+| `ollama_adapter.py` | `OllamaStructuredLLM`(9.1.5) |
+| `structured.py` | `StructuredLLM` Protocol, `DisabledLLM`, `RoutedStructuredLLM` |
+| `status.py` | `ScopeStatus`, `AiStatus`, `get_ai_status()`, `resolve_provider(data_class)` |
 | `fake.py` | `FakeStructuredLLM`, `FakeRequest` |
 | `deps.py` | `get_structured_llm()` FastAPI 의존성, `StructuredLLMDep` 타입 별칭 |
 
 세부 동작
 
-1. `AnthropicStructuredLLM(client=None, settings=None)`: 인자가 없으면 `get_anthropic_client()`와 `get_settings()`를 쓴다. 테스트는 가짜 클라이언트를 넣는다.
-2. `generate(task=..., system=..., content=..., output=Model, effort="low", max_tokens=8000)`는 9.1절 코드와 같은 순서로 호출하고 검증한다. `task`는 로그용 이름이다(`"imports.column_mapping"` 같은 형식).
-3. `DisabledLLM.generate`는 항상 `AppError(503, "LLM_UNAVAILABLE", "AI 기능을 쓰려면 서버에 Anthropic API 키를 설정해야 합니다.")`.
-4. `get_structured_llm()`은 `LLM_MODE == "anthropic"`이고 `ANTHROPIC_API_KEY`가 있으면 `AnthropicStructuredLLM`, 아니면 `DisabledLLM`.
-5. `FakeStructuredLLM.register(task, handler)`: `handler(req: FakeRequest) -> dict`. `generate`는 handler 결과를 `output.model_validate`해서 돌려준다. 등록되지 않은 task는 `AssertionError`. 호출 기록은 `calls: list[FakeRequest]`(`task`, `system`, `content`, `effort`, `output_name`).
-6. `strict_json_schema`: `model_json_schema()`의 `$ref`를 `$defs`로 펼친다. 모든 `type: object`에 `additionalProperties: false`와 전체 속성 `required`를 넣는다. `title`, `default`, `examples`, `minLength`, `maxLength`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `pattern`을 지운다. `Optional`은 `anyOf: [..., {"type": "null"}]`로 둔다.
+1. 설정(`core/config.py`): architecture 2.3의 LLM 변수를 읽는다. `LLM_GENERAL_PROVIDER`·`LLM_PERSONAL_PROVIDER`는 `disabled`/`gemini`/`ollama`만 받고, 그 밖의 값(`anthropic` 포함)이면 시작할 때 설정 오류로 멈춘다.
+2. `resolve_provider(data_class)`: architecture 9.1.1의 규칙으로 등급별 `ScopeStatus`를 계산한다. 라우터와 상태 API가 같은 함수를 쓴다. 프로세스 시작 시 등급별 결정을 한 번 로그로 남긴다(키·주소 제외).
+3. `RoutedStructuredLLM.generate(task=..., system=..., content=..., output=Model)`: `get_task(task)`로 등급·effort·max_tokens를 찾고, 등급의 공급자 어댑터를 부른다. 등급이 꺼져 있으면 `DisabledLLM`과 같은 503이다. `enabled_for(task)`는 등급이 켜져 있는지 돌려준다.
+4. `GeminiStructuredLLM(client=None, settings=None)`, `OllamaStructuredLLM(client=None, settings=None)`: 인자가 없으면 `clients.py`의 팩토리와 `get_settings()`를 쓴다. 테스트는 가짜 클라이언트를 넣는다. 호출 순서와 오류 처리는 9.1.4·9.1.5와 같다.
+5. `DisabledLLM.generate`는 항상 `AppError(503, "LLM_UNAVAILABLE", "AI 기능이 꺼져 있습니다. 서버에 로컬 AI(Ollama)나 Gemini를 설정해야 합니다.")`.
+6. `FakeStructuredLLM.register(task, handler)`: `handler(req: FakeRequest) -> dict`. `generate`는 handler 결과를 `output.model_validate`해서 돌려준다. 등록되지 않은 task는 `AssertionError`. `set_enabled(task, False)`면 `enabled_for`가 거짓이고 `generate`가 503이다. 호출 기록은 `calls: list[FakeRequest]`(`task`, `data_class`, `system`, `content`(Part 목록), `output_name`).
+7. `pdf_to_png_pages`: PDF가 아니면 `ValueError`. 쪽 수 제한은 하지 않는다(호출하는 쪽이 먼저 검사).
 
 ## 9. 공통 유틸 (01a)
 
@@ -304,6 +324,7 @@ def compute_age_band(birth_year: int, today: date) -> AgeBand
 - `time.now_utc()`(aware datetime), `time.today_kst()`(date). 모든 모듈은 `datetime.now()`를 직접 쓰지 않는다.
 - `logging.SecretMaskingFilter`: 로그 레코드의 메시지·인자에서 `app_key`, `appkey`, `app_secret`, `secretkey`, `secret`, `token`, `password`, `account_no`, `authorization` 키의 값을 `***`로 바꾼다.
 - `domain.py`: architecture 6절 상수와 한국어 표시명, `AGE_BAND_REPRESENTATIVE_AGE = {"20s": 25, "30s": 35, "40s": 45, "50s": 55, "60s": 65}`.
+- `format.py`: 프론트 `lib/format.ts`(11.2)와 같은 규칙. `format_krw(1234000)` → `"1,234,000원"`(음수 `"-5,000원"`). `format_krw_compact(n)`: 절댓값이 1억 이상이면 억 단위 소수 첫째 자리(ROUND_HALF_UP, `.0`은 생략: `100000000` → `"1억원"`, `123400000` → `"1.2억원"`, `2710264056` → `"27.1억원"`), 1만 이상이면 만 단위 정수(ROUND_HALF_UP, 천 단위 쉼표: `56700000` → `"5,670만원"`, `12345678` → `"1,235만원"`, 반올림 결과가 10,000만이면 `"1억원"`), 1만 미만은 `format_krw`. 음수는 앞에 `-`.
 
 ## 10. 개발 인프라 (01a)
 
@@ -366,13 +387,14 @@ frontend/src/
     layout/AppShell.tsx, Sidebar.tsx, MobileNav.tsx, UserMenu.tsx
     charts/DonutChart.tsx, BarChart.tsx, LineChart.tsx, palette.ts
     common/PageHeader.tsx, EmptyState.tsx, ErrorState.tsx, LoadingState.tsx, MoneyText.tsx,
-           SampleDataBadge.tsx, Disclaimer.tsx, ConfirmDialog.tsx, ComingSoon.tsx
+           SampleDataBadge.tsx, Disclaimer.tsx, ConfirmDialog.tsx, ComingSoon.tsx, AiProviderBadge.tsx
   features/
     auth/api.ts, types.ts, AuthProvider.tsx, components/(LoginForm, SignupForm, RequireAuth, OnboardingGate, ProfileForm)
     chat/components/ChatWidget.tsx   # 스텁: null을 렌더링. 09가 내용을 채운다
   lib/
     api-client.ts           # gamja-market 이식(apiFetch, ApiError, 타임아웃 10초)
     format.ts, navigation.ts, domain.ts, query.ts, site.ts
+    ai-status.ts            # useAiStatus(): GET /api/ai/status(쿼리 키 ["ai", "status"], staleTime 5분), AiStatus 타입
   types/api.ts              # ErrorResponse, Page<T>
 ```
 
@@ -389,6 +411,7 @@ frontend/src/
 | `Disclaimer` | `variant: "investment" \| "tax" \| "sample" \| "ai"` | architecture 13절 문구 |
 | `ConfirmDialog` | `title`, `description`, `confirmLabel`, `onConfirm`, `destructive?` | alert-dialog |
 | `ComingSoon` | `title`, `taskId` | 자리표시 페이지 본문("준비 중입니다. 작업 NN에서 구현합니다.") |
+| `AiProviderBadge` | `scope: "general" \| "personal"`, `compact?` | `useAiStatus()`의 해당 등급으로 배지를 그린다. 로컬: "로컬 AI"(툴팁 "입력한 내용은 이 서버의 로컬 AI(Ollama)가 처리하고 외부로 보내지 않아요."), Gemini: "Google Gemini"(툴팁 "입력한 내용이 Google Gemini API로 전송돼요."), 꺼짐: "AI 꺼짐"(툴팁 "서버에 AI 설정이 없어 AI 기능을 쓸 수 없어요."). 상태를 못 불러오면 아무것도 그리지 않는다 |
 | `DonutChart` | `data: {key, label, value, color}[]`, `centerLabel?`, `ariaLabel` | 비중 도넛. 범례 포함 |
 | `BarChart` | `data`, `xKey`, `series: {key, label, color}[]`, `layout?: "vertical" \| "horizontal"`, `valueFormatter?`, `ariaLabel` | |
 | `LineChart` | `data`, `xKey`, `series`, `valueFormatter?`, `ariaLabel` | |
@@ -402,7 +425,7 @@ frontend/src/
 | --- | --- |
 | `formatKRW(1234000)` | `1,234,000원` |
 | `formatSignedKRW(-5000)` | `-5,000원`, 양수는 `+5,000원` |
-| `formatKRWCompact(123400000)` | `1.2억원`, `56,700,000` → `5,670만원`, 1만 미만은 `formatKRW` |
+| `formatKRWCompact(123400000)` | `1.2억원`, `100000000` → `1억원`, `56,700,000` → `5,670만원`, `12,345,678` → `1,235만원`, 1만 미만은 `formatKRW`. 규칙은 9절 `format_krw_compact`와 같다 |
 | `formatPercent(12.345, 1)` | `12.3%` |
 | `formatDate("2026-10-16")` | `2026.10.16` |
 | `formatDateTime("2026-10-16T03:21:45Z")` | `2026.10.16 12:21`(KST) |
@@ -455,7 +478,7 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 
 ### 12.3 `/onboarding`
 
-- 안내: "나이대와 투자성향에 따라 권장 자산배분이 달라져요. 먼저 출생연도를 알려 주세요."
+- 안내: "나이대와 투자성향, 목표에 따라 권장 자산배분이 달라져요. 먼저 출생연도를 알려 주세요."
 - 입력: 출생연도(`Select`, 올해−10부터 1920까지 내림차순), 닉네임(선택, 20자).
 - 저장 `PUT /api/profile` → `refresh()` → `/allocation/survey?onboarding=1`로 이동(02가 설문 화면을 만든다).
 
@@ -482,8 +505,15 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
   - 에러 형식: 없는 경로 404, 405, 처리되지 않은 예외 500(CORS 헤더 포함)
   - `AdminUser`: 일반 사용자 403, 관리자 200(테스트 안에서 임시 라우터를 붙여 확인), `make-admin` CLI
   - `crypto`: 왕복, 잘못된 토큰, `mask_tail`
+  - `format`: 9절 예시 값 전부와 음수, 99,995,000 → `"1억원"`
   - `SecretMaskingFilter`
-  - LLM 래퍼: 가짜 클라이언트로 `generate` 호출 인자(모델, `output_config.effort`, `output_config.format.schema`, 폴백 켜짐일 때 `betas`·`fallbacks`, 꺼짐일 때 `messages.create`), `refusal` → `LLM_REFUSED`, `max_tokens` → `LLM_UNAVAILABLE`, SDK 예외 → `LLM_UNAVAILABLE`, 응답 JSON 검증 실패 → `LLM_UNAVAILABLE`, `DisabledLLM`, `strict_json_schema`(중첩 모델, Optional, enum)
+  - LLM 라우팅: 작업 등급별 공급자 선택(general → Gemini, personal → Ollama), 등록되지 않은 작업 `ValueError`, 꺼진 등급 503, 설정값 `anthropic`이면 설정 오류
+  - 결제 조건: `LLM_PERSONAL_PROVIDER=gemini`이고 `GEMINI_BILLING_ENABLED=false`면 personal이 꺼지고(`billing_required`) general은 영향이 없다. 키가 없으면 `missing_api_key`
+  - Gemini 어댑터(가짜 클라이언트): 호출 인자(`model`, `store=False`, `system_instruction`, 파일 부분 → 텍스트 순서의 `input`, `response_format.schema`, `generation_config`의 `thinking_level`·`max_output_tokens`), `status`별 처리(`completed`/`incomplete`/`failed`), 400 + `code: "safety"` → `LLM_REFUSED`, 그 밖의 예외 → `LLM_UNAVAILABLE`, JSON 검증 실패 → `LLM_UNAVAILABLE`
+  - Ollama 어댑터(가짜 클라이언트): 호출 인자(`model`, system → user 순서의 `messages`, `format`, `stream=False`, effort별 `think`, `OLLAMA_THINKING=false`면 `think` 없음, `options`), 이미지·PDF가 `images`로 들어감, `done_reason == "length"`, `ConnectionError`, `ResponseError` 404 안내 문구
+  - `portable_json_schema`: 중첩 모델(`$defs` 펼침), Optional, enum, Literal(`const` → `enum`), 판별 유니언(`oneOf` → `anyOf`), 지워야 할 키워드, 재귀 모델 `ValueError`
+  - `pdf_to_png_pages`: `pypdfium2`로 만든 2쪽 PDF → PNG 2개, PDF가 아니면 `ValueError`
+  - `/api/ai/status`: 미인증 401, 설정 조합별 응답, 응답에 키·주소가 없음
   - 라우터 등록: 13개 모듈 라우터가 `/api` 아래 붙어 있다(OpenAPI의 tags로 확인)
 
 ### 13.2 프론트 (01b, `frontend/tests/`)
@@ -499,6 +529,7 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
   - 내비게이션: 관리자 메뉴 표시 조건, 현재 경로 강조
   - 자리표시 페이지가 작업 번호를 보여 준다(대표 3개)
   - 차트 래퍼가 숨김 표를 렌더링한다
+  - `AiProviderBadge`: 로컬·Gemini·꺼짐 세 상태의 문구와 툴팁, 상태 요청 실패 시 렌더링 없음(MSW)
 
 ## 14. 완료 기준
 
@@ -509,7 +540,7 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 - [ ] `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`가 통과한다.
 - [ ] 빈 DB에서 `alembic upgrade heads` → `downgrade base` → `upgrade heads`가 성공한다.
 - [ ] `/docs`(OpenAPI)에 auth·profile·health와 12개 모듈 태그가 보인다.
-- [ ] `ANTHROPIC_API_KEY` 없이 모든 테스트가 통과하고, 실제 네트워크 호출이 없다.
+- [ ] `GEMINI_API_KEY`와 로컬 Ollama 없이 모든 테스트가 통과하고, 실제 네트워크 호출이 없다.
 
 ### 01b
 
@@ -524,7 +555,7 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 2. 7절의 모든 엔드포인트를 실제 요청으로 대조한다: 상태코드, 필드 이름(camelCase), `Set-Cookie` 속성(HttpOnly, SameSite=Lax, Path=/, Max-Age=604800), 에러 `code`.
 3. DB에 비밀번호 원문이나 세션 토큰 원문이 없다.
 4. 13개 모듈 라우터 등록, 12개 모듈 스텁, `db/models.py` import 목록이 architecture 3절과 일치한다.
-5. `strict_json_schema` 결과에 `additionalProperties: false`와 전체 `required`가 들어 있고, `AnthropicStructuredLLM`이 architecture 9.1절의 인자 형태로 SDK를 부른다(테스트 코드로 확인).
+5. `portable_json_schema` 결과가 architecture 9.1.6 규칙을 지키고, Gemini·Ollama 어댑터가 9.1.4·9.1.5의 인자 형태로 SDK를 부른다(테스트 코드로 확인). Gemini 호출에 `store=False`가 항상 있다. personal 등급이 결제 조건 없이 Gemini로 가는 경로가 없다.
 6. `worktree-setup.sh`가 사용자가 넣은 `.env` 값을 보존하고, 다른 슬롯 DB를 건드리지 않는다. `stop.sh`가 다른 워크트리 프로세스를 종료하지 않는다.
 7. 4.1절 의존성이 모두 설치돼 있다(`uv pip list`, `npm ls --depth=0`).
 8. 11.6절 자리표시 경로가 모두 있고, 내비게이션이 architecture 12.1절과 일치한다.
@@ -534,6 +565,6 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 ## 16. 다음 단계 연결점
 
 - 02~09는 이 브랜치들이 develop에 병합된 뒤 시작한다. 각 작업은 자기 모듈 스텁(`router.py`, `models.py`)과 자리표시 페이지를 채운다.
-- 02는 `/onboarding`이 넘겨주는 `/allocation/survey?onboarding=1`을 받아 설문 후 `/allocation`으로 보낸다.
+- 02는 `/onboarding`이 넘겨주는 `/allocation/survey?onboarding=1`을 받아 설문 → 목표·상황 → 자산 간단 입력 → 추천 결과 → 상세 설명으로 잇는다(02 9절).
 - 09는 `features/chat/components/ChatWidget.tsx` 스텁을 실제 위젯으로 바꾼다.
-- 08·17은 `crypto`로 자격증명을 저장한다. 04·10·13·07은 `get_structured_llm`을 쓴다.
+- 08·17은 `crypto`로 자격증명을 저장한다. 04·10·13·07은 `get_structured_llm`을 쓴다. 09는 `clients.py`·`tasks.py`·`schema.py`와 `get_ai_status()`로 챗봇 공급자 어댑터를 만든다. AI를 쓰는 화면은 01b의 `AiProviderBadge`로 데이터 처리 위치를 보여 준다.
