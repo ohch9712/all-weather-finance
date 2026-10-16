@@ -1,10 +1,12 @@
-"""원본 파일이 임시 파일로 넘어가지 않는 메모리 전용 multipart 읽기."""
+"""설치된 multipart 파서로 파일을 메모리 안에서만 읽는다."""
 
 from dataclasses import dataclass
-from email import policy
-from email.parser import BytesParser
+from io import BytesIO
 
 from fastapi import Request
+from python_multipart import MultipartParser
+from python_multipart.exceptions import MultipartParseError
+from python_multipart.multipart import parse_options_header
 
 from app.core.config import get_settings
 from app.modules.imports.readers import too_large
@@ -19,52 +21,114 @@ class Upload:
     sheet_name: str | None
 
 
+class MemoryUploadParser:
+    def __init__(self, maximum: int):
+        self.maximum = maximum
+        self.fields: dict[str, str] = {}
+        self.file = BytesIO()
+        self.file_name: str | None = None
+        self.complete = False
+        self.parts = 0
+
+    def on_part_begin(self):
+        self.parts += 1
+        if self.parts > 3:
+            invalid("file", "파일 업로드 형식이 올바르지 않습니다.")
+        self.header_name = bytearray()
+        self.header_value = bytearray()
+        self.headers: dict[bytes, bytes] = {}
+        self.part_name = ""
+        self.part_value = bytearray()
+
+    def on_header_field(self, data, start, end):
+        self.header_name.extend(data[start:end])
+
+    def on_header_value(self, data, start, end):
+        self.header_value.extend(data[start:end])
+
+    def on_header_end(self):
+        self.headers[bytes(self.header_name).lower()] = bytes(self.header_value)
+        self.header_name.clear()
+        self.header_value.clear()
+
+    def on_headers_finished(self):
+        _, options = parse_options_header(self.headers.get(b"content-disposition"))
+        try:
+            self.part_name = options.get(b"name", b"").decode("utf-8")
+            if b"filename" in options:
+                if self.part_name != "file" or self.file_name is not None:
+                    invalid("file", "파일은 한 개씩 올려 주세요.")
+                self.file_name = options[b"filename"].decode("utf-8")
+            elif self.part_name not in ("kind", "sheetName") or self.part_name in self.fields:
+                invalid("file", "파일 업로드 형식이 올바르지 않습니다.")
+        except UnicodeDecodeError:
+            invalid("file", "파일 업로드 형식이 올바르지 않습니다.")
+
+    def on_part_data(self, data, start, end):
+        if self.part_name == "file":
+            if self.file.tell() + end - start > self.maximum:
+                raise too_large()
+            self.file.write(data[start:end])
+        else:
+            if len(self.part_value) + end - start > 1024:
+                invalid(self.part_name, "입력값을 확인해 주세요.")
+            self.part_value.extend(data[start:end])
+
+    def on_part_end(self):
+        if self.part_name != "file":
+            try:
+                self.fields[self.part_name] = self.part_value.decode("utf-8")
+            except UnicodeDecodeError:
+                invalid(self.part_name, "입력값을 확인해 주세요.")
+
+    def on_end(self):
+        self.complete = True
+
+
 async def read_upload(request: Request) -> Upload:
-    content_type = request.headers.get("content-type", "")
-    if (
-        not content_type.lower().startswith("multipart/form-data;")
-        or "\r" in content_type
-        or "\n" in content_type
-    ):
+    media_type, options = parse_options_header(request.headers.get("content-type"))
+    boundary = options.get(b"boundary")
+    if media_type != b"multipart/form-data" or not boundary or len(boundary) > 200:
         invalid("file", "파일을 multipart/form-data 형식으로 올려 주세요.")
     maximum = get_settings().import_max_file_mb * 1024 * 1024
-    body = bytearray()
-    # 파일 외 multipart 헤더·필드도 제한해 요청 전체를 메모리 안에 둔다.
-    async for chunk in request.stream():
-        if len(body) + len(chunk) > maximum + 65536:
-            raise too_large()
-        body.extend(chunk)
-    message = BytesParser(policy=policy.default).parsebytes(
-        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode() + body
-    )
-    if not message.is_multipart() or message.defects:
-        invalid("file", "파일 업로드 형식이 올바르지 않습니다.")
-    fields: dict[str, str] = {}
-    data: bytes | None = None
-    file_name = ""
-    for part in message.iter_parts():
-        name = part.get_param("name", header="content-disposition")
-        if part.is_multipart() or part.defects:
-            invalid("file", "파일 업로드 형식이 올바르지 않습니다.")
-        payload = part.get_payload(decode=True) or b""
-        if name == "file":
-            if data is not None:
-                invalid("file", "파일은 한 개씩 올려 주세요.")
-            data = payload
-            file_name = part.get_filename() or ""
-            if len(data) > maximum:
+    memory = MemoryUploadParser(maximum)
+    callbacks = {
+        name: getattr(memory, name)
+        for name in (
+            "on_part_begin",
+            "on_part_data",
+            "on_part_end",
+            "on_header_field",
+            "on_header_value",
+            "on_header_end",
+            "on_headers_finished",
+            "on_end",
+        )
+    }
+    parser = MultipartParser(boundary, callbacks, max_header_count=8, max_header_size=4096)
+    total = 0
+    try:
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > maximum + 65536:
                 raise too_large()
-        elif name in ("kind", "sheetName"):
-            if len(payload) > 1024 or name in fields:
-                invalid(name, "입력값을 확인해 주세요.")
-            try:
-                fields[name] = payload.decode("utf-8")
-            except UnicodeDecodeError:
-                invalid(name, "입력값을 확인해 주세요.")
-    if not fields.get("kind"):
-        invalid("kind", "필수 항목입니다.")
-    if data is None or not file_name:
-        invalid("file", "필수 항목입니다.")
-    if len(file_name) > 255:
-        invalid("file", "파일 이름은 255자 이하로 정해 주세요.")
-    return Upload(fields["kind"], file_name, data, fields.get("sheetName") or None)
+            parser.write(chunk)
+        parser.finalize()
+        if not memory.complete:
+            invalid("file", "파일 업로드 형식이 올바르지 않습니다.")
+        if not memory.fields.get("kind"):
+            invalid("kind", "필수 항목입니다.")
+        if not memory.file_name:
+            invalid("file", "필수 항목입니다.")
+        if len(memory.file_name) > 255:
+            invalid("file", "파일 이름은 255자 이하로 정해 주세요.")
+        return Upload(
+            memory.fields["kind"],
+            memory.file_name,
+            memory.file.getvalue(),
+            memory.fields.get("sheetName") or None,
+        )
+    except MultipartParseError:
+        invalid("file", "파일 업로드 형식이 올바르지 않습니다.")
+    finally:
+        memory.file.close()

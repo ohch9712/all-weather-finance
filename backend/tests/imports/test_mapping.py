@@ -2,7 +2,6 @@ import json
 from dataclasses import replace
 
 import pytest
-from fastapi.exceptions import RequestValidationError
 
 from app.core.errors import AppError
 from app.integrations.llm.fake import FakeStructuredLLM
@@ -21,7 +20,7 @@ def test_registry(demo_kind):
     assert list_import_kinds() == [demo_kind]
     with pytest.raises(ValueError):
         register_import_kind(demo_kind)
-    with pytest.raises(RequestValidationError):
+    with pytest.raises(AppError):
         get_import_kind("unknown")
 
 

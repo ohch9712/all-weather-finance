@@ -71,3 +71,19 @@ def test_xlsx_magic_and_sheet_names():
     data = io.BytesIO()
     book.save(data)
     assert list(read_file(data.getvalue()).sheets) == ["안내", "데이터"]
+
+
+@pytest.mark.parametrize(
+    "data", [b"PK\x03\x04broken", bytes.fromhex("D0CF11E0A1B11AE1"), b"\x89PNG\r\n", b"\x00\x01"]
+)
+def test_corrupt_binary_is_unsupported(data):
+    with pytest.raises(AppError) as exc:
+        read_file(data)
+    assert exc.value.code == "IMPORT_FILE_UNSUPPORTED"
+
+
+def test_charset_fallback_and_long_csv_cell():
+    table = "날짜,금액,제목\n2026-10-16,1,가짜\n"
+    assert read_file(table.encode("utf-16")).sheets["Sheet1"][0] == ["날짜", "금액", "제목"]
+    data = ("날짜,금액,제목\n2026-10-16,1," + "x" * 200000).encode()
+    assert len(read_file(data).sheets["Sheet1"][1][2]) == 200000

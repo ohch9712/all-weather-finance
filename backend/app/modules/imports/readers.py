@@ -1,15 +1,18 @@
 import csv
 import io
 import re
+import struct
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from xml.etree.ElementTree import ParseError
 from zipfile import BadZipFile, ZipFile
 
 import openpyxl
 import pandas as pd
 import xlrd
 from charset_normalizer import from_bytes
+from openpyxl.utils.exceptions import InvalidFileException
 from xlrd.compdoc import CompDoc, CompDocError
 
 from app.core.config import get_settings
@@ -131,7 +134,7 @@ def read_file(data: bytes) -> Workbook:
                 return Workbook("xls", sheets)
             finally:
                 book.release_resources()
-        if data.startswith((b"%PDF", b"\x89PNG", b"\xff\xd8", b"GIF8")) or b"\x00" in data:
+        if data.startswith((b"%PDF", b"\x89PNG", b"\xff\xd8", b"GIF8")):
             raise unsupported()
         content = decode(data)
         if content.lstrip().startswith("<") and re.search(r"<table\b", content, re.I):
@@ -164,12 +167,26 @@ def read_file(data: bytes) -> Workbook:
                 d: sum(line.count(d) for line in sample.splitlines()) for d in (",", "\t", ";")
             }
             delimiter = max(scores, key=scores.get)
+        csv.field_size_limit(
+            max(csv.field_size_limit(), get_settings().import_max_file_mb * 1024 * 1024)
+        )
         rows = [
             [cell_string(v) for v in row]
             for row in csv.reader(io.StringIO(content), delimiter=delimiter)
         ]
         return Workbook("csv", {"Sheet1": rows})
-    except (BadZipFile, ValueError, KeyError, OSError, xlrd.XLRDError, CompDocError) as exc:
+    except (
+        BadZipFile,
+        ValueError,
+        KeyError,
+        OSError,
+        xlrd.XLRDError,
+        CompDocError,
+        csv.Error,
+        ParseError,
+        InvalidFileException,
+        struct.error,
+    ) as exc:
         if "encrypt" in str(exc).lower():
             raise encrypted() from exc
         raise unsupported() from exc
