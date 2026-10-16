@@ -4,6 +4,13 @@ import type { AgeBand, AssetClass, RiskProfile } from "@/lib/domain";
 
 export type ByAssetClass<T> = Record<AssetClass, T>;
 
+/** 01 `GET /api/profile` 응답 중 이 모듈이 쓰는 필드 */
+export interface ProfileSummary {
+  birthYear: number | null;
+  age: number | null;
+  ageBand: AgeBand | null;
+}
+
 // ── 설문·진단 ────────────────────────────────────────────────────────────
 
 export interface SurveyOption {

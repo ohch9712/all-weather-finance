@@ -5,6 +5,7 @@ import type {
   GoalInput,
   Holding,
   HoldingInput,
+  ProfileSummary,
   Recommendation,
   RiskAssessment,
   RiskAssessmentCreated,
@@ -19,6 +20,11 @@ import type {
 // 자산배분 API(스펙 02 7절). 화면은 hooks.ts의 TanStack Query 훅으로 부른다.
 
 const BASE = "/api/allocation";
+
+/** 상세 설명의 "내 정보"에 쓰는 프로필(01 `GET /api/profile`) */
+export function getProfile(): Promise<ProfileSummary> {
+  return apiFetch<ProfileSummary>("/api/profile");
+}
 
 function json(method: string, body: unknown): RequestInit {
   return { method, body: JSON.stringify(body) };

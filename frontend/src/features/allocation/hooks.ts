@@ -17,6 +17,7 @@ export const allocationKeys = {
   holdings: ["allocation", "holdings"] as const,
   situation: ["allocation", "situation"] as const,
   goals: ["allocation", "goals"] as const,
+  profile: ["allocation", "profile"] as const,
 };
 
 function useInvalidateAllocation() {
@@ -58,6 +59,10 @@ export function useSituation() {
 
 export function useGoals() {
   return useQuery({ queryKey: allocationKeys.goals, queryFn: api.listGoals });
+}
+
+export function useProfileSummary() {
+  return useQuery({ queryKey: allocationKeys.profile, queryFn: api.getProfile });
 }
 
 export function useCreateRiskAssessment() {
