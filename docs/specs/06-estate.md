@@ -442,3 +442,46 @@ def compare_estate_plans(req: EstateCompareInput) -> EstateCompareResult   # 8.1
 
 - 15: `list_members`, `calc_gift_tax`, `get_deduction_status`, `simulate_gift_plan`, `build_compare_input`·`compare_estate_plans`를 챗봇 도구로 감싼다. 16도 `list_members`와 `get_deduction_status`를 쓴다.
 - 세법이 바뀌면 `rules/kr_<시행일>.py`를 추가하고 `get_active_rules`가 날짜로 고르게 한다(유산취득세 전환안은 2026-10 현재 국회 미통과).
+
+## 구현 결과
+
+### 구현한 것
+
+- `estate_0001` 브랜치 마이그레이션으로 가족·증여 기록 테이블, 같은 모듈 내 삭제 연쇄, 사용자·수증자·날짜 인덱스를 추가했다.
+- 10절의 인증 API 전체와 11절의 공개 서비스 함수를 구현했다. 기록 CRUD는 사용자 범위로 조회하며 다른 사용자의 가족·기록·계산 입력은 404다.
+- 시행일별 불변 규칙 파일과 DB·시계에 의존하지 않는 계산 함수(`calculations.py`)를 분리했다. 기본·혼인출산 공제 재생, 동일 그룹 합산, 누진세·세대생략 할증·세액공제, 상속 공제·종합한도, 분산 증여·복리 미래가치, 방향 비교의 금융 예산·사전증여 가산을 구현했다.
+- 자산배분 공개 함수는 함수 안에서 지연 import한다. 실제 `AssetBreakdown.included_by_class`·`excluded_total` 대응과 ImportError·AttributeError 폴백을 테스트했다.
+- `/estate?tab=`의 일곱 탭, 가족·기록 CRUD 다이얼로그, 공제 카드, 직접 입력·가족 기준 증여세, 상속세 사전 채움·단계표, 분산 증여 타임라인·선 그래프, 방향 비교 카드·막대 그래프·상세 펼치기를 구현했다. 모든 탭에 `tax` 고지와 계산 가정을 표시한다.
+- 국가법령정보센터의 상속세 및 증여세법 제13·18~26·47·53·53의2·55~57·69조와 시행령 제9조, 민법 제4조를 참조해 규칙을 구성했다. 배우자 법정한도·종합한도 등 단순화는 본문의 계약과 화면 계산 가정을 따른다.
+
+### 스펙 해석과 세부 결정
+
+- 코디네이터 확인에 따라 시행일 이전 기록도 생성·수정·재생할 수 있다. 과거 기록의 공제와 추정 세액은 현재 규칙으로 다시 계산하되 혼인·출산 공제는 2024-01-01 이후 기록에만 적용한다. 직접 증여세 계산에서 2024-01-01 이전 증여일은 `field_error("giftedOn", "2024년 1월 1일 이후 증여만 계산할 수 있어요.")`다. `get_active_rules` 자체의 시행일 이전 에러도 유지한다. 화면에 "2024년 1월 1일 이전 기록도 현행 규칙으로 다시 계산한 추정치예요."를 표시했다.
+- API에 이름이 지정되지 않았던 상속세 결과 금액·단계 키는 `funeralDeduction`, `basicPersonalDeduction`, `lumpSumDeduction`, `spouseDeduction`, `financialDeduction`, `cohabitingHouseDeduction`, `totalDeduction`, `deductionLimit`, `appliedDeduction`, `taxableValue`, `taxBase`, `calculatedTax`, `giftTaxCredit`, `filingCredit`, `payableTax`를 사용한다. 단계 순서는 10.6을 따른다.
+- 상속세 화면의 자녀 입력은 쉼표로 나이를 구분하고, 장애인 공제가 필요하면 `나이:기대여명 연수`로 입력한다. 생년월일 없는 가족 제외 안내는 기존 데이터에도 대응한다.
+- 새 의존성·공유 파일 변경은 없다. 이 모듈은 LLM·외부 금융 API를 호출하지 않는다.
+
+### 완료 기준 검증
+
+| 검증 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 06 준비 성공 |
+| `uv run ruff check .` | 통과 |
+| `uv run ruff format --check .` | 148개 파일 통과 |
+| `uv run pytest` | 762개 통과(estate 30개 포함) |
+| 별도 빈 DB `uv run alembic upgrade heads` → `downgrade base` → `upgrade heads` | 통과, 임시 DB 삭제 완료 |
+| `npm run lint` | 통과, 경고 없음 |
+| `npx tsc --noEmit` | 통과 |
+| `npm run test` | 26개 파일·293개 테스트 통과(estate 8개 포함) |
+| `npm run build` | 통과, `/estate` 생성 확인 |
+| 실서버 API | 증여세 1억·상속세 30억·분산 증여 사례·방향 비교 사례 1·2 값 일치 |
+| 독립 Playwright 세션 | UI 가입·기본정보·가족 추가·방향 비교 결과 확인 |
+| 360px·1280px 일곱 탭 | `scrollWidth === innerWidth`, `tax` 고지 확인 |
+| 방향 비교 결과 레이아웃 | 360px 한 열·가로 넘침 없음, 1280px 두 열(각 480px) 확인 |
+| 보안·소유 범위 | 사용자 격리 404, 외부 HTTP 차단 픽스처 사용, 변경 경로 모두 3절 범위 |
+
+5절 사례 10개, 6절 재생 사례, 7절 사례 5개, 8절 미래가치·일정, 8.1 사례 2개와 경계·예산·포함 조건·동률 순서를 테스트로 고정했다. 공통 완료 기준과 14절 완료 기준을 모두 확인했다.
+
+### 남은 일
+
+- 구현 범위의 남은 일은 없다. PR에 대한 별도 검증 워커 실행과 병합은 코디네이터가 진행한다.
