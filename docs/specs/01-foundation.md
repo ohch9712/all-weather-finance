@@ -639,3 +639,9 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 - 두 브랜치를 합친 실제 흐름은 로드맵의 웨이브 1 통합 검증에서 다시 확인한다(위 브라우저 흐름은 사전 확인이다).
 - 다른 API 호출 중 세션이 만료되면(401) 해당 화면은 오류 상태만 보여 주고 로그인 화면으로 자동 이동하지 않는다. 필요하면 공통 처리(쿼리 캐시의 401 감지 → `refresh()`)를 추가한다.
 - 테마 전환 UI, 로그인 시도 제한 안내는 범위 밖이다. `npm audit`의 high 9건은 create-next-app·shadcn 의존성에서 온 것이라 이번 범위에서 손대지 않았다.
+
+#### 검증 지적 수정(1차 검증, PR #2 코멘트)
+
+1. 중요 — 제어문자가 든 `next`로 외부 이동: `getSafeRedirectPath(next, origin = window.location.origin)`가 제어문자(U+0000~U+001F, U+007F)가 있거나, `/`로 시작하지 않거나, `//`·`/\`로 시작하는 값을 거절한다. 퍼센트 인코딩을 한 번 푼 값도 같은 기준으로 보고(잘못된 인코딩은 거절), URL로 해석·정규화한 뒤 origin이 현재 사이트와 같을 때만 `pathname + search + hash`를 돌려준다. 그 밖에는 `/`다. 사용처는 `LoginForm` 한 곳이고 그대로 이 함수를 거친다(`RequireAuth`는 `getLoginPath`로 next를 만들기만 한다).
+   - 테스트: `tests/foundation/redirect.test.ts`(정상 6건, 거절 24건 + null·undefined: LF·CR·탭·NUL·US·DEL, `%0A`·`%0D`·`%09`·`%2F`·`%5C`·잘못된 인코딩, `//`, `/\`, 절대 URL(같은 사이트 절대 URL도 `/`로 시작하지 않아 거절), `javascript:`·대소문자 섞은 `javascript:`, `data:`, 상대 경로, 앞 공백, 빈 값), `auth-forms.test.tsx` LoginForm에 `/\n/…`·`/\r/…`·`/\t/…`·`javascript:` 케이스 추가. 헤드리스 Chrome으로 `/login?next=%2F%0A%2Fverify.invalid`(CR·탭 포함)를 다시 밟아 `/`로 가는 것을 확인했다.
+2. 경미 — 토스트 접근성 문구: `components/ui/sonner.tsx`에서 sonner 2.0.8 공식 옵션 `containerAriaLabel="알림"`(영역 이름 "알림 alt+T", 단축키 표시는 sonner가 붙인다)과 `toastOptions.closeButtonAriaLabel="알림 닫기"`를 기본값으로 둔다. 테스트: `common-components.test.tsx`의 Toaster 케이스.
