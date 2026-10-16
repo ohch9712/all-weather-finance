@@ -3,6 +3,7 @@ import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { JournalPage } from "@/features/journal/components/JournalPage";
 import { TradeDetailPage } from "@/features/journal/components/TradeDetailPage";
+import { NoteDialog } from "@/features/journal/components/NoteDialog";
 import { TradeDialog } from "@/features/journal/components/TradeDialog";
 import { PnlCalendar } from "@/features/journal/components/JournalStats";
 import type { Note, Trade, TradeInput, TradeStats } from "@/features/journal/types";
@@ -108,6 +109,21 @@ describe("매매일지", () => {
     expect(screen.getByText("차분")).toBeInTheDocument();
     expect(notes[0].tradeId).toBe(trade.id); expect(notes[0].tags).toEqual(["복기", "장기"]);
     expect(screen.getByRole("link", { name: "연결 거래 보기" })).toHaveAttribute("href", `/journal/${trade.id}`);
+  });
+
+  it("상세에서 연 노트는 거래 목록이 도착해도 선택한 거래를 유지한다", async () => {
+    mockTrades();
+    let received: Note | undefined;
+    server.use(http.post(apiUrl("/api/journal/notes"), async ({ request }) => {
+      received = await request.json() as Note;
+      return HttpResponse.json({ ...received, id: "linked-note", createdAt: trade.createdAt, updatedAt: trade.updatedAt }, { status: 201 });
+    }));
+    const { user } = renderWithProviders(<NoteDialog tradeId={trade.id} symbolCode={trade.symbolCode} onClose={() => {}} />);
+    await screen.findByRole("option", { name: /삼성전자/ });
+    expect(screen.getByLabelText("연결 거래")).toHaveValue(trade.id);
+    await user.type(screen.getByLabelText("내용"), "이 거래 복기");
+    await user.click(screen.getByRole("button", { name: "노트 저장" }));
+    await waitFor(() => expect(received?.tradeId).toBe(trade.id));
   });
 
   it("잘못된 매매 입력은 API에 보내지 않고 필드 오류를 보여 준다", async () => {

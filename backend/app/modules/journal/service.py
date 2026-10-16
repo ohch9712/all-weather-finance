@@ -6,7 +6,7 @@ from decimal import ROUND_HALF_UP, Decimal, localcontext
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
-from app.core.errors import AppError
+from app.core.errors import AppError, field_error
 from app.core.schemas import Page
 from app.core.time import KST
 from app.modules.journal import repository as repo
@@ -117,15 +117,7 @@ def list_trades(db, user_id, page, **filters):
 
 def check_note_trade(db, user_id, data):
     if data.trade_id and repo.owned_trade(db, user_id, data.trade_id) is None:
-        raise RequestValidationError(
-            [
-                {
-                    "type": "value_error",
-                    "loc": ("body", "tradeId"),
-                    "msg": "Value error, 내 매매 기록을 선택해 주세요.",
-                }
-            ]
-        )
+        raise field_error("tradeId", "내 매매 기록을 선택해 주세요.")
 
 
 def create_note(db, user_id, data):

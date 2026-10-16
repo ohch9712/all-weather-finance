@@ -60,7 +60,12 @@ def test_trade_crud_filters_and_unknown_time(auth_client):
     assert auth_client.get("/api/journal/trades?side=sell").json()["total"] == 0
     assert auth_client.get("/api/journal/trades?symbol=absent").json()["total"] == 0
     assert auth_client.get("/api/journal/trades?pageSize=101").status_code == 422
-    assert auth_client.delete(f"/api/journal/trades/{id}").status_code == 204
+    assert (
+        auth_client.delete(
+            f"/api/journal/trades/{id}", headers={"Content-Type": "application/json"}
+        ).status_code
+        == 204
+    )
     assert auth_client.get(f"/api/journal/trades/{id}").status_code == 404
 
 
@@ -120,9 +125,19 @@ def test_notes_crud_trade_delete_set_null(auth_client):
     )
     assert response.status_code == 200, response.text
     assert response.json()["content"] == "복기 완료"
-    assert auth_client.delete(f"/api/journal/trades/{trade['id']}").status_code == 204
+    assert (
+        auth_client.delete(
+            f"/api/journal/trades/{trade['id']}", headers={"Content-Type": "application/json"}
+        ).status_code
+        == 204
+    )
     assert auth_client.get("/api/journal/notes").json()["items"][0]["tradeId"] is None
-    assert auth_client.delete(f"/api/journal/notes/{id}").status_code == 204
+    assert (
+        auth_client.delete(
+            f"/api/journal/notes/{id}", headers={"Content-Type": "application/json"}
+        ).status_code
+        == 204
+    )
     assert (
         auth_client.patch(f"/api/journal/notes/{id}", json={"content": "없음"}).status_code == 404
     )
@@ -132,14 +147,18 @@ def test_user_isolation(auth_client, other_auth_client):
     trade = create(auth_client)
     note = auth_client.post("/api/journal/notes", json={**NOTE, "tradeId": trade["id"]}).json()
     for method in ["get", "patch", "delete"]:
-        kwargs = {"json": {}} if method == "patch" else {}
+        kwargs = (
+            {"json": {}} if method == "patch" else {"headers": {"Content-Type": "application/json"}}
+        )
         response = getattr(other_auth_client, method)(
             f"/api/journal/trades/{trade['id']}", **kwargs
         )
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "NOT_FOUND"
     for method in ["patch", "delete"]:
-        kwargs = {"json": {}} if method == "patch" else {}
+        kwargs = (
+            {"json": {}} if method == "patch" else {"headers": {"Content-Type": "application/json"}}
+        )
         assert (
             getattr(other_auth_client, method)(
                 f"/api/journal/notes/{note['id']}", **kwargs

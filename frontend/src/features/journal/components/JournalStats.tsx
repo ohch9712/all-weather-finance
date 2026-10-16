@@ -39,7 +39,20 @@ export function JournalStats() {
       <div className="grid gap-3 sm:grid-cols-2">{[["최고 거래", summary.bestTrade], ["최악 거래", summary.worstTrade]].map(([label, performance]) => { const item = performance as typeof summary.bestTrade; return <section key={String(label)} className="min-w-0 space-y-2 rounded-xl border p-4"><h3 className="font-medium">{String(label)}</h3>{item ? <><Link className="text-primary underline" href={`/journal/${item.tradeId}`}>{item.symbolName}</Link><p>{item.tradedOn} · <JournalMoney value={item.realizedPnl} currency={currency} signed /></p></> : <p>계산 가능한 매도가 없어요.</p>}</section>; })}</div>
       <section className="min-w-0 rounded-xl border p-4"><h3 className="mb-4 font-semibold">월별 실현손익</h3><BarChart data={query.data.monthly.filter(item => item.currency === currency).map(item => ({ month: item.month, profit: Math.max(0, Number(item.realizedPnl)), loss: Math.min(0, Number(item.realizedPnl)) }))} xKey="month" series={[{ key: "profit", label: "수익", color: "var(--money-up)" }, { key: "loss", label: "손실", color: "var(--money-down)" }]} valueFormatter={value => decimalMoney(String(value), currency)} ariaLabel="월별 실현손익" /></section>
       <PnlCalendar daily={query.data.daily} currency={currency} />
-      <section className="space-y-3"><h3 className="font-semibold">종목별 성과</h3><div className="grid gap-3 sm:grid-cols-2">{query.data.bySymbol.filter(item => item.currency === currency).map((item, index) => <div key={`${item.symbolCode}-${index}`} className="min-w-0 rounded-xl border p-4"><p className="font-medium break-words">{item.symbolName} <span className="text-sm text-muted-foreground">{item.symbolCode}</span></p><p><JournalMoney value={item.realizedPnl} currency={currency} signed /> · 매도 {item.sellCount}건</p></div>)}</div></section>
+      <section className="space-y-3">
+        <h3 className="font-semibold">종목별 성과</h3>
+        <table className="w-full table-fixed text-sm">
+          <caption className="sr-only">종목별 실현손익과 매도 거래 수</caption>
+          <thead><tr className="border-b text-left"><th className="w-2/5 p-2">종목</th><th className="p-2">실현손익</th><th className="w-1/5 p-2">매도 수</th></tr></thead>
+          <tbody>{query.data.bySymbol.filter(item => item.currency === currency).map((item, index) => (
+            <tr className="border-b" key={`${item.symbolCode}-${index}`}>
+              <td className="break-words p-2">{item.symbolName}<p className="break-all text-xs text-muted-foreground">{item.symbolCode}</p></td>
+              <td className="p-2"><JournalMoney value={item.realizedPnl} currency={currency} signed /></td>
+              <td className="p-2">{item.sellCount}건</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </section>
     </>}
   </div>;
 }

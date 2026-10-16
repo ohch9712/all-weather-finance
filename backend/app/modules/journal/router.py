@@ -11,11 +11,13 @@ from app.modules.journal.schemas import (
     Kind,
     NoteInput,
     NoteOut,
+    NotePatch,
     Positions,
     Side,
     TradeDetail,
     TradeInput,
     TradeOut,
+    TradePatch,
     TradeStats,
 )
 
@@ -50,8 +52,8 @@ def trade_detail(trade_id: UUID, db: DBSession, user: CurrentUser):
 
 
 @router.patch("/trades/{trade_id}", response_model=TradeOut, dependencies=[Depends(require_json)])
-def update_trade(trade_id: UUID, data: dict, db: DBSession, user: CurrentUser):
-    return service.update_trade(db, user.id, trade_id, data)
+def update_trade(trade_id: UUID, data: TradePatch, db: DBSession, user: CurrentUser):
+    return service.update_trade(db, user.id, trade_id, data.model_dump(exclude_unset=True))
 
 
 @router.delete("/trades/{trade_id}", status_code=204, dependencies=[Depends(require_json)])
@@ -98,8 +100,8 @@ def create_note(data: NoteInput, db: DBSession, user: CurrentUser):
 
 
 @router.patch("/notes/{note_id}", response_model=NoteOut, dependencies=[Depends(require_json)])
-def update_note(note_id: UUID, data: dict, db: DBSession, user: CurrentUser):
-    return service.update_note(db, user.id, note_id, data)
+def update_note(note_id: UUID, data: NotePatch, db: DBSession, user: CurrentUser):
+    return service.update_note(db, user.id, note_id, data.model_dump(exclude_unset=True))
 
 
 @router.delete("/notes/{note_id}", status_code=204, dependencies=[Depends(require_json)])

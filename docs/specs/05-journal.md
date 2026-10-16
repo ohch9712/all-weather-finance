@@ -231,3 +231,46 @@ def get_trade_stats(db, user_id, start: date | None = None, end: date | None = N
 
 - 11: `journal_trades` 임포트 종류, 증권사 체결 동기화(`journal_0002`), 보유 탭의 현재가·평가손익(08의 `get_quotes`).
 - 15·16: `get_positions`, `get_trade_stats`.
+
+## 구현 결과
+
+### 구현한 것
+
+- `journal_0001` 분기 마이그레이션으로 `trades`, `trade_notes`, 사용자별 조회 인덱스, `dedup_hash` 부분 유일 인덱스와 거래 삭제 시 노트 연결 해제 제약을 추가했다.
+- 인증된 사용자의 매매·노트 CRUD, 기간·종목·종류 필터와 페이지네이션, 거래 상세·보유·통계 API를 구현했다. 다른 사용자의 거래·노트는 404이고, 노트에 다른 사용자 거래를 연결하면 `tradeId` 필드의 422다.
+- 전체 이력을 `traded_at → created_at → id` 순서로 처리하는 Decimal 이동평균 계산을 구현했다. 초과 매도는 보유 수량만 계산하며, 통계 기간은 계산 이후 매도 집계에 적용한다. 공개 함수 `get_positions`, `get_trade_stats`와 응답 모델을 제공한다.
+- 가격·금액은 KRW 0자리, USD 2자리로 마지막에 ROUND_HALF_UP하고 수량은 최대 6자리 문자열로 응답한다. 날짜만 입력한 거래는 09:00 KST, `timeKnown=false`로 저장한다.
+- `/journal`의 기록·보유·통계·노트 탭과 URL 쿼리, `/journal/[id]` 상세 화면, 매매·노트 추가·수정·삭제, 저장 후 노트 연결, 통화 자동 설정, 초과 매도 경고와 투자 고지를 구현했다. 월별 막대, 일별 손익 달력, 종목별 성과 표를 제공한다.
+- 비동기 거래 목록을 불러온 뒤에도 상세 화면에서 선택한 노트 연결 거래가 유지되도록 처리하고 회귀 테스트를 추가했다. `journal/import/`는 기존 11 담당 자리표시를 유지했다.
+
+### 스펙에 없는 세부 결정
+
+- PATCH는 전달된 필드만 기존 값과 합친 뒤 전체 입력을 다시 검증한다. 원본 DB decimal을 합치므로 응답용 반올림 값이 부분 수정에서 원본 정밀도를 덮어쓰지 않는다.
+- 탭 쿼리 값은 `records`, `positions`, `stats`, `notes`이며, 없거나 잘못된 값이면 기록 탭을 보여 준다. 기록은 좁은 화면에서 같은 필드의 카드로 표시한다.
+- 승·패가 각각 없으면 `avgWin`·`avgLoss`는 null이고, 계산 가능한 매도가 없으면 최고·최악 거래도 null이다. 매도 전부터 보유가 없는 초과 매도는 `realizedPnl=null`, `oversold=true`이며 매도 건수에는 포함한다. 청산된 종목의 평균단가는 0이다.
+- 매수만 있는 통화도 통계 요약에 실현손익 0·승률 null로 포함한다. 각 손익은 반올림 전 값으로 집계한 뒤 응답 시 반올림한다.
+- 의존성 추가나 공유 파일 직접 수정은 없다. 코디네이터 안내에 따라 공통 오류 도우미와 자리표시 테스트 수정이 포함된 develop을 병합했다.
+
+### 검증 결과 (2026-10-17)
+
+| 검사 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 05 준비·마이그레이션 성공 |
+| `cd backend && uv run ruff check .` | 통과 |
+| `cd backend && uv run ruff format --check .` | 통과 |
+| `cd backend && uv run pytest` | 139개 통과(매매일지 28개 포함), 기존 Starlette 사용 중단 경고 1개 |
+| 별도 빈 DB에서 `uv run alembic upgrade heads` → `uv run alembic downgrade base` → `uv run alembic upgrade heads` | 통과, 검증용 DB 삭제 완료 |
+| `cd frontend && npm run lint` | 통과 |
+| `cd frontend && npx tsc --noEmit` | 통과 |
+| `cd frontend && npm run test` | 211개 통과(매매일지 9개 포함), 외부 API는 MSW로 대체 |
+| `cd frontend && npm run build` | 통과 |
+| 5절 사례 실제 화면 입력 | 1·2차 매수 원가 700,100원·1,500,200원, 3차 거래 후 15주·평균 75,010원·원가 1,125,150원·실현 74,040원, 4차 초과 매도 −225,150원·청산 확인 |
+| 실제 화면 통계·노트 | 합계 −151,110원·승률 50%, 달력 수익 빨강·손실 파랑, 거래 연결 노트 저장·한국어 감정 표시 확인 |
+| 반응형 | 네 탭 360·768·1280px, 상세 360px에서 문서 가로 넘침 없음; 360px 매매·노트 다이얼로그 내부 폭 328px와 스크롤 폭 일치 |
+| 소유 경로·외부 호출·고지 | 변경 경로가 소유 범위 내임을 확인, 실제 외부 API·LLM 호출 없음, 투자 고지 확인 |
+| `scripts/stop.sh` | 기동한 프론트·백엔드 종료 완료 |
+
+### 남은 일
+
+- 이번 작업 범위의 남은 구현은 없다. 별도 검증 워커의 독립 검증과 코디네이터 병합이 필요하다.
+- 파일 업로드·증권사 체결 동기화·현재가와 평가손익은 계약대로 11에서 추가한다.

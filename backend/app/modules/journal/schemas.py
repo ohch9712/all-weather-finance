@@ -53,6 +53,22 @@ class TradeInput(CamelModel):
         return value.upper()
 
 
+class TradePatch(CamelModel):
+    traded_on: date | None = None
+    traded_time: str | None = None
+    market: Market | None = None
+    symbol_code: Symbol | None = None
+    symbol_name: str | None = Field(default=None, min_length=1, max_length=100)
+    side: Side | None = None
+    quantity: PositiveDecimal | None = None
+    price: PositiveDecimal | None = None
+    currency: Currency | None = None
+    fee: NonnegativeDecimal | None = None
+    tax: NonnegativeDecimal | None = None
+    broker: Literal["kiwoom", "toss", "other"] | None = None
+    account_label: str | None = Field(default=None, max_length=30)
+
+
 class TradeOut(CamelModel):
     traded_on: date
     traded_time: str | None
@@ -96,6 +112,16 @@ class NoteInput(CamelModel):
     @classmethod
     def uppercase(cls, value):
         return value.upper() if value else None
+
+
+class NotePatch(CamelModel):
+    trade_id: UUID | None = None
+    symbol_code: Symbol | None = None
+    noted_on: date | None = None
+    kind: Kind | None = None
+    content: str | None = Field(default=None, min_length=1, max_length=5000)
+    tags: list[str] | None = None
+    emotion: Emotion | None = None
 
 
 class NoteOut(NoteInput):
