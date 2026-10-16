@@ -412,3 +412,45 @@ type Card =
 
 - 15: 모듈 서비스 함수를 감싼 도구와 전용 카드(자산배분 도넛, 관리 방향, 종목 표, 세금 단계표, 방향 비교 등)를 추가한다.
 - 16: 홈에서 위젯을 그대로 쓴다.
+
+## 구현 결과
+
+### 구현한 것
+
+- 백엔드 `app/modules/chat/`: 모델·리포지토리·서비스·라우터(8절의 엔드포인트 6개), 공급자 인터페이스와 어댑터 2종(`providers/base.py`·`gemini.py`·`ollama_provider.py`), 에이전트 루프(`agent.py`, 5.4 순서 `refused` → 저장 → `max_tokens` → `end` → 도구 실행, 최대 8회 도구 왕복), SSE 본문(`sse.py`), 고정 시스템 프롬프트(`prompts.py`), 도구 레지스트리(`tools/registry.py`, 6절 시그니처 그대로)와 기본 도구 `get_today`·`get_my_profile`(`tools/basic.py`, `tools/__init__.py`에서 등록).
+- 마이그레이션 `chat_0001`(`down_revision="foundation_0001"`, `branch_labels=("chat",)`): 4절의 두 테이블, CHECK 제약(`provider`·`role`·`kind`·`stop_reason`), UNIQUE `(conversation_id, seq)`, 인덱스 `(user_id, last_message_at desc)`와 하루 상한용 `(user_id, created_at)`.
+- 공급자 선택은 `get_ai_status().personal`만 본다. Gemini는 결제 조건(`GEMINI_BILLING_ENABLED`)이 맞을 때만 켜지고, 꺼져 있으면 다른 공급자로 바꾸지 않고 `None`(503)이다.
+- 프론트 `features/chat/`: API·훅·SSE 클라이언트(`sse.ts`, 청크 경계를 넘는 파서), 전송 상태 훅(`use-chat-stream.ts`), 카드 레지스트리(`cards/registry.tsx`)와 기본 카드 3종, `/chat` 화면(데스크톱 왼쪽 목록, 모바일은 Sheet), 위젯(`components/ChatWidget.tsx`, 01b 스텁 교체), `index.ts`의 `openChatWidget(options?: { draft?: string })`(window `chat:open` 이벤트).
+- 테스트: 백엔드 `tests/chat/` 122개(10절 항목 전부. 가짜 공급자 `FakeChatProvider`, Gemini는 `Interaction.model_validate`, Ollama는 `ChatResponse` 조각을 돌려주는 가짜 클라이언트), 프론트 `tests/chat/` 30개(SSE 파서·화면·위젯·카드, MSW로 스트림 흉내).
+
+### 스펙에 없어 정한 것
+
+- 대화 메시지 상한: "200행을 넘으면"을 글자대로 행 수가 200을 넘을 때(`> 200`) `409 CONFLICT`로 했다. 200행까지는 보낼 수 있다.
+- 확인 순서: 404(남의·없는 대화) → 503(공급자 꺼짐) → 409 `CHAT_PROVIDER_CHANGED` → 409 `CONFLICT`(200행) → 429. 모두 JSON이고 SSE를 열기 전에 끝난다. 503 문장은 architecture 9.1.3 `DisabledLLM`과 같다.
+- 카드 저장: 의사 코드의 `save_cards_on_last_response`는 행을 고치게 되므로, 턴의 마지막 응답 행(`stop`이 `tool_use`가 아니거나 마지막 허용 라운드)을 저장할 때 그때까지 모은 카드를 함께 넣는다. 다른 응답 행의 `cards`는 `[]`다.
+- `message_end`는 의사 코드 `message_end(result)`대로 마지막 라운드의 `stopReason`·`model`·`usage`를 보낸다. DB `usage`는 응답 행(라운드)마다 남긴다.
+- 도구 오류 결과 `content`: 입력 검증 실패 `{"INVALID_INPUT": "<loc: msg; ...>"}`, 끊김 `{"INTERRUPTED": "사용자가 중단했습니다."}`, 실행 예외는 JSON 문자열 `"도구 실행 중 오류가 발생했습니다."`(`json.dumps`). 등록되지 않은 도구 이름은 `INVALID_INPUT`("등록되지 않은 도구입니다.")이다. 도구는 SAVEPOINT 안에서 실행해 DB 오류가 나도 대화 저장을 이어 간다.
+- Ollama 도구 결과 항목에는 오류 표시가 없어서, 상세의 `toolCalls.ok`는 응답 행 바로 뒤 `tool_results` 행의 결과를 순서대로 짝지은 뒤 위 오류 형식인지로 판별한다(Gemini는 `call_id`·`is_error`).
+- Ollama 스트리밍은 연결 실패를 `ConnectionError`가 아니라 `httpx.ConnectError`로 던져서(ollama 0.6.3 `_client.py`의 스트림 경로) 둘 다 연결 실패 문장으로 바꾼다. 그 밖의 예외는 "AI 응답을 받지 못했습니다…"다. 도구 호출 id의 라운드 번호는 요청마다 새로 만드는 어댑터 안에서 0부터 센다.
+- Gemini: SDK가 모르는 단계(`UnknownStep`)는 받은 원본(`raw`)을 그대로 저장한다. `RoundResult.model`은 응답의 `model`, 없으면 설정값이다.
+- SSE: 에이전트 루프(동기 SDK·동기 세션)는 전용 스레드에서 돌리고 이벤트 루프는 큐를 기다리며 15초마다(이벤트와 상관없이 고정 간격) `: ping`을 보낸다. 연결이 끊기면 스레드에 멈춤을 알리고, 스레드는 다음 이벤트 경계에서 루프 제너레이터를 닫아 진행 중인 라운드를 버린다. 요청 DB 세션이 닫히기 전에 스레드가 끝나기를 기다린다. 예기치 못한 예외는 롤백 후 `error`(`INTERNAL_ERROR`)로 보낸다.
+- 대화: 제목은 첫 질문(`seq` 0)이고 제목이 기본값 "새 대화"일 때만 앞 30자로 채운다(`{"title": ...}`로 만든 제목은 유지). 목록은 `coalesce(last_message_at, created_at) desc` 순이다. `POST /conversations`는 본문이 없으면 `Content-Type`을 요구하지 않고, 본문이 있으면 JSON만 받는다(제목 100자 초과 422). 시각 컬럼은 `now_utc()`로 넣는다(시간 고정 테스트용).
+- 카드: 백엔드도 `link` 카드의 `href`가 `/`로 시작하지 않거나 `//`이면 카드를 버린다. 프론트도 내부 경로만 그린다.
+- 기본 도구 설명에 "인자 없이 빈 객체({})로 부른다"를 넣었다. 수동 확인에서 작은 로컬 모델이 결과 필드 이름을 인자로 넣어 `INVALID_INPUT`이 났기 때문이다(검증·오류 처리는 스펙대로 동작했다).
+- 프론트: 새 대화는 첫 질문을 보낼 때 만든다(위젯 포함, 빈 대화를 남기지 않는다). `/chat?c=<id>`로 대화를 열고 위젯의 "전체 화면으로"가 이 주소를 쓴다. 예시 질문 버튼은 누르면 바로 보낸다. 남은 횟수가 0이거나 429를 받으면 상한 안내를 보이고 입력을 막는다. SSE 전 JSON 오류(409·429·503 등)는 질문을 되돌려 입력창에 다시 채운다. 받은 글자는 도구 실행 뒤 다음 라운드 앞에 빈 줄을 넣어 상세의 `DisplayMessage`(라운드 텍스트를 `"\n\n"`으로 합침)와 같게 보인다. 한글 조합 중 Enter는 보내지 않는다.
+- 위젯을 닫으면 Sheet 내용이 사라지므로 진행 중인 답변은 "멈추기"와 같이 끊긴다. 다시 열면 최근 대화를 다시 고른다.
+- `sse.ts`는 스펙 9.3대로 `fetch`를 쓰되, 01b 구조 테스트(`fetch(` 직접 호출은 `lib/api-client.ts`만)를 지키려고 `globalThis.fetch`로 부른다. `apiFetch`는 10초 타임아웃과 JSON 본문 처리 때문에 스트림에 쓸 수 없다.
+
+### 검사 결과
+
+- 백엔드: `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 854개 통과(챗봇 122개), `uv run alembic check` 변경 없음.
+- 마이그레이션: 빈 DB `finance_09_cycle`에서 `upgrade heads` → `downgrade base` → `upgrade heads` 성공 후 DB 삭제.
+- 프론트: `npm run lint`·`npx tsc --noEmit` 통과, `npm run test` 315개 통과(챗봇 30개), `npm run build` 성공.
+- 수동 확인(완료 기준 2): `OLLAMA_MODEL` 기본값 `gemma4:12b`는 이 기기에 없고 디스크 여유가 적어 받지 않았다. 대신 이미 받아 둔 도구 지원 모델 `qwen2.5:7b`로 환경변수만 바꿔(`LLM_PERSONAL_PROVIDER=ollama OLLAMA_MODEL=qwen2.5:7b OLLAMA_THINKING=false scripts/start.sh`, 8009·3009) 확인했다. "내 나이대 알려줘" → `get_my_profile` 호출(`tool_start`·`tool_end ok`·`key_value` 카드) → "당신은 30대입니다." 스트리밍, 이어지는 "오늘은 무슨 요일이야?" → `get_today` → 토요일(KST), 응답 대기 중 `: ping`, 응답 헤더(`no-cache`, `X-Accel-Buffering: no`), 2초 뒤 연결을 끊으면 질문 행만 남고 부분 응답은 저장되지 않음(서버 오류 로그 없음). 결제가 연결된 Gemini 키는 없어 가짜 SDK 클라이언트 테스트로 대신했다.
+- 화면(Orca 독립 프로필 브라우저): 360px `/chat`에서 질문 → 도구 칩·글자 스트리밍·카드·"멈추기" → 완료 후 제목·남은 횟수 갱신, `/ledger`의 위젯(전체 화면 Sheet, 최근 대화 잇기, "전체 화면으로" 링크), 모바일 대화 목록 Sheet, 1280px `/chat`(위젯 숨김)을 확인했다. 360px에서 `scrollWidth` 360, 넘치는 요소 0개. 백엔드를 기본 설정(personal 꺼짐)으로 다시 띄우면 기존 대화는 읽을 수 있고 입력창 자리에 공급자 설정 안내, 목록에 "이전 AI 설정" 배지가 보이며 콘솔 오류가 없다. 확인 후 `scripts/stop.sh`로 서버를 멈췄다.
+
+### 남은 일
+
+- 기본 모델 `gemma4:12b`(또는 결제 Gemini 키)로 같은 수동 확인을 한 번 더 한다.
+- 15: 모듈 데이터 도구와 전용 카드 타입을 `tools/__init__.py`·`cards/registry.tsx`에 더한다.
+- 대화 요약(compaction)·Gemini 글자 단위 스트리밍은 범위 밖이다.
