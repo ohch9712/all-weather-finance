@@ -47,6 +47,66 @@ describe("getSafeRedirectPath(같은 사이트 경로만 허용)", () => {
     expect(getSafeRedirectPath(next, ORIGIN)).toBe("/");
   });
 
+  // 정규화(점 구간 제거, 백슬래시 → 슬래시) 뒤 //로 시작하게 되는 값(2차 검증 발견 사항)
+  it.each([
+    ["/.//verify.invalid"],
+    ["/a/..//verify.invalid"],
+    ["/%2e//verify.invalid"],
+    ["/.\\/verify.invalid"],
+    ["/%2e%2e//evil.example.com"],
+    ["/.\\/evil.example.com"],
+    ["/a/../..//evil.example.com"],
+    ["/./%2e//evil.example.com"],
+    ["/%2F/evil.example.com"],
+    ["/%5Cevil.example.com"],
+    ["/.%2e//evil.example.com"],
+  ])("정규화하면 외부 주소가 되는 %j → /", (next) => {
+    expect(getSafeRedirectPath(next, ORIGIN)).toBe("/");
+  });
+
+  it("정규화 뒤 같은 사이트 경로로 남는 값은 그 경로로 보낸다", () => {
+    expect(getSafeRedirectPath("/a/.\\./\\evil.example.com", ORIGIN)).toBe("/a//evil.example.com");
+    expect(new URL("/a//evil.example.com", ORIGIN).origin).toBe(ORIGIN);
+  });
+
+  it.each([["/allocation?x=1#a"], ["/learn/per"], ["/stocks/005930"], ["/settings/profile"]])(
+    "정상 내부 경로 %s는 그대로 돌려준다",
+    (next) => {
+      expect(getSafeRedirectPath(next, ORIGIN)).toBe(next);
+    },
+  );
+
+  it("성질: 점 구간·인코딩·백슬래시 구간을 깊이 1~4로 조합해도 결과는 항상 같은 사이트 경로다", () => {
+    const segments = [".", "..", "%2e", "%2E", "%2e%2e", ".%2e", "", "a", "\\", "%5c", "%2f"];
+    const combos: string[][] = [[]];
+    const inputs: string[] = [];
+    for (let depth = 1; depth <= 4; depth += 1) {
+      const next: string[][] = [];
+      for (const prefix of combos.filter((combo) => combo.length === depth - 1)) {
+        for (const segment of segments) next.push([...prefix, segment]);
+      }
+      combos.push(...next);
+      for (const combo of next) {
+        const joined = combo.join("/");
+        inputs.push(`/${joined}/evil.example/x`, `${joined}/evil.example/x`);
+      }
+    }
+    // 11 + 11² + 11³ + 11⁴ = 16,104개 조합 × (앞에 / 있음·없음) = 32,208개
+    expect(inputs).toHaveLength(32_208);
+
+    const failures = inputs.flatMap((input) => {
+      const result = getSafeRedirectPath(input, ORIGIN);
+      const ok =
+        result.startsWith("/") &&
+        !result.startsWith("//") &&
+        !result.startsWith("/\\") &&
+        new URL(result, ORIGIN).origin === ORIGIN &&
+        getSafeRedirectPath(result, ORIGIN) === result;
+      return ok ? [] : [{ input, result }];
+    });
+    expect(failures).toEqual([]);
+  });
+
   it("null·undefined는 /", () => {
     expect(getSafeRedirectPath(null, ORIGIN)).toBe("/");
     expect(getSafeRedirectPath(undefined, ORIGIN)).toBe("/");

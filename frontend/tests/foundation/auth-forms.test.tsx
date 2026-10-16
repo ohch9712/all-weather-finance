@@ -144,6 +144,10 @@ describe("LoginForm", () => {
     ["/\r/evil.example.com"],
     ["/\t/evil.example.com"],
     ["javascript:alert(1)"],
+    ["/.//verify.invalid"],
+    ["/a/..//verify.invalid"],
+    ["/%2e//verify.invalid"],
+    ["/.\\/verify.invalid"],
   ])(
     "다른 사이트로 가는 next(%j)는 무시하고 /로 간다",
     async (next) => {
