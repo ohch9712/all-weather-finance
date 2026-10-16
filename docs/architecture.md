@@ -211,6 +211,7 @@ features/<module>/
 | `FORBIDDEN` | 403 | 관리자 전용 경로 |
 | `NOT_FOUND` | 404 | 없는 경로·자원, 남의 자원 |
 | `METHOD_NOT_ALLOWED` | 405 | |
+| `HTTP_ERROR` | 원래 상태코드(예: 400) | 다른 코드에 해당하지 않는 프레임워크 HTTP 오류. CORS 사전 요청(preflight) 거부는 400 "허용되지 않은 교차 출처 요청입니다."(gamja-market `core/errors.py`·`core/cors.py`와 같다) |
 | `EMAIL_ALREADY_EXISTS` | 409 | 가입 |
 | `CONFLICT` | 409 | 중복 생성(예: 이미 있는 관심종목) |
 | `PROFILE_INCOMPLETE` | 409 | 출생연도가 없어 나이대를 알 수 없음 |
@@ -281,7 +282,7 @@ features/<module>/
 | --- | --- | --- |
 | 자산군 `AssetClass` | `stock`, `bond`, `gold`, `cash`, `other` | 주식, 채권, 금, 현금성 자산, 기타 |
 | 투자성향 `RiskProfile` | `stable`, `stable_seeking`, `neutral`, `active`, `aggressive` | 안정형, 안정추구형, 위험중립형, 적극투자형, 공격투자형 |
-| 나이대 `AgeBand` | `20s`, `30s`, `40s`, `50s`, `60s` | 20대(20세 미만 포함), 30대, 40대, 50대, 60대 이상 |
+| 나이대 `AgeBand` | `20s`, `30s`, `40s`, `50s`, `60s` | 20대, 30대, 40대, 50대, 60대 이상(`20s`는 20세 미만도 포함하지만 표시명에는 적지 않는다) |
 | 나이 계산 | 기준연도 − 출생연도 | 연 나이 |
 | 자산군 색 토큰 | `--asset-stock`, `--asset-bond`, `--asset-gold`, `--asset-cash`, `--asset-other` | 01b가 `globals.css`에 정의, 모든 차트·카드가 같은 색을 쓴다 |
 
@@ -543,6 +544,7 @@ return output.model_validate_json(response.message.content or "")
 
 - `FakeStructuredLLM`(`fake.py`): `register(task, handler)`, `set_enabled(task, bool)`, `calls`. 테스트는 `fake_llm` 픽스처로 `get_structured_llm` 의존성을 바꾼다.
 - 어댑터 테스트는 SDK 클라이언트 자리에 가짜 객체를 넣어 호출 인자와 응답 처리만 확인한다. Gemini 응답은 `google.genai.interactions.Interaction.model_validate({...})`, Ollama 응답은 `ollama.ChatResponse(...)`로 만든다. 실제 API나 로컬 Ollama 서버를 부르는 테스트는 만들지 않는다.
+- Gemini 가짜 응답은 `steps`로 만든다(예: `{"id": "test", "status": "completed", "steps": [{"type": "model_output", "content": [{"type": "text", "text": "<JSON 문자열>"}]}]}`). SDK 2.31의 `Interaction` 검증기(`_populate_output_helpers`, `_gaos/types/interactions/interaction.py`)가 `output_text`를 마지막 `model_output` 텍스트로 다시 계산해 넣은 값을 덮어쓰기 때문이다.
 
 ### 9.2 증권사 어댑터 (08, `app/integrations/brokers/`)
 
@@ -604,10 +606,11 @@ class BrokerClient(Protocol):
 - 데이터가 필요한 화면은 Client Component이고 `features/<module>/hooks.ts`의 TanStack Query 훅을 쓴다. 인증 쿠키가 API origin에 있으므로 서버 컴포넌트에서 API를 부르지 않는다.
 - 라우트 그룹: `(auth)`는 셸 없는 로그인·가입, `(app)`은 앱 셸 + `RequireAuth` + `OnboardingGate`(출생연도 없으면 `/onboarding`) + 챗봇 위젯.
 - 공용 컴포넌트(01b): shadcn/ui 기본 컴포넌트(`components/ui`), 앱 셸(`components/layout`), 차트 래퍼 `DonutChart`·`BarChart`·`LineChart`(`components/charts`), `PageHeader`·`EmptyState`·`ErrorState`·`LoadingState`·`MoneyText`·`SampleDataBadge`·`Disclaimer`·`ConfirmDialog`·`AiProviderBadge`(`components/common`). AI 공급자 상태는 `lib/ai-status.ts`의 `useAiStatus()`로 읽는다.
-- 형식 함수(`lib/format.ts`): `formatKRW`(1,234,000원), `formatKRWCompact`(123.4만원, 1.2억원), `formatSignedKRW`, `formatPercent`, `formatDate`, `formatDateTime`(KST).
+- 형식 함수(`lib/format.ts`): `formatKRW`(1,234,000원), `formatKRWCompact`(5,670만원, 1.2억원. 규칙은 스펙 01 11.2·9절, 백엔드 `app.core.format.format_krw_compact`와 같다), `formatSignedKRW`, `formatPercent`, `formatDate`, `formatDateTime`(KST).
 - 폼은 react-hook-form + zod, 알림은 shadcn `sonner`.
 - 모바일 360px에서 가로 스크롤이 없어야 한다.
 - Next.js 16은 학습 데이터와 다른 부분이 있다. 코드를 쓰기 전에 `frontend/node_modules/next/dist/docs/`의 해당 가이드를 읽는다.
+- `next.config.ts`(01b)는 `cacheComponents`와 `partialPrefetching`을 끈다(create-next-app 16.4 기본값과 다름). 데이터를 모두 클라이언트에서 불러오므로 이점이 거의 없고, 켜 두면 이전 경로가 React Activity로 숨은 채 상태를 유지해 로그아웃·다른 사용자 로그인 뒤에도 폼 상태가 남을 수 있다. 모듈 작업은 숨은 경로 상태를 가정하지 않는다.
 
 ### 12.1 내비게이션
 
