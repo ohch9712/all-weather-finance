@@ -211,6 +211,7 @@ features/<module>/
 | `FORBIDDEN` | 403 | 관리자 전용 경로 |
 | `NOT_FOUND` | 404 | 없는 경로·자원, 남의 자원 |
 | `METHOD_NOT_ALLOWED` | 405 | |
+| `HTTP_ERROR` | 원래 상태코드(예: 400) | 다른 코드에 해당하지 않는 프레임워크 HTTP 오류. CORS 사전 요청(preflight) 거부는 400 "허용되지 않은 교차 출처 요청입니다."(gamja-market `core/errors.py`·`core/cors.py`와 같다) |
 | `EMAIL_ALREADY_EXISTS` | 409 | 가입 |
 | `CONFLICT` | 409 | 중복 생성(예: 이미 있는 관심종목) |
 | `PROFILE_INCOMPLETE` | 409 | 출생연도가 없어 나이대를 알 수 없음 |
