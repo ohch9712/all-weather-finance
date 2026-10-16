@@ -38,10 +38,10 @@ export function DirectionCard({ direction }: { direction: Direction }) {
   return (
     <li className="flex flex-col gap-2 rounded-lg border p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h3 className="font-semibold break-keep">{direction.title}</h3>
+        <h3 className="min-w-0 font-semibold break-keep wrap-anywhere">{direction.title}</h3>
         {direction.amount !== null && <MoneyText value={direction.amount} compact className="text-sm font-medium" />}
       </div>
-      <p className="text-sm text-muted-foreground break-keep">{direction.body}</p>
+      <p className="text-sm text-muted-foreground break-keep wrap-anywhere">{direction.body}</p>
       <div>
         <Button asChild variant="link" className="h-auto px-0">
           <Link href={direction.href}>
@@ -178,8 +178,8 @@ function RecommendationBody({ recommendation }: { recommendation: Recommendation
           <ul className="space-y-3">
             {recommendation.reasons.slice(0, 3).map((reason) => (
               <li key={reason.code}>
-                <p className="font-medium break-keep">{reason.title}</p>
-                <p className="text-sm text-muted-foreground break-keep">{firstSentence(reason.body)}</p>
+                <p className="font-medium break-keep wrap-anywhere">{reason.title}</p>
+                <p className="text-sm text-muted-foreground break-keep wrap-anywhere">{firstSentence(reason.body)}</p>
               </li>
             ))}
           </ul>

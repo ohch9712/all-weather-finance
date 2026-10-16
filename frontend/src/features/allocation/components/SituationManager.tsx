@@ -123,13 +123,13 @@ function GoalSection({ goals }: { goals: ReturnType<typeof useGoals> }) {
 
 function GoalCard({ goal, onEdit, onDelete }: { goal: Goal; onEdit: () => void; onDelete: () => Promise<void> }) {
   return (
-    <li className="flex items-start justify-between gap-2 rounded-lg border p-3">
+    <li className="flex min-w-0 items-start justify-between gap-2 rounded-lg border p-3">
       <div className="min-w-0 space-y-1">
         <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           {GOAL_TYPE_LABEL[goal.goalType]}
           <Badge variant={goal.horizon === "long_term" ? "outline" : "secondary"}>{HORIZON_LABEL[goal.horizon]}</Badge>
         </p>
-        <p className="font-medium break-keep">{goal.title}</p>
+        <p className="font-medium break-keep wrap-anywhere">{goal.title}</p>
         <p className="flex flex-wrap items-center gap-x-2 text-sm">
           <MoneyText value={goal.targetAmount} compact />
           <span className="flex items-center gap-1 text-muted-foreground">
@@ -144,7 +144,7 @@ function GoalCard({ goal, onEdit, onDelete }: { goal: Goal; onEdit: () => void; 
         </Button>
         <ConfirmDialog
           title="목표를 삭제할까요?"
-          description={`'${goal.title}'을(를) 삭제하면 권장 배분이 다시 계산돼요.`}
+          description={<span className="wrap-anywhere">{`'${goal.title}'을(를) 삭제하면 권장 배분이 다시 계산돼요.`}</span>}
           confirmLabel="삭제"
           destructive
           onConfirm={onDelete}

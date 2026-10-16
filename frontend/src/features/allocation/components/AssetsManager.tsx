@@ -149,12 +149,12 @@ function HoldingList({ holdings, onEdit }: { holdings: Holding[]; onEdit: (holdi
                   <li key={holding.id} className="flex items-center justify-between gap-2 py-2.5 first:pt-0 last:pb-0">
                     <div className="min-w-0 space-y-1">
                       <p className="flex flex-wrap items-center gap-1.5 font-medium break-keep">
-                        {holding.name}
+                        <span className="min-w-0 wrap-anywhere">{holding.name}</span>
                         {!holding.includeInAllocation && <Badge variant="outline">점수 계산 제외</Badge>}
                         {holding.source !== "manual" && <Badge variant="secondary">증권사 연동</Badge>}
                       </p>
                       <MoneyText value={holding.amount} className="text-sm" />
-                      {holding.memo && <p className="text-xs text-muted-foreground break-all">{holding.memo}</p>}
+                      {holding.memo && <p className="text-xs text-muted-foreground wrap-anywhere">{holding.memo}</p>}
                     </div>
                     <div className="flex shrink-0 items-center">
                       <Button
@@ -168,7 +168,7 @@ function HoldingList({ holdings, onEdit }: { holdings: Holding[]; onEdit: (holdi
                       </Button>
                       <ConfirmDialog
                         title="자산을 삭제할까요?"
-                        description={`'${holding.name}'을(를) 삭제하면 점수와 추천이 다시 계산돼요.`}
+                        description={<span className="wrap-anywhere">{`'${holding.name}'을(를) 삭제하면 점수와 추천이 다시 계산돼요.`}</span>}
                         confirmLabel="삭제"
                         destructive
                         onConfirm={async () => {

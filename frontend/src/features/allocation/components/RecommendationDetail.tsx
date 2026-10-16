@@ -88,7 +88,7 @@ function InfoRow({ label, href, children }: { label: string; href: string; child
     <div className="flex items-start justify-between gap-3 border-b py-3 first:pt-0 last:border-0 last:pb-0">
       <div className="min-w-0 space-y-1">
         <dt className="text-xs text-muted-foreground">{label}</dt>
-        <dd className="text-sm break-keep">{children}</dd>
+        <dd className="text-sm break-keep wrap-anywhere">{children}</dd>
       </div>
       <EditLink href={href} label={label} />
     </div>
@@ -186,7 +186,7 @@ function DetailBody({
             ) : (
               <ul className="space-y-0.5 text-sm text-muted-foreground">
                 {shortTermGoals.map((goal) => (
-                  <li key={goal.goalId} className="break-keep">
+                  <li key={goal.goalId} className="break-keep wrap-anywhere">
                     &apos;{goal.title}&apos; {formatYearMonth(goal.targetDate)}{" "}
                     {formatKRWCompact(goal.allocatedAmount ?? goal.targetAmount)} → {ASSET_CLASS_LABEL[goal.assetClass]}
                   </li>
@@ -283,8 +283,8 @@ function DetailBody({
         <ul className="space-y-4">
           {recommendation.reasons.map((reason) => (
             <li key={reason.code}>
-              <p className="font-medium break-keep">{reason.title}</p>
-              <p className="text-sm text-muted-foreground break-keep">{reason.body}</p>
+              <p className="font-medium break-keep wrap-anywhere">{reason.title}</p>
+              <p className="text-sm text-muted-foreground break-keep wrap-anywhere">{reason.body}</p>
             </li>
           ))}
         </ul>
@@ -323,4 +323,3 @@ function DetailBody({
     </>
   );
 }
-
