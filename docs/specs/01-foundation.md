@@ -586,6 +586,15 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 - 스펙과 다른 점: 없음. 명세되지 않은 내부 동작은 단순하게 정했고, 테스트 픽스처는 기존 개발 데이터를 트랜잭션 안에서만 지운 뒤 롤백한다. 테스트의 공개 고정 Fernet 키는 테스트 전용이다.
 - 남은 일: 코디네이터의 별도 검증·PR 병합 및 01b와의 통합 검증. 설치된 Starlette 1.8.0은 TestClient의 httpx 사용에 deprecation 경고 1건을 표시하지만 테스트는 통과하며, 계약 밖 패키지 `httpx2`는 추가하지 않았다. 실제 외부 AI 연결은 이번 테스트 범위 밖이다.
 
+#### 웨이브 1 통합 검증 지적 수정: 접근 로그 마스킹
+
+- `SecretMaskingFilter`가 `uvicorn.access`의 메시지 틀과 인자 튜플 5개를 유지하고 각 인자 안의 비밀값만 가리도록 수정했다. 상태 코드의 정수 타입도 유지하며 쿼리 `token`은 `***`로 바뀐다.
+- 일반 로그는 인자를 먼저 가린 뒤 서식을 적용한 결과를 검사한다. 결과에 추가로 가릴 비밀값이 있을 때만 최종 문자열을 메시지로 저장하고 인자를 비운다. 따라서 `password=%s`·`token=%s`의 서식 지정자가 먼저 없어져 서식 오류가 나는 일을 피하며, 추가 마스킹이 필요 없는 메시지는 기존 메시지 틀과 인자의 타입·길이를 유지한다.
+- `tests/foundation/test_logging.py`에 실제 Uvicorn `AccessFormatter`, 일반·쿼리 접근 로그, 위치·딕셔너리 인자, 중첩 딕셔너리, 숫자·퍼센트 서식, 일반 메시지, 필터 중복 적용을 확인하는 회귀 테스트 13개를 추가했다. 기존 테스트는 수정하지 않았다.
+- 검증: `scripts/worktree-setup.sh`(슬롯 01, `finance_01`) 성공, `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` **110개 통과**(기존 Starlette 경고 1건). 실제 외부 API를 호출하지 않았다.
+- 실제 서버: `uv run uvicorn app.main:app --port 8001` 실행 후 `/api/health`와 테스트용 `token` 쿼리를 붙인 요청이 모두 `200 {"status":"ok"}`를 반환했다. 요청마다 접근 로그가 한 줄씩 남고 쿼리 값은 `***`로 가려졌으며 stderr에 `Logging error`·스택 추적이 없었다. 확인 후 검증 서버를 종료했다.
+- 스펙과 다른 점·의존성 추가: 없음. 남은 일: 코디네이터의 별도 검증과 PR 병합.
+
 ### 01b
 
 #### 구현한 것
