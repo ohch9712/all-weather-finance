@@ -35,8 +35,9 @@ def mask(value):
 
 class SecretMaskingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        record.msg = mask(record.msg)
         record.args = mask(record.args)
+        record.msg = mask(record.getMessage())
+        record.args = ()
         return True
 
 

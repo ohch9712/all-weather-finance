@@ -1,3 +1,4 @@
+from contextlib import closing
 from io import BytesIO
 
 import pypdfium2 as pdfium
@@ -10,8 +11,8 @@ def pdf_to_png_pages(data: bytes) -> list[bytes]:
     try:
         with pdfium.PdfDocument(data) as document:
             for index in range(len(document)):
-                with document[index] as page:
-                    with page.render(scale=2) as bitmap:
+                with closing(document[index]) as page:
+                    with closing(page.render(scale=2)) as bitmap:
                         with bitmap.to_pil() as image:
                             buffer = BytesIO()
                             image.save(buffer, format="PNG")

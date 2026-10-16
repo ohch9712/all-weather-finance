@@ -19,13 +19,19 @@ class GeminiStructuredLLM:
         self.client = client if client is not None else get_gemini_client()
 
     def enabled_for(self, task: str) -> bool:
-        get_task(task)
-        return bool(self.settings.gemini_api_key)
+        config = get_task(task)
+        return bool(self.settings.gemini_api_key) and (
+            config.data_class != "personal" or self.settings.gemini_billing_enabled
+        )
 
     def generate[T: BaseModel](
         self, *, task: str, system: str, content: str | list[Part], output: type[T]
     ) -> T:
         config = get_task(task)
+        if not self.enabled_for(task):
+            from app.integrations.llm.structured import DisabledLLM
+
+            return DisabledLLM().generate(task=task, system=system, content=content, output=output)
         parts = [TextPart(content)] if isinstance(content, str) else content
         files = [
             {
