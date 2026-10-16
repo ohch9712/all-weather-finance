@@ -115,7 +115,7 @@
 
 - `AdminPost`: 4.1 컬럼 camelCase 전부.
 - 입력 검증: `slug` 비면 `p-<8자리 hex>` 자동, 형식 위반·중복은 `422`/`409 CONFLICT`. `term`은 용어일 때 필수·용어끼리 중복 409. `videoUrl`은 영상일 때 필수(5절).
-- AI 초안 요청: `{"kind": "glossary", "topic": "PBR", "level": "beginner"}` → `llm.generate(task="learn.ai_draft", system=…, content=…, output=DraftOutput, effort="medium", max_tokens=8000)` → `Draft {"title", "summary", "term", "bodyMd", "tags"}`. 저장하지 않는다. 화면이 폼에 채우고 `aiAssisted=true`로 저장한다. 시스템 프롬프트: 입문자용 쉬운 한국어, 비유와 예시 하나, 투자 권유 금지, 시점에 따라 바뀌는 수치(세법 한도·금리)는 넣지 않거나 기준 시점을 밝힘, Markdown 소제목 2~4개.
+- AI 초안 요청: `{"kind": "glossary", "topic": "PBR", "level": "beginner"}` → `llm.generate(task="learn.ai_draft", system=…, content=…, output=DraftOutput)`(general 등급, 기본 Gemini. effort·max_tokens는 작업 등록부) → `Draft {"title", "summary", "term", "bodyMd", "tags"}`. 저장하지 않는다. 화면이 폼에 채우고 `aiAssisted=true`로 저장한다. 시스템 프롬프트: 입문자용 쉬운 한국어, 비유와 예시 하나, 투자 권유 금지, 시점에 따라 바뀌는 수치(세법 한도·금리)는 넣지 않거나 기준 시점을 밝힘, Markdown 소제목 2~4개.
 
 ## 7. 시드 콘텐츠
 
@@ -140,7 +140,7 @@ def get_progress(db, user_id) -> LearnProgress      # 6.1 `/progress` 응답과 
 - `/learn/[slug]`: 글은 Markdown 본문, 영상은 16:9 임베드 + 설명, 용어는 큰 용어명·한 줄 정의·본문. 공통으로 태그, 북마크, 관련 게시물, "AI 도움으로 작성" 배지(`aiAssisted`). 진입 시 읽음 표시.
 - `/learn/glossary`: 초성 색인 바(ㄱ~ㅎ, A-Z, #), 용어 목록(용어·한 줄 정의·읽음), 검색.
 - `/admin/learn`: 관리자만(일반 사용자는 "권한이 없습니다" 화면). 게시물 표(종류, 제목, 공개 여부 스위치, 수정일), 새로 만들기, 수정, 삭제 확인.
-- `/admin/learn/new`, `/admin/learn/[id]/edit`: 폼(종류에 따라 용어·영상 URL 칸 표시), Markdown 작성·미리보기 탭, "AI 초안 만들기"(주제·난이도 → 폼 채움, LLM 꺼짐이면 안내).
+- `/admin/learn/new`, `/admin/learn/[id]/edit`: 폼(종류에 따라 용어·영상 URL 칸 표시), Markdown 작성·미리보기 탭, "AI 초안 만들기"(주제·난이도 → 폼 채움, 옆에 `AiProviderBadge scope="general" compact`, LLM 꺼짐이면 안내). 주제 칸 도움말: "주제는 AI 공급자로 전송돼요. 개인정보를 적지 마세요."
 
 ## 10. 테스트
 
@@ -151,7 +151,7 @@ def get_progress(db, user_id) -> LearnProgress      # 6.1 `/progress` 응답과 
 - 북마크·읽음 멱등성, 진도 집계
 - 초성 계산(쌍자음, 영문, 숫자), 오늘의 용어(날짜에 따라 결정적)
 - YouTube URL 형식 4종과 거부 사례
-- 관리자: 403/200, 슬러그 자동·중복 409, 용어 중복 409, AI 초안(`FakeStructuredLLM`, task 이름·effort 확인), LLM 꺼짐 503
+- 관리자: 403/200, 슬러그 자동·중복 409, 용어 중복 409, AI 초안(`FakeStructuredLLM`, task 이름 확인), LLM 꺼짐 503
 - `search_posts` 결과
 
 ### 프론트 (`frontend/tests/learn/`, MSW)

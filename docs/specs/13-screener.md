@@ -102,7 +102,7 @@ class ScreenFilter(CamelModel):
 ## 5. 자연어 해석 `POST /api/screener/parse`
 
 - 요청 `{"query": "코스피 대형주 중에 PER 10 이하"}`(공백 제거 후 1~300자)
-- 호출: `llm.generate(task="screener.parse", system=SYSTEM, content=query, output=ParsedScreenOutput, effort="medium", max_tokens=4000)`
+- 호출: `llm.generate(task="screener.parse", system=SYSTEM, content=query, output=ParsedScreenOutput)`(general 등급, 기본 Gemini. effort·max_tokens는 작업 등록부)
   - `SYSTEM` = 역할(한국 주식 조건검색 해석기) + 4.1 필드 표 + 4.2 기준표 + 규칙(필드·연산자는 목록에서만, 확실하지 않은 조건은 `unsupported`, 업종명은 사용자가 말한 그대로).
   - `ParsedScreenOutput` = `{"filter": ScreenFilter, "explanation": str, "unsupported": [{"text": str, "reason": str}]}`
 - 응답 `200`
@@ -162,7 +162,7 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 
 ## 9. 화면 명세 (`/stocks/screener`)
 
-- 상단 AI 입력창: "원하는 조건을 말해 보세요", 예시 버튼 4개("코스피 대형주 중 PER 10 이하", "52주 신고가 근처 코스닥 종목", "ROE 15% 이상 저PBR", "오늘 5% 넘게 오른 종목"). LLM 꺼짐이면 입력창 대신 "직접 조건 추가"만.
+- 상단 AI 입력창: "원하는 조건을 말해 보세요", 예시 버튼 4개("코스피 대형주 중 PER 10 이하", "52주 신고가 근처 코스닥 종목", "ROE 15% 이상 저PBR", "오늘 5% 넘게 오른 종목"). LLM 꺼짐이면 입력창 대신 "직접 조건 추가"만. 입력창 옆에 `AiProviderBadge scope="general" compact`, 아래에 "조건 문장은 AI 공급자로 전송돼요. 개인정보는 적지 마세요." 안내.
 - 해석 결과: 설명 한 문단, 조건 칩(눌러서 필드·연산자·값 수정, 삭제, "조건 추가"), `unsupported` 경고 상자.
 - "검색" → 결과 표(정렬 가능한 열: 종목명, 시장, 현재가, 등락률, 시가총액, PER, PBR, ROE), 행의 "관심종목 담기"(12 API, 409면 "이미 있어요"), 종목명은 `/stocks/[code]` 링크, 기준일·`SampleDataBadge`, 지표 없는 종목 제외 수.
 - 저장한 검색 목록(불러오기·삭제), "이 조건 저장".
@@ -188,7 +188,7 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 ## 11. 완료 기준
 
 - [ ] 공통 완료 기준(AGENTS.md) 전 항목
-- [ ] `seed-mock` 후 예시 4개가 Mock 데이터에서 결과를 낸다(실제 LLM 키가 있으면 수동 확인, 없으면 칩 직접 입력으로 확인)
+- [ ] `seed-mock` 후 예시 4개가 Mock 데이터에서 결과를 낸다(general 공급자(Gemini 키)가 켜져 있으면 수동 확인, 없으면 칩 직접 입력으로 확인)
 
 ## 12. 검증 체크리스트
 

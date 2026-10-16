@@ -1,7 +1,7 @@
 # 18. 배포: 호스팅, 고정 IP, 시크릿, 배치 일정, 백업
 
 > 웨이브 5 · 브랜치 `feature/18-deploy` · 구현 codex · 검증 codex `gpt-6.1-sol` / `xhigh`
-> 선행: 1~4웨이브 전체 병합, **사용자의 호스팅 결정**(3절). 결정 전에는 디스패치하지 않는다.
+> 선행: 1~4웨이브 전체 병합, **사용자의 호스팅 결정과 LLM 배치 결정**(3절). 결정 전에는 디스패치하지 않는다.
 > **착수 직전 갱신**: 코디네이터는 결정된 호스팅에 맞춰 4절을 확정하고 나머지 선택지 설명을 지운다.
 
 ## 1. 목표
@@ -24,6 +24,7 @@
 | 로그인 보호 | 로그인 시도 제한(IP·계정 기준, 예: 10분 10회) — 리버스 프록시 또는 앱 미들웨어 |
 | 보안 헤더 | HSTS, `X-Content-Type-Options`, `Referrer-Policy`, CSP(YouTube nocookie 임베드 허용) |
 | 관리자 | 배포 후 `make-admin`으로 첫 관리자 지정, 학습 시드(`learn.seed`) 실행 |
+| LLM | general 등급은 Gemini API(나가는 HTTPS만 필요). personal 등급(챗봇, 카드 명세서·매매 파일 처리)은 둘 중 하나: ① 백엔드에서 닿는 Ollama 서버(같은 서버나 사설망, `OLLAMA_HOST`, 모델을 미리 받아 둠. `gemma4:12b` 기준 메모리 16GB 이상, GPU나 Apple Silicon이 아니면 응답이 매우 느리다) ② 결제가 연결된 Gemini 키(`LLM_PERSONAL_PROVIDER=gemini`, `GEMINI_BILLING_ENABLED=true`). Ollama 포트(11434)는 외부에 열지 않는다 |
 
 ## 3. 호스팅 선택지 (사용자 결정 필요)
 
@@ -34,11 +35,12 @@
 | C. 컨테이너 PaaS + 관리형 DB | Fly.io·Railway 등 + 고정 egress IP 옵션 + 관리형 Postgres | 플랫폼 옵션 | 관리 부담 중간 | 플랫폼별 설정 차이 |
 
 - 권장은 A다. 증권사 허용 IP와 장 마감 후 배치를 가장 단순하게 맞출 수 있다.
+- LLM 배치도 함께 정한다. A에서 Ollama를 같은 서버에 두려면 메모리가 큰 서버(가능하면 GPU)가 필요하고 비용이 오른다. 일반 VPS를 쓰면 personal 등급은 결제 Gemini 키로 두는 쪽이 단순하다. B·C는 Ollama를 둘 곳이 없으므로 결제 Gemini 키가 필요하다.
 
 ## 4. 범위와 산출물 (선택지 A 기준, 결정에 따라 조정)
 
 - `backend/Dockerfile`(uv, slim, 비루트 사용자), `frontend/Dockerfile`(Next.js standalone 출력)
-- `deploy/compose.prod.yaml`: `caddy`(HTTPS 자동, `/api/*` → backend, 나머지 → frontend), `frontend`, `backend`, `postgres`(볼륨), `migrate`(시작 시 `alembic upgrade heads` 1회), `cron`(2절 배치)
+- `deploy/compose.prod.yaml`: `caddy`(HTTPS 자동, `/api/*` → backend, 나머지 → frontend), `frontend`, `backend`, `postgres`(볼륨), `migrate`(시작 시 `alembic upgrade heads` 1회), `cron`(2절 배치), `ollama`(선택, compose 프로필 `local-llm`, 내부 네트워크만, 모델 볼륨)
 - `deploy/Caddyfile`, `deploy/.env.production.example`(값 없는 키 목록), `deploy/backup.sh`(pg_dump + 7일 보관), `deploy/README.md`(서버 준비, 시크릿 넣기, 첫 배포, 업데이트, 롤백, 복구, 증권사 IP 등록 안내)
 - 앱 수정이 필요한 부분(로그인 시도 제한, 보안 헤더)은 소유 모듈을 확인해 코디네이터에게 `ask`로 범위를 받는다.
 - GitHub Actions(선택): `develop`·`main` PR에서 백엔드·프론트 테스트 실행. 배포 자동화는 사용자 결정 후.
@@ -64,3 +66,4 @@
 4. 배치 일정(KST)과 종료 코드 처리.
 5. 보안 헤더와 CSP가 YouTube nocookie 임베드를 막지 않는다.
 6. 백업·복구 절차를 실제로 한 번 수행한 기록.
+7. personal 등급 LLM이 무료 Gemini로 가지 않는다(`/api/ai/status` 확인). Ollama를 쓰면 11434 포트가 외부에서 닿지 않는다.

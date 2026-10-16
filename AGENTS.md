@@ -1,17 +1,18 @@
 # 프로젝트 설명
 
-개인 자산배분 금융 플랫폼이다. 나이대(20~60대)와 투자성향에 맞는 권장 자산배분을 정해 주고, 사용자가 입력한 보유 자산이 권장 배분과 얼마나 맞는지 점수로 보여 준다. 젊을수록 공격적으로, 나이가 들수록 방어적으로 배분한다. 자산군은 주식, 채권, 금, 현금성 자산, 기타다.
+개인 자산배분 금융 플랫폼이다. 나이대(20~60대)·투자성향·상황·목표에 맞는 권장 자산배분과 관리 방향을 이유와 함께 보여 주고, 사용자가 입력한 보유 자산이 권장 배분과 얼마나 맞는지 점수로 보여 준다. 젊을수록 공격적으로, 나이가 들수록 방어적으로 배분한다. 자산군은 주식, 채권, 금, 현금성 자산, 기타다.
 
 주요 기능
 
-- 가입 직후 증권사 방식의 투자성향 설문으로 성향(5등급)을 파악하고, 나이대와 함께 권장 배분을 정한다.
+- 핵심 흐름: 가입 시 정보 입력(출생연도 → 증권사 방식 투자성향 설문 → 목표·상황 → 자산 간단 입력) → 추천 결과 → 상세 설명.
+- 목표 반영 권장 배분(비상금 → 3년 안 목표 자금 → 나이대·성향 표 비중의 장기 투자), 자산 현황·상황·목표에 맞는 관리 방향(먼저 할 일)과 추천 이유.
 - 보유 자산 입력과 배분 일치 점수·등급·리밸런싱 안내(흥미 유도용 점수 이력 포함).
 - 가계부: 수입·지출 수동 입력, 카드 이용내역 파일 업로드 자동 기록.
 - 주식 매매일지: 파일 업로드와 수동 입력, 증권사 체결 동기화.
 - 관심종목, AI 챗봇에게 자연어로 말하는 종목 조건검색(키움·토스 API 데이터 기반).
-- 자녀 상속·증여 플래너: 증여재산공제(10년 합산)·혼인출산 공제를 반영한 세금 계산과 분산 증여 일정.
+- 자녀 상속·증여 플래너: 증여재산공제(10년 합산)·혼인출산 공제를 반영한 세금 계산과 분산 증여 일정, 가족 구성·자산 정보로 상속·증여 방향(증여 없이 상속, 분산 증여, 일시 증여, 손자녀 증여)을 비교하는 참고 화면.
 - 주린이를 위한 주식 용어·글·영상 학습 게시판.
-- 위 데이터를 도구로 쓰는 AI 챗봇 에이전트.
+- 위 데이터를 도구로 쓰는 AI 챗봇 에이전트(개인 데이터를 다루므로 기본은 로컬 LLM).
 - 가능한 범위의 자동 수집(CODEF 데모, 마이데이터는 허가 사업자 전용이라 스텁).
 
 이 서비스는 정보 제공과 학습 도구다. 주문·매매 실행 기능은 만들지 않는다.
@@ -35,7 +36,7 @@
 | Frontend | Next.js 16(App Router) + TypeScript(strict) + Tailwind CSS 4 + shadcn/ui, TanStack Query, react-hook-form + zod, Recharts, react-markdown |
 | Backend | FastAPI + Python 3.12+(uv), SQLAlchemy 2.0(동기), Alembic, Pydantic 2, pydantic-settings |
 | Database | Postgres 17(로컬은 루트 `compose.yaml`, 호스트 포트 5433) |
-| AI | Anthropic Python SDK, 모델 `claude-opus-5-5`(환경변수로 교체) |
+| AI | 데이터 등급별 공급자. 개인 데이터가 없는 작업은 Gemini API(`google-genai`, `gemini-3.8-flash`), 개인 금융 데이터(챗봇·업로드 파일 처리)는 로컬 Ollama(`ollama`, `gemma4:12b`). 환경변수로 교체한다(architecture 9.1) |
 | 외부 데이터 | 키움 REST API, 토스증권 Open API, CODEF(모두 조회 전용 어댑터, 기본은 Mock) |
 | 테스트 | pytest(+ respx), Vitest + Testing Library + MSW |
 | 배포 | 미정(작업 18에서 결정). 증권사 API의 허용 IP 때문에 고정 아웃바운드 IP가 필요하다 |
@@ -119,10 +120,11 @@ docs/                    # architecture.md, roadmap.md, specs/
 
 # AI·외부 API 규칙
 
-- LLM 구조화 호출은 `app.integrations.llm`의 `StructuredLLM`(`get_structured_llm` 의존성)만 쓴다. 호출 형태는 `docs/architecture.md` 9.1절에 고정돼 있다. SDK 사용법을 추측하지 않는다.
-- 모델은 설정값(`ANTHROPIC_MODEL`, 기본 `claude-opus-5-5`)을 쓴다. 코드에 모델 이름을 새로 하드코딩하지 않는다. `thinking` 파라미터와 강제 `tool_choice`는 쓰지 않는다. effort는 항상 명시한다.
-- 거절(`stop_reason == "refusal"`)과 잘림(`max_tokens`)을 먼저 확인한 뒤 내용을 읽는다.
-- 테스트는 실제 Anthropic·증권사·CODEF API를 부르지 않는다. `FakeStructuredLLM`, `MockBroker`, `respx`를 쓴다.
+- LLM 호출은 `app.integrations.llm` 계층만 거친다. 구조화 출력은 `StructuredLLM`(`get_structured_llm` 의존성), 챗봇은 09의 공급자 어댑터를 쓴다. 호출 형태는 `docs/architecture.md` 9.1·11절에 고정돼 있다. SDK 사용법을 추측하지 않는다. 없는 내용은 설치된 패키지 소스를 확인하고 `ask`로 묻는다.
+- **개인 금융 데이터(거래·자산·가족 정보, 업로드 파일 내용, 챗봇 대화)는 personal 등급 작업으로만 보낸다.** personal은 기본 로컬 Ollama이고, 결제가 연결된 Gemini 키(`GEMINI_BILLING_ENABLED=true`)일 때만 Gemini로 갈 수 있다. 다른 공급자로 자동 전환하지 않는다. Gemini 호출은 항상 `store=False`다.
+- 모델 이름은 설정값(`GEMINI_MODEL`, `OLLAMA_MODEL`)만 쓴다. 코드에 모델 이름을 새로 하드코딩하지 않는다. effort·max_tokens·데이터 등급은 작업 등록부(architecture 9.1.2)가 정한다. 강제 도구 호출은 쓰지 않는다.
+- 거절(Gemini 안전 차단)과 잘림(Gemini `status: "incomplete"`, Ollama `done_reason: "length"`)을 먼저 확인한 뒤 내용을 읽는다.
+- 테스트는 실제 Gemini·Ollama·증권사·CODEF를 부르지 않는다. `FakeStructuredLLM`, 가짜 공급자·가짜 SDK 클라이언트, `MockBroker`, `respx`를 쓴다.
 - 증권사 연동은 조회 전용이다. 주문·정정·취소 API를 구현하지 않는다.
 - 외부 API의 api-id·경로·필드는 공식 문서에서 확인한 것만 쓰고 코드 주석에 출처를 남긴다. 확인하지 못한 기능은 `BROKER_NOT_SUPPORTED`로 둔다.
 - 카드사·증권사 내보내기 파일 형식을 지어내지 않는다. 실제 샘플이 없으면 범용 헤더 탐지와 LLM 매핑만 만든다.
@@ -133,6 +135,7 @@ docs/                    # architecture.md, roadmap.md, specs/
 - 업로드 파일은 디스크에 저장하지 않는다.
 - 다른 사용자 자원에 접근하면 404다. 테스트로 확인한다.
 - 자산배분·종목 화면에는 `investment`, 세금 화면에는 `tax`, Mock 데이터에는 `sample`, AI 응답에는 `ai` 고지를 붙인다.
+- AI를 쓰는 화면은 `AiProviderBadge`(01b)로 데이터가 처리되는 곳(로컬 AI·Google Gemini)을 보여 준다. 관리 방향·추천 이유는 자산군 단위로만 말하고 특정 상품·종목을 권하지 않는다.
 
 # 브랜치·커밋·PR
 
