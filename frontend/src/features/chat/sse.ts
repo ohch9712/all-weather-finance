@@ -98,7 +98,7 @@ interface StreamOptions {
 export async function streamChatMessage(conversationId: string, content: string, { signal, onEvent }: StreamOptions) {
   let response: Response;
   try {
-    // 스트리밍 응답이라 lib/api-client의 apiFetch(타임아웃·JSON 본문)를 쓸 수 없다(스펙 09 9.3).
+    // 스트리밍 응답이라 lib/api-client의 공용 호출 함수(10초 타임아웃·JSON 본문)를 쓸 수 없다(스펙 09 9.3).
     response = await globalThis.fetch(
       `${API_BASE_URL.replace(/\/+$/, "")}/api/chat/conversations/${conversationId}/messages`,
       {
@@ -125,17 +125,26 @@ export async function streamChatMessage(conversationId: string, content: string,
       if (event) onEvent(event);
     }
   };
+  // 멈추면 본문 읽기도 바로 끝낸다(본문 스트림이 abort로 끝나지 않는 환경 대비).
+  const cancel = () => void reader.cancel().catch(() => undefined);
+  signal?.addEventListener("abort", cancel, { once: true });
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       emit(parser.push(decoder.decode(value, { stream: true })));
     }
-    emit(parser.push(decoder.decode()));
+    if (!signal?.aborted) emit(parser.push(decoder.decode()));
   } catch (error) {
-    if (signal?.aborted || isAbortError(error)) throw error;
+    if (signal?.aborted || isAbortError(error)) throw abortError(signal);
     throw new ApiError(0, "NETWORK_ERROR", NETWORK_ERROR_MESSAGE);
   } finally {
+    signal?.removeEventListener("abort", cancel);
     reader.releaseLock();
   }
+  if (signal?.aborted) throw abortError(signal);
+}
+
+function abortError(signal?: AbortSignal): unknown {
+  return isAbortError(signal?.reason) ? signal?.reason : new DOMException("요청을 멈췄습니다.", "AbortError");
 }
