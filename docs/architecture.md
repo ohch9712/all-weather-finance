@@ -204,6 +204,8 @@ features/<module>/
 { "error": { "code": "VALIDATION_ERROR", "message": "입력값을 확인해 주세요.", "details": [{ "field": "birthYear", "message": "..." }] } }
 ```
 
+서비스에서 필드별 422를 내야 하면(스펙의 "422(field …)") `app.core.errors.field_error(field, message)`를 던진다. `field`는 camelCase 키나 위치(예: `items.0.amount`)다. 다른 코드에 `details`가 필요하면 `AppError(status, code, message, details=[ErrorDetail(...)])`를 쓴다. `details`를 주지 않으면 빈 배열이다.
+
 | code | HTTP | 쓰는 곳 |
 | --- | --- | --- |
 | `UNAUTHENTICATED` | 401 | 쿠키 없음·세션 없음·만료 |
