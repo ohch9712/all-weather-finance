@@ -13,11 +13,28 @@ logger = logging.getLogger(__name__)
 
 
 class AppError(Exception):
-    def __init__(self, status_code: int, code: str, message: str) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        details: list[ErrorDetail] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
+        self.details = details or []
+
+
+def field_error(field: str, message: str) -> AppError:
+    """필드 하나의 422 VALIDATION_ERROR. field는 camelCase 키나 위치(예: items.0.amount)다."""
+    return AppError(
+        422,
+        "VALIDATION_ERROR",
+        "입력값을 확인해 주세요.",
+        [ErrorDetail(field=field, message=message)],
+    )
 
 
 def error_response(
@@ -36,7 +53,7 @@ def error_response(
 
 
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
-    return error_response(exc.status_code, exc.code, exc.message)
+    return error_response(exc.status_code, exc.code, exc.message, exc.details)
 
 
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:

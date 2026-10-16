@@ -3,13 +3,17 @@ import logging
 
 import pytest
 from cryptography.fernet import InvalidToken
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from freezegun import freeze_time
 from pydantic import ValidationError
 
 from app.core.config import Settings, get_settings
 from app.core.crypto import decrypt_str, encrypt_str, mask_tail
+from app.core.errors import AppError, field_error, register_error_handlers
 from app.core.format import format_krw, format_krw_compact
 from app.core.logging import SecretMaskingFilter
+from app.core.schemas import ErrorDetail
 from app.core.time import now_utc, today_kst
 
 
@@ -122,3 +126,36 @@ def test_settings_validation_does_not_print_secrets():
     with pytest.raises(ValidationError) as exc:
         Settings(app_encryption_key="invalid", gemini_api_key="fake-sensitive-value")
     assert "fake-sensitive-value" not in str(exc.value)
+
+
+def test_app_error_details():
+    app = FastAPI()
+    register_error_handlers(app)
+
+    @app.get("/field")
+    def raise_field():
+        raise field_error("items.0.amount", "0보다 큰 금액을 입력해 주세요.")
+
+    @app.get("/details")
+    def raise_details():
+        raise AppError(
+            409, "CONFLICT", "이미 있습니다.", [ErrorDetail(field="code", message="중복")]
+        )
+
+    @app.get("/plain")
+    def raise_plain():
+        raise AppError(409, "CONFLICT", "이미 있습니다.")
+
+    client = TestClient(app)
+    assert client.get("/field").status_code == 422
+    assert client.get("/field").json() == {
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "입력값을 확인해 주세요.",
+            "details": [{"field": "items.0.amount", "message": "0보다 큰 금액을 입력해 주세요."}],
+        }
+    }
+    assert client.get("/details").json()["error"]["details"] == [
+        {"field": "code", "message": "중복"}
+    ]
+    assert client.get("/plain").json()["error"]["details"] == []
