@@ -56,7 +56,8 @@ register_tool(
         name="get_today",
         description=(
             "오늘 날짜(한국 시간)를 알려 준다. 날짜·요일·기간 계산이 필요할 때 쓴다. "
-            "today(YYYY-MM-DD), weekday(요일), timezone을 돌려준다."
+            "인자 없이 빈 객체({})로 부른다. "
+            "결과로 today(YYYY-MM-DD), weekday(요일), timezone을 돌려준다."
         ),
         input_model=NoInput,
         label="오늘 날짜 확인 중",
@@ -68,8 +69,9 @@ register_tool(
         name="get_my_profile",
         description=(
             "사용자의 출생연도, 나이, 나이대, 닉네임을 확인한다. 나이나 나이대에 맞는 설명이 "
-            "필요할 때 쓴다. birthYear, age, ageBand(20s~60s), ageBandLabel, nickname을 돌려준다. "
-            "입력하지 않은 값은 null이다."
+            "필요할 때 쓴다. 인자 없이 빈 객체({})로 부른다. "
+            "결과로 birthYear, age, ageBand(20s~60s), ageBandLabel, nickname을 돌려준다. "
+            "사용자가 입력하지 않은 값은 null이다."
         ),
         input_model=NoInput,
         label="프로필 확인 중",
