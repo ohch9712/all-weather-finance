@@ -595,3 +595,51 @@ def get_asset_breakdown(db, user_id) -> AssetBreakdown
 - 15: `get_allocation_report`·`get_recommendation`을 챗봇 도구로 감싼다("왜 이렇게 추천했어?").
 - 16: 홈 대시보드에 점수 카드, 도넛, 첫 번째 관리 방향을 보여 준다. 체크리스트에 "목표·상황 입력하기"가 들어간다.
 - 06: 상속세 추정과 방향 비교의 자산 사전 채움에 `get_asset_breakdown`을 쓴다.
+
+## 구현 결과
+
+### 구현한 것
+
+- 백엔드 `modules/allocation`
+  - `rules.py`: 설문 6문항(`SURVEY_VERSION = 1`), 25칸 `TARGET_TABLE`, 성향 한 줄 설명, 보정값·위험자산 계산, 등급 경계, 목표 종류·입력 범위, 자산군 역할 문구.
+  - `recommendation.py`: 5.3~5.10 순수 함수(층 쌓기, 배분 점수, 관리 방향, 추천 이유, 답변별 점수, 7.4 `explanation`). DB·시간을 읽지 않고 오늘 날짜를 인자로 받는다.
+  - `service.py`: 7절 API 서비스와 8절 공개 함수(`get_latest_risk_profile`, `get_target_allocation`, `get_recommendation`, `get_allocation_report`, `get_asset_breakdown`)와 데이터클래스(`RiskProfileInfo`, `TargetAllocation`, `AssetBreakdown`). 상태를 바꾸는 모든 서비스(진단·보유 자산·일괄 생성·상황·목표)는 커밋 전에 리포트를 다시 계산해 `ready`면 오늘(KST) 스냅샷을 upsert한다(일괄 생성은 한 번).
+  - `repository.py`, `models.py`, `router.py`(7절 16개 엔드포인트), 마이그레이션 `allocation_0001`(5개 테이블, `branch_labels=("allocation",)`).
+- 프론트 `features/allocation`(api·types·hooks·constants·validation·dates·components)과 화면 6개: `/allocation`(리포트), `/allocation/survey`, `/allocation/situation`, `/allocation/assets`, `/allocation/recommendation`, `/allocation/recommendation/detail`. 온보딩(`?onboarding=1`) 진행 표시·건너뛰기·다음 이동은 9절 흐름 그대로다.
+- 테스트: 백엔드 `tests/allocation` 429개(5.1·5.2·5.4·5.8·5.9·5.10 사례, 경계값, 스냅샷·`scoreDelta`(freezegun), 리포트 상태 4종, 일괄 생성 원자성, API 계약·422·409·404 격리), 프론트 `tests/allocation` 35개(MSW, 설문·온보딩·목표·상황·자산·추천·상세·리포트). 프론트 고정 응답(`tests/allocation/responses.ts`)은 백엔드 `build_recommendation`이 만든 5.8 사례 2와 자산 없음 사례를 그대로 기록한 것이다.
+
+### 스펙에 없어 정한 것
+
+| 항목 | 결정 |
+| --- | --- |
+| 진단 `answers`의 모르는 키 | 422(`field`는 그 키, "선택지를 다시 골라 주세요.")로 거절한다. 저장은 6개 키만 한다 |
+| 일괄 생성 개수 위반(0개·21개 이상) | 422 `field: "items"`, "자산은 한 번에 1~20개까지 입력할 수 있어요." |
+| 필드 문구 | 보유 자산 이름 "이름은 1~50자로 입력해 주세요.", 메모 "메모는 200자 이내로 입력해 주세요.", 목표 이름 "이름은 30자 이내로 입력해 주세요.", 목표일 "목표일은 내일부터 50년 안으로 골라 주세요.". 그 밖의 범위·형식 오류는 공통 핸들러 문구를 쓴다. 일괄 생성의 항목 오류도 같은 문구 규칙에 `items.N.field` 위치를 붙인다 |
+| 필드별 422 | develop의 `AppError(details=…)`/`field_error`(architecture 4.1)로 낸다 |
+| 목표 PATCH | 보낸 필드만 바꾼다. `title`을 보내지 않으면 기존 이름을 유지하고, `""`·`null`이면 (바뀐) 종류 이름이 된다. 보유 자산 PATCH는 `memo`만 `null`로 지울 수 있고 나머지 필드의 `null`은 422다 |
+| 점수 upsert | Core `INSERT … ON CONFLICT (user_id, scored_on)`. 같은 세션에서 다시 읽을 때 오래된 값을 보지 않도록 점수 조회는 `populate_existing`을 쓴다 |
+| 설문 다시 하기 | 최신 진단의 답을 미리 골라 둔다 |
+| 리포트 `needs_profile` 화면 | 9.2에 없어 추천 결과와 같은 "출생연도 입력하기" 안내를 보여 준다(OnboardingGate 때문에 실제로는 거의 보이지 않는다) |
+| `scoreDelta` 0, 차이 금액 0 | "지난번과 같아요", "맞아요" |
+| 나이대·성향별 표 다이얼로그 | 360px에서 가로 스크롤 없이 보이도록 나이대 버튼으로 한 줄(성향 5 × 자산군 5)씩 보여 준다. 내 나이대가 기본이고 내 칸(행)을 "내 배분"으로 강조한다 |
+| 차이 막대·층 막대 | Recharts 대신 `div` 막대로 그린다. 차이 막대는 `--asset-*`, 층 막대는 `--chart-1~3` 색이다 |
+| 상세 설명의 장기 투자 나눈 결과 | 프론트가 반올림 규칙을 다시 구현하지 않도록 `targetAmounts`에서 비상금·가까운 목표 층 금액을 빼서 보여 준다 |
+| 상세 설명의 출생연도 | 01 `GET /api/profile`을 이 모듈 `api.ts`에서 부른다(다른 모듈 내부를 import하지 않는다) |
+| 상황 화면 저장 | 저장하면 토스트로 "비상금 목표: 600만원(3개월)"을 알리고 이동한다. 저장된 상황이 있으면 폼 아래에도 같은 줄을 보여 준다. 온보딩에서 저장된 상황 없이 생활비를 비우고 "다음"을 누르면 저장하지 않고 넘어간다(목표만 입력하는 경우) |
+| 목표일 범위(프론트) | KST 오늘 기준 `min`(내일)·`max`(오늘 + 50년, 2월 29일은 28일)를 날짜 입력에 건다 |
+| 상태 변경 요청 형식 | DELETE도 다른 상태 변경 요청처럼 `Content-Type: application/json`을 요구한다(architecture 4절, `require_json`) |
+
+### 스펙과 다른 점
+
+- 없음.
+
+### 확인한 것
+
+- 백엔드 `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 540 passed.
+- 빈 DB(`finance_02_cycle`)에서 `upgrade heads` → `downgrade base` → `upgrade heads` 성공 후 DB 삭제. 모델과 마이그레이션의 autogenerate 비교 차이 0건.
+- 프론트 `npm run lint`·`npx tsc --noEmit` 통과, `npm run test` 237 passed, `npm run build` 성공.
+- `scripts/start.sh`로 실제 서버(8002/3002)를 띄워 360px 뷰포트에서 가입 → 온보딩(출생연도) → 설문 → 목표·상황(목표 2개, 생활비) → 간단 입력 → 추천 결과 → 상세 설명 → 리포트를 진행했다. 결과가 5.8 사례 2와 같다(권장 1,690만/2,650만/130만/730만/0원, 58점 D, 방향 문장 일치). 두 번째 사용자로 목표·상황과 자산 입력을 건너뛰어 `needs_holdings` 추천과 리포트를 확인했다. 모든 화면과 다이얼로그(표, 자산 추가)에서 `scrollWidth = 360`, 리밸런싱 표 칸 넘침 없음, 서버 로그 오류 없음. 끝난 뒤 `scripts/stop.sh`로 멈췄다.
+
+### 남은 일
+
+- 없음. 14가 `allocation_0002`와 `upsert_synced_holdings`를, 15·16·06이 8절 함수를 이어서 쓴다(13절).
