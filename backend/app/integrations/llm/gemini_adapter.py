@@ -43,6 +43,7 @@ class GeminiStructuredLLM:
             if not isinstance(part, TextPart)
         ]
         text = "\n".join(part.text for part in parts if isinstance(part, TextPart))
+        schema = portable_json_schema(output)
         # 호출 계약 및 출처: docs/architecture.md 9.1.4, google-genai 2.31 Interactions.
         try:
             interaction = self.client.interactions.create(
@@ -53,7 +54,7 @@ class GeminiStructuredLLM:
                 response_format={
                     "type": "text",
                     "mime_type": "application/json",
-                    "schema": portable_json_schema(output),
+                    "schema": schema,
                 },
                 generation_config={
                     "thinking_level": config.effort,

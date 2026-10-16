@@ -16,7 +16,7 @@ SECRET_KEYS = frozenset(
 )
 KEY_PATTERN = "|".join(sorted(SECRET_KEYS, key=len, reverse=True))
 SECRET_PATTERN = re.compile(
-    rf"(?i)(\b(?:{KEY_PATTERN})\b[\"']?\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;&}}]+(?:\s+[^\s,;&}}]+)?)"
+    rf"(?i)(\b(?:{KEY_PATTERN})\b[\"']?\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\n,;&}}]+)"
 )
 
 

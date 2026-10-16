@@ -2,9 +2,9 @@
 
 import base64
 import os
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -14,7 +14,7 @@ def update(path: Path, values: dict[str, str]) -> None:
         pattern = rf"(?m)^(?:export\s+)?{re.escape(key)}=.*$"
         replacement = f"{key}={value}"
         if re.search(pattern, content):
-            content = re.sub(pattern, lambda _: replacement, content)
+            content = re.sub(pattern, lambda _, text=replacement: text, content)
         else:
             content = content.rstrip("\n") + "\n" + replacement + "\n"
     path.write_text(content)
@@ -31,17 +31,25 @@ def main() -> None:
             env.write_text((backend / ".env.example").read_text())
         content = env.read_text()
         match = re.search(r"(?m)^(?:export\s+)?DATABASE_URL=(.*)$", content)
-        url = urlsplit(match.group(1).strip().strip("\"'") if match else
-                       "postgresql+psycopg://finance:finance_local_password@localhost:5433/finance_00")
-        values = {"DATABASE_URL": urlunsplit(url._replace(path="/" + database)),
-                  "FRONTEND_ORIGIN": "http://localhost:" + frontend_port}
+        url = urlsplit(
+            match.group(1).strip().strip("\"'")
+            if match
+            else "postgresql+psycopg://finance:finance_local_password@localhost:5433/finance_00"
+        )
+        values = {
+            "DATABASE_URL": urlunsplit(url._replace(path="/" + database)),
+            "FRONTEND_ORIGIN": "http://localhost:" + frontend_port,
+        }
         match = re.search(r"(?m)^(?:export\s+)?APP_ENCRYPTION_KEY=(.*)$", content)
         if not match or not match.group(1).split("#", 1)[0].strip().strip("\"'"):
             values["APP_ENCRYPTION_KEY"] = base64.urlsafe_b64encode(os.urandom(32)).decode()
         update(env, values)
     frontend = root / "frontend"
     if frontend.is_dir():
-        update(frontend / ".env.local", {"NEXT_PUBLIC_API_BASE_URL": "http://localhost:" + backend_port})
+        update(
+            frontend / ".env.local",
+            {"NEXT_PUBLIC_API_BASE_URL": "http://localhost:" + backend_port},
+        )
 
 
 if __name__ == "__main__":
