@@ -32,8 +32,9 @@ export function getErrorMessage(error: unknown): string {
   return isApiError(error) && error.message ? error.message : UNKNOWN_ERROR_MESSAGE;
 }
 
+// realm마다 DOMException이 달라(브라우저·Node·jsdom) instanceof 대신 이름으로 판별한다.
 function isAbortError(error: unknown) {
-  return error instanceof DOMException && error.name === "AbortError";
+  return typeof error === "object" && error !== null && (error as { name?: unknown }).name === "AbortError";
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -95,7 +96,7 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
     });
   } catch (error) {
     if (timedOut) throw new ApiError(0, "TIMEOUT", TIMEOUT_ERROR_MESSAGE);
-    if (isAbortError(error)) throw error;
+    if (callerSignal?.aborted || isAbortError(error)) throw error;
     throw new ApiError(0, "NETWORK_ERROR", NETWORK_ERROR_MESSAGE);
   } finally {
     clearTimeout(timer);
