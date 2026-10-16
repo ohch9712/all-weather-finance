@@ -163,13 +163,16 @@ orca orchestration worker-start --task <NN 검증 task id> --worktree branch:fea
   --agent codex --model gpt-6.1-sol --effort xhigh --json
 
 # 수정(검증 실패 시). 유지해 둔 구현 터미널이 있으면 --terminal <handle>로 재사용한다
-orca orchestration task-create --task-title "[NN] 검증 지적 수정" --spec "<6.3 블록>" --deps '["<NN 검증 task id>"]' --json
+orca orchestration task-create --task-title "[NN] 검증 지적 수정" --spec "<6.3 블록>" --json   # 실패한 검증 작업에 --deps를 걸지 않는다
 orca orchestration worker-start --task <수정 task id> --worktree branch:feature/NN-<slug> --agent <구현 에이전트> --json
 
 # 재검증
 orca orchestration worker-start --task <NN 검증 task id> --retry-of <실패한 검증 dispatch id> --worktree branch:feature/NN-<slug> \
   --agent codex --model gpt-6.1-sol --effort xhigh --json
 ```
+
+- 수정 작업에는 `--deps`를 걸지 않는다. 실패로 끝난 작업에 의존하면 수정 작업이 시작되지 않는다. 같은 검증 작업은 연속 3번 실패하면 Orca가 닫으므로, 재검증 전에 코디네이터가 수정 내용을 직접 확인한다(웨이브 1에서는 로그인 `next` 우회를 입력 수만 건으로 확인했다).
+- 구현 워커의 터미널은 검증이 끝날 때까지 `worker-retain`으로 남겨 수정에 `--terminal`로 다시 쓴다. 에이전트 상태가 오래돼 `stale_status`면 새 워커를 띄운다.
 
 ### 4.6 병합
 
@@ -199,6 +202,12 @@ gh pr merge <PR 번호> --merge
 ```
 
 - 웨이브가 끝나면 병합된 작업 워크트리를 정리한다(`orca worktree rm --help`로 선택자를 확인). 열린 워커는 `worker-list --run <run_id> --terminal-state reclaimable --json`이 빈 목록이 될 때까지 `worker-release`.
+
+### 4.9 운영 메모 (웨이브 1에서 겪은 일)
+
+- **codex 업데이트 안내**: codex가 새 버전 안내를 띄우면 `worker-start`가 `agent_readiness` 단계에서 `Agent startup blocked: agent-update-prompt`로 실패한다. 실패한 시도는 영수증대로 `worker-release`하고, `~/.codex/version.json`의 `dismissed_version`을 `latest_version`과 같게 적거나(그 버전 건너뛰기) codex를 올린 뒤 `--retry-of`로 다시 띄운다. 디스패치 전에 `npm view @openai/codex version`으로 확인한다.
+- **슬롯 포트 충돌**: 이 기기에서는 다른 프로젝트가 8000을 쓰고 있다. `scripts/start.sh`는 점유 프로세스를 죽이지 않고 멈춘다(정상). 슬롯 00 통합 검증은 백엔드 8090(`FRONTEND_ORIGIN=http://localhost:3090`)·프론트 3090(`NEXT_PUBLIC_API_BASE_URL=http://localhost:8090`)으로 직접 띄워 진행하고, 디스패치 전에 `lsof -nP -iTCP:<port> -sTCP:LISTEN`으로 확인한다.
+- **수정 브랜치**: 통합 검증에서 나온 결함은 그 모듈의 기존 워크트리에서 `git switch -c feature/NN-<slug>-fix-<번호> origin/develop`으로 브랜치를 만들고 `orca worktree show --worktree path:<경로>`로 Orca를 갱신한 뒤 디스패치한다(의존성·DB 슬롯을 다시 쓸 수 있다).
 
 ## 5. 웨이브별 통합 확인 항목 (6.4 블록이 참조)
 
