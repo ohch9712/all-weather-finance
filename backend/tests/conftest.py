@@ -1,9 +1,10 @@
-from collections.abc import Iterator
+import base64
 import os
+from collections.abc import Iterator
 
 # 테스트 전용 공개 고정 키이며 실제 자격증명이 아니다.
 os.environ["APP_ENV"] = "test"
-os.environ["APP_ENCRYPTION_KEY"] = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+os.environ["APP_ENCRYPTION_KEY"] = base64.urlsafe_b64encode(b"0" * 32).decode()
 os.environ["LLM_GENERAL_PROVIDER"] = "disabled"
 os.environ["LLM_PERSONAL_PROVIDER"] = "disabled"
 os.environ["GEMINI_API_KEY"] = ""
@@ -28,6 +29,7 @@ from app.modules.auth.service import make_admin  # noqa: E402
 def forbid_external_http(monkeypatch):
     def blocked(*args, **kwargs):
         raise AssertionError("테스트에서 실제 외부 HTTP 호출은 금지됩니다.")
+
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", blocked)
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", blocked)
     monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", blocked)
@@ -45,7 +47,9 @@ def db(test_engine) -> Iterator[Session]:
     with test_engine.connect() as connection:
         transaction = connection.begin()
         connection.execute(delete(User))
-        with Session(bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False) as session:
+        with Session(
+            bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False
+        ) as session:
             try:
                 yield session
             finally:
@@ -56,8 +60,10 @@ def db(test_engine) -> Iterator[Session]:
 @pytest.fixture
 def app(db):
     application = create_app()
+
     def override_db():
         yield db
+
     application.dependency_overrides[get_db] = override_db
     yield application
     application.dependency_overrides.clear()
@@ -71,7 +77,10 @@ def client(app):
 
 def authenticated_client(app, email):
     instance = TestClient(app, raise_server_exceptions=False)
-    response = instance.post("/api/auth/signup", json={"email": email, "password": "test-password", "passwordConfirm": "test-password"})
+    response = instance.post(
+        "/api/auth/signup",
+        json={"email": email, "password": "test-password", "passwordConfirm": "test-password"},
+    )
     assert response.status_code == 201, response.text
     assert instance.put("/api/profile", json={"birthYear": 1994}).status_code == 200
     return instance
