@@ -87,9 +87,12 @@ flowchart LR
 
 - 원격: GitHub 비공개 저장소 `ohch9712/finance-project`(`origin`).
 - `main`: 설계 문서 커밋. `develop`: `main`에서 분기, 기본 체크아웃(코디네이터 작업 위치).
-- 1웨이브 워크트리 2개를 Orca로 만들어 두었다(`feature/01-foundation-backend`, `feature/01-foundation-frontend`, 기준 `develop`).
+- 1웨이브 워크트리 2개를 Orca로 만들어 두었다(기준 `develop`, 브랜치 이름을 규칙대로 바꾸고 원격에 올림).
+  - `feature/01-foundation-backend` → `/Users/ochunghwan/orca/workspaces/금융 프로젝트/feature-01-foundation-backend`
+  - `feature/01-foundation-frontend` → `/Users/ochunghwan/orca/workspaces/금융 프로젝트/feature-01-foundation-frontend`
+- 원격 주소는 HTTPS이고, 저장소 로컬 설정에 gh 자격 증명 도우미(`credential.https://github.com.helper = !gh auth git-credential`)를 넣었다. 이 기기의 SSH 키는 암호가 걸려 있어 에이전트 셸에서 푸시할 수 없었기 때문이다. 워커는 `gh auth status`가 로그인 상태이면 그냥 `git push`하면 된다. SSH로 되돌리려면 `git remote set-url origin git@github.com:ohch9712/finance-project.git`.
 - 2웨이브 이후 브랜치는 디스패치할 때 그 시점의 `develop`에서 만든다.
-- Orca 저장소 id: `5c07c49e-10bd-4c28-b5f6-bdf63867ba69`. 기본 기준 브랜치는 `develop`.
+- Orca 저장소 id: `5c07c49e-6263-4f45-bf2b-d995226a1433`. 기본 기준 브랜치는 `develop`.
 
 ## 4. 웨이브 진행 절차 (코디네이터)
 
@@ -114,18 +117,27 @@ orca orchestration task-create --task-title "[NN] <제목> 검증" --spec "<6.2 
 
 ### 4.3 구현 디스패치
 
+Orca는 `--name feature/NN-<slug>`로 워크트리를 만들면 브랜치를 `<git 사용자>/feature-NN-<slug>`(예: `ohch9712/feature-02-allocation`)로 만든다. 그래서 2웨이브부터는 **워크트리를 먼저 만들고 브랜치 이름을 규칙대로 바꾼 뒤** 디스패치한다(`worker-start --worktree new-top-level`은 쓰지 않는다. 워커의 setup이 이름 변경보다 먼저 돌 수 있다).
+
+```bash
+# 1) 워크트리 생성(기준 develop, setup은 워커가 직접 실행)
+orca worktree create --repo id:5c07c49e-6263-4f45-bf2b-d995226a1433 --name feature/NN-<slug> --base-branch develop --no-parent --setup skip --json
+# 2) 브랜치 이름 맞추기, Orca 정보 갱신, 원격 등록
+W="/Users/ochunghwan/orca/workspaces/금융 프로젝트/feature-NN-<slug>"
+git -C "$W" branch -m feature/NN-<slug>
+orca worktree show --worktree "path:$W" --json > /dev/null
+git -C "$W" push -u origin feature/NN-<slug>
+```
+
 ```text
-# 1웨이브(워크트리가 이미 있다)
+# 3) 디스패치(1웨이브 워크트리는 이미 1~2단계를 마쳤다)
 orca orchestration worker-start --task <01a 구현 task id> --worktree branch:feature/01-foundation-backend --agent codex --json
 orca orchestration worker-start --task <01b 구현 task id> --worktree branch:feature/01-foundation-frontend --agent claude --json
-
-# 2웨이브부터(새 워크트리를 develop에서 만든다)
-orca orchestration worker-start --task <NN 구현 task id> --worktree new-top-level --repo id:5c07c49e-10bd-4c28-b5f6-bdf63867ba69 \
-  --name feature/NN-<slug> --base-branch develop --setup run --agent <codex|claude> --json
+orca orchestration worker-start --task <NN 구현 task id> --worktree branch:feature/NN-<slug> --agent <codex|claude> --json
 ```
 
 - 독립 작업은 기다리지 말고 한 번에 모두 띄운 뒤 대기한다.
-- 만든 브랜치 이름이 `feature/NN-<slug>`인지 `git worktree list`로 확인한다. 다르면 워커에게 `git branch -m`으로 맞추라고 알린다.
+- 기존 워크트리로 디스패치하면 Orca가 setup을 다시 돌리지 않는다. 워커가 첫 단계로 `scripts/worktree-setup.sh`를 실행한다(6.1 블록에 포함).
 
 ### 4.4 대기와 처리
 
@@ -151,13 +163,16 @@ orca orchestration worker-start --task <NN 검증 task id> --worktree branch:fea
   --agent codex --model gpt-6.1-sol --effort xhigh --json
 
 # 수정(검증 실패 시). 유지해 둔 구현 터미널이 있으면 --terminal <handle>로 재사용한다
-orca orchestration task-create --task-title "[NN] 검증 지적 수정" --spec "<6.3 블록>" --deps '["<NN 검증 task id>"]' --json
+orca orchestration task-create --task-title "[NN] 검증 지적 수정" --spec "<6.3 블록>" --json   # 실패한 검증 작업에 --deps를 걸지 않는다
 orca orchestration worker-start --task <수정 task id> --worktree branch:feature/NN-<slug> --agent <구현 에이전트> --json
 
 # 재검증
 orca orchestration worker-start --task <NN 검증 task id> --retry-of <실패한 검증 dispatch id> --worktree branch:feature/NN-<slug> \
   --agent codex --model gpt-6.1-sol --effort xhigh --json
 ```
+
+- 수정 작업에는 `--deps`를 걸지 않는다. 실패로 끝난 작업에 의존하면 수정 작업이 시작되지 않는다. 같은 검증 작업은 연속 3번 실패하면 Orca가 닫으므로, 재검증 전에 코디네이터가 수정 내용을 직접 확인한다(웨이브 1에서는 로그인 `next` 우회를 입력 수만 건으로 확인했다).
+- 구현 워커의 터미널은 검증이 끝날 때까지 `worker-retain`으로 남겨 수정에 `--terminal`로 다시 쓴다. 에이전트 상태가 오래돼 `stale_status`면 새 워커를 띄운다.
 
 ### 4.6 병합
 
@@ -188,14 +203,20 @@ gh pr merge <PR 번호> --merge
 
 - 웨이브가 끝나면 병합된 작업 워크트리를 정리한다(`orca worktree rm --help`로 선택자를 확인). 열린 워커는 `worker-list --run <run_id> --terminal-state reclaimable --json`이 빈 목록이 될 때까지 `worker-release`.
 
+### 4.9 운영 메모 (웨이브 1에서 겪은 일)
+
+- **codex 업데이트 안내**: codex가 새 버전 안내를 띄우면 `worker-start`가 `agent_readiness` 단계에서 `Agent startup blocked: agent-update-prompt`로 실패한다. 실패한 시도는 영수증대로 `worker-release`하고, `~/.codex/version.json`의 `dismissed_version`을 `latest_version`과 같게 적거나(그 버전 건너뛰기) codex를 올린 뒤 `--retry-of`로 다시 띄운다. 디스패치 전에 `npm view @openai/codex version`으로 확인한다.
+- **슬롯 포트 충돌**: 이 기기에서는 다른 프로젝트가 8000을 쓰고 있다. `scripts/start.sh`는 점유 프로세스를 죽이지 않고 멈춘다(정상). 슬롯 00 통합 검증은 백엔드 8090(`FRONTEND_ORIGIN=http://localhost:3090`)·프론트 3090(`NEXT_PUBLIC_API_BASE_URL=http://localhost:8090`)으로 직접 띄워 진행하고, 디스패치 전에 `lsof -nP -iTCP:<port> -sTCP:LISTEN`으로 확인한다.
+- **수정 브랜치**: 통합 검증에서 나온 결함은 그 모듈의 기존 워크트리에서 `git switch -c feature/NN-<slug>-fix-<번호> origin/develop`으로 브랜치를 만들고 `orca worktree show --worktree path:<경로>`로 Orca를 갱신한 뒤 디스패치한다(의존성·DB 슬롯을 다시 쓸 수 있다).
+
 ## 5. 웨이브별 통합 확인 항목 (6.4 블록이 참조)
 
 | 웨이브 | 준비 명령 | 핵심 흐름 |
 | --- | --- | --- |
 | 1 | `scripts/worktree-setup.sh` | 가입 → 온보딩(출생연도) → 프로필 수정 → 로그아웃 → 재로그인. localhost 3000↔8000 쿠키 전달, 자리표시 화면 전부, 앱 셸·모바일 메뉴 |
-| 2 | 위 + `uv run python -m app.modules.learn.seed`, `uv run python -m app.modules.market.jobs seed-mock` | 설문 → 자산 입력 → 리포트·점수 / 가계부 입력 → 요약 / 매매 입력 → 보유·통계 / 가족·증여 기록 → 공제 현황·세금 계산(스펙 06 사례 값) / 학습 목록·상세 / 종목 검색 API / 챗봇(키 없으면 안내 상태, 있으면 `get_my_profile`) / 개발용 Mock 증권사 연결 확인 |
+| 2 | 위 + `uv run python -m app.modules.learn.seed`, `uv run python -m app.modules.market.jobs seed-mock` | 가입 → 온보딩 → 설문 → 목표·상황 → 자산 간단 입력 → 추천 결과 → 상세 설명 → 리포트·점수(스펙 02 5.8 사례 값, 건너뛰기 경로 포함) / 가계부 입력 → 요약 / 매매 입력 → 보유·통계 / 가족·증여 기록 → 공제 현황·세금 계산·방향 비교(스펙 06 사례 값, 02 병합 후 자산 사전 채움) / 학습 목록·상세 / 종목 검색 API / 챗봇(공급자 꺼짐이면 안내 상태, 로컬 Ollama나 결제 Gemini가 있으면 `get_my_profile`) / `/api/ai/status` / 개발용 Mock 증권사 연결 확인 |
 | 3 | 위와 같음 | 가짜 카드 파일 업로드 → 리뷰 → 요약 반영 / 매매 파일 업로드, Mock 연결 체결 동기화, 평가손익 / 관심종목 담기 → 상세 차트 / 조건검색 칩 실행·`?f=` 링크 / 잔고 동기화 → 배분 점수 변화 |
-| 4 | 위와 같음 | 챗봇 도구 14개(가짜 클라이언트 시나리오, 키 있으면 평가 세트) / 홈 대시보드 새 사용자·데이터 사용자 / CODEF 흐름(respx 또는 샌드박스) |
+| 4 | 위와 같음 | 챗봇 도구 16개(가짜 공급자 시나리오, 실제 공급자가 있으면 평가 세트) / 홈 대시보드 새 사용자·데이터 사용자 / CODEF 흐름(respx 또는 샌드박스) |
 
 모든 웨이브 공통: 빈 DB에서 `alembic upgrade heads` → `downgrade base` → `upgrade heads`, 백엔드·프론트 전체 테스트·린트·빌드, 360px 화면 확인, 다른 사용자 데이터 격리.
 
@@ -255,9 +276,10 @@ Orca 작업 명세 계약(대상·변경·제약·소유·완료 기준)을 따�
 | --- | --- |
 | 01a | "01b와 병렬이다. frontend/를 만들지 않는다. 4.1 백엔드 의존성을 모두 설치한다." |
 | 01b | "01a와 병렬이다. backend/·scripts/를 만들지 않는다. 백엔드 없이 MSW로 테스트한다. 4.1 프론트 의존성과 shadcn 컴포넌트를 모두 설치한다." |
-| 06 | "02와 병렬이다. 스펙 9.3의 지연 import 처리를 지킨다. 4절 세법 값을 국가법령정보센터 원문으로 다시 확인한다." |
+| 02 | "추천 계산(스펙 5.8~5.10)은 recommendation.py 순수 함수로 두고 사례 값과 문장 틀을 테스트로 고정한다. 금액 문장은 01a의 app.core.format을 쓴다." |
+| 06 | "02와 병렬이다. 스펙 9.3의 지연 import 처리를 지킨다. 4절 세법 값을 국가법령정보센터 원문으로 다시 확인한다. 방향 비교(8.1) 사례 값을 ±1,000원 안으로 고정한다." |
 | 08 | "키움·토스 엔드포인트는 공식 문서·공식 저장소에서 확인한 것만 구현하고 근거를 구현 결과 표에 남긴다." |
-| 09, 15 | "시작 전에 claude-api 스킬(Python)을 읽는다." |
+| 09, 15 | "LLM SDK 사용법은 architecture 9.1·11절과 스펙 5절의 형태만 쓴다. 다르면 설치된 패키지 소스를 확인하고 ask로 묻는다. 개인 데이터는 personal 등급 공급자로만 보낸다." |
 | 10, 11 | "카드사·증권사 파일 프리셋은 실제 샘플 픽스처가 있을 때만 만든다." |
 | 18 | "사용자의 호스팅 결정을 먼저 확인한다(스펙 3절)." |
 
@@ -266,4 +288,4 @@ Orca 작업 명세 계약(대상·변경·제약·소유·완료 기준)을 따�
 - 코디네이터는 기능 코드를 직접 고치지 않는다. 고칠 것은 수정 작업으로 디스패치한다. 예외는 문서(스펙 갱신)와 워커 요청에 따른 의존성·공유 파일 변경이며, 이것은 `develop`에 직접 커밋한다.
 - 공유 파일을 바꾸면 진행 중인 워커 모두에게 `orchestration send`로 알리고 `git merge origin/develop`을 지시한다.
 - 시드·배치 명령(`learn.seed`, `market.jobs seed-mock`)은 통합 검증 전에 기본 체크아웃 DB(`finance_00`)에 실행한다.
-- 실제 Anthropic·증권사·CODEF 키는 사용자만 `.env`에 넣는다. 코디네이터와 워커는 키 값을 출력하거나 커밋하지 않는다.
+- 실제 Gemini·증권사·CODEF 키는 사용자만 `.env`에 넣는다. 코디네이터와 워커는 키 값을 출력하거나 커밋하지 않는다. 로컬 Ollama 모델은 사용자가 `ollama pull <OLLAMA_MODEL>`로 받는다.

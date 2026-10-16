@@ -48,7 +48,7 @@
 | 읽기 | XLSX `openpyxl`(read_only, data_only), XLS `xlrd`, HTML `pandas.read_html`(lxml), CSV 표준 `csv` |
 | 인코딩 | `utf-8-sig` → `cp949` → `charset-normalizer` 추정 순서 |
 | 만료 | 생성 후 24시간. 새 작업을 만들 때 만료된 내 작업을 지운다 |
-| LLM | `get_structured_llm()`, task `imports.column_mapping`, effort `low`. LLM이 꺼져 있으면 건너뛴다 |
+| LLM | `get_structured_llm()`, 작업 키 `imports.column_mapping`(architecture 9.1.2: personal 등급이라 기본 로컬 Ollama, effort `low`). `llm.enabled_for("imports.column_mapping")`가 거짓이면 건너뛴다 |
 
 ## 5. 레지스트리 (`app/modules/imports/registry.py`)
 
@@ -151,7 +151,7 @@ def create_job_from_table(db, user_id, *, kind_key: str, file_name: str,
 
 ### 6.4 LLM 컬럼 매핑
 
-- 호출: `llm.generate(task="imports.column_mapping", system=SYSTEM, content=<JSON 문자열>, output=ColumnMappingOutput, effort="low", max_tokens=4000)`
+- 호출: `llm.generate(task="imports.column_mapping", system=SYSTEM, content=<JSON 문자열>, output=ColumnMappingOutput)`(effort·max_tokens·공급자는 작업 등록부가 정한다)
 - `SYSTEM`(고정 문자열): 표의 머리행과 예시 값을 보고 각 목표 필드에 맞는 열 번호를 고르는 역할, 확실하지 않으면 `null`, 한 열을 두 필드에 쓰지 않음, 종류 설명(`llm_hint`).
 - `content`: `{"kind": "...", "fields": [{"key", "label", "type", "required", "description"}], "headerRowCandidates": [...] | null, "header": [...], "samples": [[...], [...], [...]]}`. 예시는 3행까지만 보낸다. 8자리 이상 연속 숫자는 앞 2자리·뒤 2자리만 남기고 `*`로 가린다(카드번호·승인번호 보호).
 - `ColumnMappingOutput`: `{"headerRow": int | null, "mappings": [{"field": str, "columnIndex": int | null, "reason": str}]}`. 범위 밖 열 번호, 모르는 필드, 중복 열은 버린다.
@@ -275,7 +275,7 @@ def create_job_from_table(db, user_id, *, kind_key: str, file_name: str,
 />
 ```
 
-- 단계: ① 파일 선택(끌어 놓기 + 버튼, `.csv,.xlsx,.xls,.html,.htm`) → ② 열 매핑(목표 필드별 열 선택 `Select`, 각 열의 예시 값 표시, 필수 표시, `mappingSource` 배지 "자동 인식"/"AI 추천"/"직접 지정"/"알려진 형식") → ③ 미리보기(정상·오류 수, 오류 행 강조와 메시지, "오류 행 제외하고 저장" 토글) → ④ 결과(저장·중복·실패 수, `onCommitted` 호출).
+- 단계: ① 파일 선택(끌어 놓기 + 버튼, `.csv,.xlsx,.xls,.html,.htm`) → ② 열 매핑(목표 필드별 열 선택 `Select`, 각 열의 예시 값 표시, 필수 표시, `mappingSource` 배지 "자동 인식"/"AI 추천"/"직접 지정"/"알려진 형식", "AI 추천" 옆에 `AiProviderBadge scope="personal" compact`) → ③ 미리보기(정상·오류 수, 오류 행 강조와 메시지, "오류 행 제외하고 저장" 토글) → ④ 결과(저장·중복·실패 수, `onCommitted` 호출).
 - 시트가 여러 개면 ①에서 시트 선택을 보여 준다(다시 업로드).
 - 업로드 진행 표시, 만료(410) 시 처음으로 돌아가는 안내.
 - `api.ts`: `listImportKinds`, `createImportJob(kind, file, sheetName?)`(FormData, `apiFetch`는 FormData일 때 Content-Type을 넣지 않는다), `getImportJob`, `updateMapping`, `getPreview`, `commitImportJob`, `deleteImportJob`. `hooks.ts`에 대응 훅.
@@ -308,7 +308,7 @@ def create_job_from_table(db, user_id, *, kind_key: str, file_name: str,
 
 1. 5절 레지스트리와 5.1 `create_job_from_table` 시그니처가 문서와 같다(10·11의 전제).
 2. 6.1 판별 순서와 에러 코드·문구가 같다. 암호 파일이 `IMPORT_FILE_ENCRYPTED`다.
-3. 6.4 LLM 호출이 architecture 9.1 래퍼를 거치고 effort `low`, 예시 3행, 숫자 가림이 지켜진다.
+3. 6.4 LLM 호출이 architecture 9.1 계층(작업 키 `imports.column_mapping`)을 거치고 예시 3행, 숫자 가림이 지켜진다.
 4. 6.5 변환 표의 모든 형식이 테스트돼 있다.
 5. 8절 응답 필드·상태 전이(`parsed → mapped → committed`)·에러 코드가 같다.
 6. 커밋이 한 트랜잭션이고 실패 시 아무 행도 남지 않는다.

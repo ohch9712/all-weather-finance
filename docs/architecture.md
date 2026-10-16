@@ -9,7 +9,8 @@
 flowchart LR
   U[브라우저<br/>Next.js App Router] -->|fetch + HttpOnly 쿠키| A[FastAPI<br/>/api/*]
   A --> D[(Postgres 17)]
-  A -->|Anthropic Python SDK| L[Claude API]
+  A -->|google-genai, 개인 데이터 없는 작업| G[Gemini API]
+  A -->|ollama, 개인 금융 데이터| O[Ollama<br/>로컬 LLM]
   A -->|REST + 웹소켓, 조회 전용| K[키움 REST API]
   A -->|REST, 조회 전용| T[토스증권 Open API]
   A -->|REST| C[CODEF]
@@ -21,6 +22,7 @@ flowchart LR
 - 브라우저는 백엔드를 직접 호출한다(gamja-market과 같은 구조). 프론트 서버가 API를 대신 호출하지 않는다.
 - 외부 서비스는 전부 백엔드 어댑터 뒤에 있다. 기본값은 Mock이라 키가 없어도 모든 기능이 동작한다.
 - 주문·매매 실행 API는 어디에도 만들지 않는다. 증권사 연동은 시세·종목·잔고·체결 조회만 한다.
+- LLM은 데이터 등급에 따라 나눠 부른다(9.1절). 사용자의 거래·자산·가족 정보가 들어가는 호출은 기본으로 로컬 Ollama가 처리하고 외부로 나가지 않는다. 개인 데이터가 없는 호출(학습 글 초안, 종목 조건 해석)만 Gemini API로 보낸다.
 
 ## 2. 실행 환경
 
@@ -42,7 +44,7 @@ flowchart LR
 | 브랜치 | 슬롯 | 백엔드 | 프론트 | DB |
 | --- | --- | --- | --- | --- |
 | `main`, `develop`, 그 밖의 이름 | `00` | 8000 | 3000 | `finance_00` |
-| `feature/NN-<slug>` | `NN` | `8000+NN` | `3000+NN` | `finance_NN` |
+| `feature/NN-<slug>`(Orca가 처음 만드는 `<사용자>/feature-NN-<slug>` 포함) | `NN` | `8000+NN` | `3000+NN` | `finance_NN` |
 
 - 같은 슬롯을 두 워크트리가 동시에 쓰지 않는다. 검증 워커는 구현 워커와 같은 워크트리를 쓰므로 같은 슬롯이다(동시에 돌지 않는다).
 - 설정 스크립트는 `backend/.env`와 `frontend/.env.local`을 만들고(이미 있으면 슬롯 값만 맞춘다), DB를 만들고, `uv sync`, `npm ci`, `uv run alembic upgrade heads`를 실행한다.
@@ -62,10 +64,17 @@ flowchart LR
 | `SESSION_TTL_SECONDS` | `604800` | 7일 고정 만료 |
 | `COOKIE_SECURE` | `false` | 운영에서 `true` |
 | `APP_ENCRYPTION_KEY` | 설정 스크립트가 생성 | Fernet 키. 자격증명 암호화용 |
-| `LLM_MODE` | `disabled` | `anthropic`이면 실제 호출. `disabled`면 LLM 기능이 `LLM_UNAVAILABLE`을 돌려준다 |
-| `ANTHROPIC_API_KEY` | 비어 있음 | SDK가 환경변수에서 읽는다 |
-| `ANTHROPIC_MODEL` | `claude-opus-5-5` | |
-| `LLM_FALLBACKS_ENABLED` | `true` | 서버 측 거절 폴백(`fallbacks: "default"`) 사용 |
+| `LLM_GENERAL_PROVIDER` | `disabled` | 개인 데이터가 없는 LLM 작업(9.1.2)의 공급자. `disabled` / `gemini` / `ollama`. 권장값 `gemini` |
+| `LLM_PERSONAL_PROVIDER` | `disabled` | 개인 금융 데이터가 들어가는 LLM 작업과 챗봇의 공급자. `disabled` / `ollama` / `gemini`(아래 결제 조건이 있어야 켜진다). 권장값 `ollama` |
+| `GEMINI_API_KEY` | 비어 있음 | Google AI Studio 키. 클라이언트에 명시해 넘긴다 |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | |
+| `GEMINI_BILLING_ENABLED` | `false` | 결제가 연결된 유료 등급 키일 때만 `true`. `false`면 개인 작업을 Gemini로 보내지 않는다 |
+| `GEMINI_TIMEOUT_SECONDS` | `60` | |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | |
+| `OLLAMA_MODEL` | `gemma4:12b` | 도구 호출·이미지 입력을 지원하는 모델. 메모리가 16GB 미만이면 `gemma4:e4b` |
+| `OLLAMA_THINKING` | `true` | 사고 기능이 없는 모델이면 `false`(그때는 `think`를 보내지 않는다) |
+| `OLLAMA_NUM_CTX` | `32768` | 컨텍스트 길이(도구 설명과 대화 기록이 잘리지 않게 넉넉히) |
+| `OLLAMA_TIMEOUT_SECONDS` | `300` | 로컬 추론은 느릴 수 있다 |
 | `MARKET_DATA_PROVIDER` | `mock` | `mock` / `kiwoom` / `toss`. 운영자 키로 시세·종목·스냅샷을 가져오는 원천 |
 | `KIWOOM_ENV` | `mock` | `mock`(모의투자 도메인) / `real` |
 | `KIWOOM_APP_KEY`, `KIWOOM_APP_SECRET` | 비어 있음 | 운영자 시장 데이터용 |
@@ -97,7 +106,7 @@ flowchart LR
 │   │   ├── main.py                           [01a]
 │   │   ├── core/                             [01a]  config, errors, schemas, security, cookies, cors, crypto, time, logging
 │   │   ├── db/                               [01a]  base, session, models(전 모듈 모델 import)
-│   │   ├── api/                              [01a]  router(전 모듈 라우터 등록), deps, health
+│   │   ├── api/                              [01a]  router(전 모듈 라우터 등록), deps, health, ai_status
 │   │   ├── integrations/
 │   │   │   ├── llm/                          [01a]
 │   │   │   ├── brokers/                      [08]
@@ -139,7 +148,7 @@ flowchart LR
     │   ├── components/ui/, layout/, charts/, common/      [01b]
     │   ├── features/auth/                    [01b]
     │   ├── features/<module>/                [모듈 작업]  (12는 종목 검색·상세용 features/stocks/도 소유)
-    │   ├── lib/                              [01b]  api-client, format, navigation, query
+    │   ├── lib/                              [01b]  api-client, format, navigation, query, ai-status
     │   └── types/api.ts                      [01b]
     └── tests/
         ├── setup.ts, foundation/             [01b]
@@ -202,15 +211,17 @@ features/<module>/
 | `FORBIDDEN` | 403 | 관리자 전용 경로 |
 | `NOT_FOUND` | 404 | 없는 경로·자원, 남의 자원 |
 | `METHOD_NOT_ALLOWED` | 405 | |
+| `HTTP_ERROR` | 원래 상태코드(예: 400) | 다른 코드에 해당하지 않는 프레임워크 HTTP 오류. CORS 사전 요청(preflight) 거부는 400 "허용되지 않은 교차 출처 요청입니다."(gamja-market `core/errors.py`·`core/cors.py`와 같다) |
 | `EMAIL_ALREADY_EXISTS` | 409 | 가입 |
 | `CONFLICT` | 409 | 중복 생성(예: 이미 있는 관심종목) |
 | `PROFILE_INCOMPLETE` | 409 | 출생연도가 없어 나이대를 알 수 없음 |
 | `RISK_PROFILE_REQUIRED` | 409 | 투자성향 진단 전 권장 배분 요청 |
 | `BROKER_NOT_CONNECTED` | 409 | 증권사 연결 없이 계좌 데이터 요청 |
+| `CHAT_PROVIDER_CHANGED` | 409 | 대화를 만든 AI 공급자·모델이 지금 설정과 달라 이어 갈 수 없음 |
 | `VALIDATION_ERROR` | 422 | 본문·쿼리 검증 실패 |
 | `IMPORT_FILE_ENCRYPTED` | 422 | 암호 걸린 파일 |
 | `IMPORT_HEADER_NOT_FOUND` | 422 | 표 머리행을 찾지 못함 |
-| `LLM_REFUSED` | 422 | 모델이 거절(`stop_reason == "refusal"`) |
+| `LLM_REFUSED` | 422 | 모델·안전 필터가 요청을 거절(Gemini 차단 코드 `safety` 등, 9.1.4) |
 | `IMPORT_FILE_TOO_LARGE` | 413 | |
 | `IMPORT_FILE_UNSUPPORTED` | 415 | |
 | `IMPORT_JOB_EXPIRED` | 410 | 만료된 임포트 작업 |
@@ -219,7 +230,7 @@ features/<module>/
 | `INTERNAL_ERROR` | 500 | 처리되지 않은 예외 |
 | `BROKER_NOT_SUPPORTED`, `CONNECTOR_NOT_SUPPORTED` | 501 | 어댑터가 지원하지 않는 기능 |
 | `BROKER_AUTH_FAILED`, `BROKER_IP_NOT_ALLOWED`, `BROKER_UNAVAILABLE`, `CONNECTOR_FAILED` | 502 | 외부 서비스 오류 |
-| `LLM_UNAVAILABLE`, `BROKER_RATE_LIMITED` | 503 | 키 없음·외부 장애·외부 호출 한도 |
+| `LLM_UNAVAILABLE`, `BROKER_RATE_LIMITED` | 503 | AI 꺼짐·키 없음·로컬 AI 연결 실패·응답 잘림·외부 장애·외부 호출 한도 |
 
 새 에러 코드가 필요하면 스펙에 적힌 것만 쓴다. 스펙에 없으면 코디네이터에게 묻는다.
 
@@ -234,7 +245,9 @@ features/<module>/
 | foundation | `user_profiles` | user_id(PK), birth_year, nickname, created_at, updated_at | 01a |
 | allocation | `risk_assessments` | id, user_id, survey_version, answers(JSONB), score, risk_profile, created_at | 02 |
 | allocation | `holdings` | id, user_id, name, asset_class, amount, include_in_allocation, source, memo, created_at, updated_at (+14: external_ref, connection_id, synced_at, class_override) | 02, 14 |
-| allocation | `allocation_scores` | id, user_id, scored_on(사용자·날짜 unique), score, grade, total_amount, actual_weights(JSONB), target_weights(JSONB), age_band, risk_profile, created_at, updated_at | 02 |
+| allocation | `allocation_scores` | id, user_id, scored_on(사용자·날짜 unique), score, grade, total_amount, actual_weights(JSONB), target_weights(JSONB, 목표 반영 권장 비중), age_band, risk_profile, created_at, updated_at | 02 |
+| allocation | `allocation_situations` | user_id(PK), monthly_expense, dependents, consumer_debt, created_at, updated_at | 02 |
+| allocation | `financial_goals` | id, user_id, goal_type, title, target_amount, target_date, created_at, updated_at | 02 |
 | ledger | `ledger_categories` | id, user_id(null=기본), kind(`income`/`expense`), name, sort_order | 03 |
 | ledger | `ledger_entries` | id, user_id, kind, occurred_on, amount, category_id, merchant, payment_method, memo, source, dedup_hash, created_at, updated_at (+10: card_name, approval_no, is_cancellation, import_batch_id) | 03, 10 |
 | ledger | `ledger_merchant_rules` | id, user_id, merchant_pattern, category_id, created_at | 10 |
@@ -249,8 +262,8 @@ features/<module>/
 | market | `stocks` | code(PK), market, name, sector, listed, updated_at | 08 |
 | market | `stock_snapshots` | as_of, code, price, change_rate, volume, trading_value, market_cap, per, pbr, roe, eps, bps, foreign_ratio, high_52w, low_52w, source | 08 |
 | market | `broker_connections` | id, user_id, provider, environment, label, app_key_enc, app_secret_enc, account_no_enc, status, last_verified_at, created_at, updated_at | 08 |
-| chat | `chat_conversations` | id, user_id, title, created_at, updated_at | 09 |
-| chat | `chat_messages` | id, conversation_id, seq, role, content(JSONB, API 블록 원본), text_preview, cards(JSONB), model, stop_reason, usage(JSONB), created_at | 09 |
+| chat | `chat_conversations` | id, user_id, title, provider(`gemini`/`ollama`), model, last_message_at, created_at, updated_at | 09 |
+| chat | `chat_messages` | id, conversation_id, user_id, seq, turn_id, role, kind, content(JSONB, 공급자 원본 항목 배열), text_preview, cards(JSONB), model, stop_reason, usage(JSONB), created_at | 09 |
 | watchlist | `watchlist_items` | id, user_id, stock_code, group_name, memo, sort_order, created_at | 12 |
 | screener | `saved_screens` | id, user_id, name, query_text, filter(JSONB), created_at | 13 |
 | connectors | `connector_accounts` | id, user_id, provider, kind, connected_id_enc, label, created_at | 17 |
@@ -269,7 +282,7 @@ features/<module>/
 | --- | --- | --- |
 | 자산군 `AssetClass` | `stock`, `bond`, `gold`, `cash`, `other` | 주식, 채권, 금, 현금성 자산, 기타 |
 | 투자성향 `RiskProfile` | `stable`, `stable_seeking`, `neutral`, `active`, `aggressive` | 안정형, 안정추구형, 위험중립형, 적극투자형, 공격투자형 |
-| 나이대 `AgeBand` | `20s`, `30s`, `40s`, `50s`, `60s` | 20대(20세 미만 포함), 30대, 40대, 50대, 60대 이상 |
+| 나이대 `AgeBand` | `20s`, `30s`, `40s`, `50s`, `60s` | 20대, 30대, 40대, 50대, 60대 이상(`20s`는 20세 미만도 포함하지만 표시명에는 적지 않는다) |
 | 나이 계산 | 기준연도 − 출생연도 | 연 나이 |
 | 자산군 색 토큰 | `--asset-stock`, `--asset-bond`, `--asset-gold`, `--asset-cash`, `--asset-other` | 01b가 `globals.css`에 정의, 모든 차트·카드가 같은 색을 쓴다 |
 
@@ -288,7 +301,7 @@ features/<module>/
 | revision ID | 모듈 | 작업 | 내용 |
 | --- | --- | --- | --- |
 | `foundation_0001` | foundation | 01a | users, sessions, user_profiles |
-| `allocation_0001` | allocation | 02 | risk_assessments, holdings, allocation_scores |
+| `allocation_0001` | allocation | 02 | risk_assessments, holdings, allocation_scores, allocation_situations, financial_goals |
 | `ledger_0001` | ledger | 03 | ledger_categories(기본 카테고리 행 포함), ledger_entries |
 | `imports_0001` | imports | 04 | import_jobs |
 | `journal_0001` | journal | 05 | trades, trade_notes |
@@ -315,9 +328,10 @@ def compute_age_band(birth_year: int, today: date) -> AgeBand
 
 # app/modules/allocation/service.py  (02, 14)
 def get_latest_risk_profile(db, user_id) -> RiskProfileInfo | None
-def get_target_allocation(db, user_id) -> TargetAllocation        # PROFILE_INCOMPLETE / RISK_PROFILE_REQUIRED
-def get_allocation_report(db, user_id) -> AllocationReport        # 보유·실제 비중·권장 비중·점수·등급·리밸런싱
-def get_investable_total(db, user_id) -> int                      # 배분 대상 자산 합계(원)
+def get_target_allocation(db, user_id) -> TargetAllocation        # 나이대·성향 표 값. PROFILE_INCOMPLETE / RISK_PROFILE_REQUIRED
+def get_recommendation(db, user_id) -> Recommendation             # 목표 반영 권장 배분·관리 방향·추천 이유(02 7.10). 부수 효과 없음
+def get_allocation_report(db, user_id) -> AllocationReport        # 보유·실제 비중·목표 반영 권장 비중·점수·등급·리밸런싱
+def get_asset_breakdown(db, user_id) -> AssetBreakdown            # 배분 대상 자산의 자산군별 합계와 제외 자산 합계(원)
 def upsert_synced_holdings(db, user_id, *, source: str, connection_id: UUID, items: list[SyncedHolding]) -> HoldingSyncResult   # 14가 추가
 
 # app/modules/ledger/service.py  (03, 10)
@@ -342,6 +356,9 @@ def calc_inheritance_tax(req: InheritanceTaxInput) -> InheritanceTaxResult   # �
 def get_deduction_status(db, user_id, member_id: UUID, as_of: date) -> DeductionStatus
 def simulate_gift_plan(req: GiftPlanInput) -> GiftPlanResult           # 순수 함수
 def list_members(db, user_id) -> list[MemberInfo]
+def build_compare_input(db, user_id, *, base_date: date, horizon_years: int, growth_rate: Decimal,
+                        lump_sum_per_child: int, assets: CompareAssets | None = None) -> EstateCompareInput   # 가족·증여 기록·자산 사전 채움을 모은다
+def compare_estate_plans(req: EstateCompareInput) -> EstateCompareResult   # 순수 함수. 상속·증여 방향 비교(06 8.1)
 
 # app/modules/learn/service.py  (07)
 def search_posts(db, query: str, *, kind: str | None = None, limit: int = 5) -> list[PostSummary]
@@ -369,64 +386,165 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # /stocks/screener?f= �
 # app/modules/chat/tools/registry.py  (09)
 def register_tool(spec: ToolSpec) -> None
 def get_registered_tools() -> list[ToolSpec]
+
+# app/integrations/llm/status.py  (01a)
+def get_ai_status() -> AiStatus              # GET /api/ai/status와 같은 내용. 09의 /api/chat/status가 personal 값을 쓴다
 ```
 
 ## 9. 외부 연동
 
-### 9.1 LLM 공통 래퍼 (01a, `app/integrations/llm/`)
+### 9.1 LLM 공통 계층 (01a, `app/integrations/llm/`)
 
-모든 구조화 출력 호출(04 컬럼 매핑, 10 분류·추출, 13 자연어 해석, 07 초안)은 이 래퍼를 쓴다. 챗봇(09)은 같은 클라이언트 팩토리와 설정을 쓰되 스트리밍 루프를 직접 구현한다.
+모든 LLM 호출은 이 계층을 거친다. 구조화 출력(04 컬럼 매핑, 10 분류·추출, 13 자연어 해석, 07 초안)은 `StructuredLLM`을 쓴다. 챗봇(09)은 이 계층의 설정·클라이언트 팩토리·작업 등록부·스키마 변환을 쓰고, 공급자별 대화 어댑터는 `modules/chat/providers/`에 직접 둔다(11절). SDK 사용법은 이 절의 형태를 따른다. 여기 없는 사용법이 필요하면 추측하지 말고 설치된 패키지 소스(`backend/.venv/lib/python*/site-packages/google/genai/`, `.../ollama/`)를 확인한 뒤 코디네이터에게 묻는다.
+
+#### 9.1.1 공급자와 데이터 등급
+
+| 데이터 등급 | 뜻 | 설정 | 권장값 |
+| --- | --- | --- | --- |
+| `general` | 사용자 개인 데이터가 없는 입력(학습 글 주제, 종목 조건 문장) | `LLM_GENERAL_PROVIDER` | `gemini` |
+| `personal` | 사용자의 거래·자산·가족 정보, 카드·증권 파일 내용, 챗봇 대화 | `LLM_PERSONAL_PROVIDER` | `ollama` |
+
+- 작업 키마다 등급이 정해져 있다(9.1.2). 호출하는 쪽은 등급이나 공급자를 고르지 않는다.
+- `personal` 작업은 다른 공급자로 자동 전환(폴백)하지 않는다. 로컬 AI에 연결하지 못하면 `LLM_UNAVAILABLE`이다.
+- `LLM_PERSONAL_PROVIDER=gemini`는 `GEMINI_BILLING_ENABLED=true`일 때만 켜진다. Gemini 무료 등급은 입력과 응답이 Google 제품 개선에 쓰이고 사람이 검토할 수 있으며, 약관이 무료 등급에 민감·개인정보를 보내지 말라고 한다. 조건이 맞지 않으면 개인 작업은 꺼진 상태(`reason: "billing_required"`)로 시작하고 오류 로그를 한 번 남긴다.
+- Gemini 호출은 항상 `store=False`를 명시한다. Interactions API는 기본으로 대화를 서버에 저장한다(유료 55일, 무료 1일).
+- 값이 `gemini`인데 `GEMINI_API_KEY`가 비어 있으면 그 등급은 꺼진다(`reason: "missing_api_key"`). 값이 `disabled`면 `reason: "not_configured"`.
+- `anthropic`은 예약값이다. 지금 설정하면 시작할 때 설정 오류다. Claude를 다시 쓰려면 같은 Protocol의 어댑터를 추가한다(이전 호출 형태는 커밋 `b97b4d0`의 이 절에 있다).
+
+#### 9.1.2 작업 등록부 (`tasks.py`)
+
+| 작업 키 | 등급 | effort | max_tokens | 쓰는 작업 |
+| --- | --- | --- | --- | --- |
+| `imports.column_mapping` | personal | low | 4000 | 04 |
+| `ledger.categorize` | personal | low | 8000 | 10 |
+| `ledger.extract_statement` | personal | medium | 16000 | 10 |
+| `learn.ai_draft` | general | medium | 8000 | 07 |
+| `screener.parse` | general | medium | 4000 | 13 |
+| `chat.agent` | personal | medium | 8000 | 09 |
+
+- `LLMTask(key, data_class, effort, max_tokens)` 상수 표다. 등록되지 않은 키로 부르면 `ValueError`(프로그래밍 오류)다. 새 작업이 필요하면 코디네이터에게 묻는다.
+
+#### 9.1.3 인터페이스
 
 ```python
 # app/integrations/llm/types.py
-Effort = Literal["low", "medium", "high", "xhigh", "max"]
-FALLBACK_BETA = "server-side-fallback-2026-07-01"
+Effort = Literal["low", "medium", "high"]
+DataClass = Literal["general", "personal"]
+ProviderName = Literal["gemini", "ollama"]
+
+@dataclass(frozen=True)
+class TextPart:
+    text: str
+
+@dataclass(frozen=True)
+class ImagePart:
+    data: bytes
+    mime_type: Literal["image/png", "image/jpeg", "image/webp"]
+
+@dataclass(frozen=True)
+class DocumentPart:
+    data: bytes
+    mime_type: Literal["application/pdf"] = "application/pdf"
+
+Part = TextPart | ImagePart | DocumentPart
 
 # app/integrations/llm/structured.py
 class StructuredLLM(Protocol):
-    def generate(self, *, task: str, system: str, content: str | list[dict],
-                 output: type[T], effort: Effort = "low", max_tokens: int = 8000) -> T: ...
+    def enabled_for(self, task: str) -> bool: ...
+    def generate(self, *, task: str, system: str, content: str | list[Part], output: type[T]) -> T: ...
 
-# app/integrations/llm/anthropic_client.py
+# app/integrations/llm/clients.py
 @lru_cache
-def get_anthropic_client() -> anthropic.Anthropic   # anthropic.Anthropic(timeout=60.0, max_retries=2)
+def get_gemini_client() -> genai.Client
+    # genai.Client(api_key=settings.gemini_api_key, http_options={"timeout": settings.gemini_timeout_seconds * 1000})  # timeout은 밀리초
+@lru_cache
+def get_ollama_client() -> ollama.Client
+    # ollama.Client(host=settings.ollama_host, timeout=settings.ollama_timeout_seconds)
 
 # app/integrations/llm/deps.py
-def get_structured_llm() -> StructuredLLM           # FastAPI 의존성. LLM_MODE=anthropic → AnthropicStructuredLLM, 그 외 → DisabledLLM
+def get_structured_llm() -> StructuredLLM
+    # RoutedStructuredLLM: 작업 등급 → 공급자 → GeminiStructuredLLM / OllamaStructuredLLM / DisabledLLM
+
+# app/integrations/llm/status.py
+def get_ai_status() -> AiStatus
+    # {"general": ScopeStatus, "personal": ScopeStatus}
+    # ScopeStatus = {enabled, provider: "gemini"|"ollama"|None, location: "cloud"|"local"|None, model, reason}
 ```
 
-`AnthropicStructuredLLM.generate`의 호출 형태는 아래로 고정한다(claude-api 스킬 문서 기준, `anthropic` Python SDK 1.x).
+- `content`가 문자열이면 `[TextPart(content)]`로 본다. 파일 부분은 텍스트보다 앞에 둔다.
+- `DisabledLLM.generate`는 `AppError(503, "LLM_UNAVAILABLE", "AI 기능이 꺼져 있습니다. 서버에 로컬 AI(Ollama)나 Gemini를 설정해야 합니다.")`.
+- `enabled_for(task)`는 그 작업 등급의 공급자가 켜져 있는지만 본다(네트워크 확인은 하지 않는다). 04·10처럼 AI를 건너뛸 수 있는 기능이 먼저 확인한다.
+- `GET /api/ai/status`(01a, 인증 필요)는 `get_ai_status()`를 그대로 돌려준다. 키·주소 같은 비밀값은 넣지 않는다.
+
+#### 9.1.4 Gemini 호출 형태 (`google-genai` 2.31 이상 3 미만, Interactions API)
 
 ```python
-kwargs = dict(
-    model=settings.anthropic_model,            # "claude-opus-5-5"
-    max_tokens=max_tokens,
-    system=system,
-    messages=[{"role": "user", "content": content}],
-    output_config={
-        "effort": effort,                      # Opus 5.5 기본값이 medium이므로 항상 명시
-        "format": {"type": "json_schema", "schema": strict_json_schema(output)},
-    },
+interaction = client.interactions.create(
+    model=settings.gemini_model,                       # "gemini-3.8-flash"
+    store=False,                                       # 항상 명시
+    system_instruction=system,
+    input=[*file_contents, {"type": "text", "text": text}],
+    response_format={"type": "text", "mime_type": "application/json",
+                     "schema": portable_json_schema(output)},
+    generation_config={"thinking_level": task.effort, "max_output_tokens": task.max_tokens},
 )
-if settings.llm_fallbacks_enabled:
-    response = client.beta.messages.create(betas=[FALLBACK_BETA], fallbacks="default", **kwargs)
-else:
-    response = client.messages.create(**kwargs)
-
-if response.stop_reason == "refusal":
-    raise AppError(422, "LLM_REFUSED", "AI가 이 요청을 처리하지 않았습니다. 다른 표현으로 다시 시도해 주세요.")
-if response.stop_reason == "max_tokens":
+if interaction.status == "incomplete":                 # 출력 한도에 걸림
     raise AppError(503, "LLM_UNAVAILABLE", "AI 응답이 너무 길어 중단됐습니다. 잠시 후 다시 시도해 주세요.")
-text = next(b.text for b in response.content if b.type == "text")
-return output.model_validate_json(text)
+if interaction.status != "completed":
+    raise AppError(503, "LLM_UNAVAILABLE", "AI 응답을 받지 못했습니다. 잠시 후 다시 시도해 주세요.")
+return output.model_validate_json(interaction.output_text or "")
 ```
 
-- `thinking` 파라미터는 보내지 않는다. Opus 5.5는 적응형 사고가 항상 켜져 있고 `{"type": "disabled"}`는 400이다.
-- 강제 도구 호출(`tool_choice: any/tool`)은 Opus 5.5에서 400이다. 구조화 결과가 필요하면 위의 `output_config.format`을 쓴다.
-- `strict_json_schema(model)`은 Pydantic `model_json_schema()`를 바탕으로 `$defs`를 펼치고, 모든 객체에 `additionalProperties: false`를 넣고, 모든 속성을 `required`에 넣는다(선택 값은 `X | None`으로 선언). `title`·`default`·길이·범위 키워드는 지우고, 범위 검증은 응답을 받은 뒤 Pydantic이 한다.
-- SDK 예외(`anthropic.APIConnectionError`, `anthropic.RateLimitError`, `anthropic.APIStatusError`)는 `LLM_UNAVAILABLE`(503)로 바꾼다. 원문 메시지와 `_request_id`는 서버 로그에만 남긴다.
-- 프롬프트에 이메일·사용자 ID·계좌번호를 넣지 않는다.
-- 테스트는 `FakeStructuredLLM`(`app/integrations/llm/fake.py`)으로 의존성을 바꾼다. `register(task, handler)`로 작업별 응답을 정하고 `calls`로 호출 내용을 검사한다. 실제 API를 부르는 테스트는 만들지 않는다.
+- 파일 부분: `ImagePart` → `{"type": "image", "data": <base64 문자열>, "mime_type": …}`, `DocumentPart` → `{"type": "document", "data": <base64 문자열>, "mime_type": "application/pdf"}`.
+- 안전 필터 차단은 HTTP 400 예외로 온다. 예외의 `status_code`가 400이고 본문(`exc.body`가 dict면 `body.get("error", body)`)의 `code`가 `safety`, `jailbreak`, `prohibited_content`, `blocklist` 중 하나면 `AppError(422, "LLM_REFUSED", "AI가 이 요청을 처리하지 않았습니다. 다른 표현으로 다시 시도해 주세요.")`.
+- 그 밖의 SDK 예외(연결 실패, 시간 초과, 429, 5xx)는 모두 `LLM_UNAVAILABLE`(503)이다. Interactions 예외 클래스는 SDK 내부 모듈(`google.genai._gaos.lib.compat_errors`)에 있으므로 import하지 않는다. SDK 호출만 `try`로 감싸 `Exception`을 잡고 `status_code`·`body` 속성으로 판별한다. 로그에는 예외 클래스 이름과 `status_code`만 남긴다(요청 본문·키는 남기지 않는다).
+- `temperature`·`top_p`는 Interactions에서 사용 중단 표시가 붙어 있어 보내지 않는다. `gemini-3.8-flash`의 `thinking_level`은 `low`·`medium`·`high`만 된다(`minimal`은 오류).
+- 응답 JSON 검증 실패(`pydantic.ValidationError`)는 `LLM_UNAVAILABLE`("AI 응답 형식이 올바르지 않습니다. 잠시 후 다시 시도해 주세요.").
+
+#### 9.1.5 Ollama 호출 형태 (`ollama` 0.6.3 이상 0.7 미만)
+
+```python
+response = client.chat(
+    model=settings.ollama_model,                       # "gemma4:12b"
+    messages=[
+        {"role": "system", "content": system},
+        {"role": "user", "content": text, "images": images},   # images가 비면 키를 뺀다
+    ],
+    format=portable_json_schema(output),
+    stream=False,
+    think=(task.effort != "low") if settings.ollama_thinking else None,
+    options={"temperature": 0, "num_predict": task.max_tokens, "num_ctx": settings.ollama_num_ctx},
+)
+if response.done_reason == "length":
+    raise AppError(503, "LLM_UNAVAILABLE", "AI 응답이 너무 길어 중단됐습니다. 잠시 후 다시 시도해 주세요.")
+return output.model_validate_json(response.message.content or "")
+```
+
+- `images`: `ImagePart.data` 바이트를 그대로 넣는다. `DocumentPart`(PDF)는 `pypdfium2`로 쪽마다 `pdf[i].render(scale=2).to_pil()`을 만들어 PNG 바이트로 바꿔 넣는다. 쪽 수 제한은 호출하는 쪽(10)이 먼저 검사한다.
+- 오류: `ConnectionError`(Ollama가 꺼져 있음) → `LLM_UNAVAILABLE`("로컬 AI(Ollama)에 연결하지 못했습니다. Ollama가 실행 중인지 확인해 주세요."). `ollama.ResponseError`이고 `status_code == 404` → `LLM_UNAVAILABLE`("로컬 AI 모델이 없습니다. 서버에서 ollama pull로 모델을 받아 주세요."). 그 밖의 `ollama.ResponseError`·`httpx.TimeoutException` → `LLM_UNAVAILABLE`.
+- Ollama에는 거절 신호가 없다. 모델이 거절 문장을 내면 JSON 검증에서 걸려 `LLM_UNAVAILABLE`이 된다. 검증 실패 처리는 9.1.4와 같다.
+
+#### 9.1.6 스키마 변환 (`schema.py`, `portable_json_schema(model: type[BaseModel]) -> dict`)
+
+1. `model.model_json_schema()`에서 시작한다.
+2. `$ref`를 `$defs` 내용으로 펼치고 `$defs`를 지운다. 재귀 모델이면 `ValueError`.
+3. `oneOf`는 `anyOf`로 바꾸고 `discriminator`를 지운다. `const`는 `enum: [값]`으로 바꾼다.
+4. 모든 `type: object`에 `additionalProperties: false`와 전체 속성 `required`를 넣는다. 선택 값은 `X | None`으로 선언하고 `anyOf: [..., {"type": "null"}]`로 둔다.
+5. `title`, `default`, `examples`, `$schema`, `minLength`, `maxLength`, `pattern`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minItems`, `maxItems`, `uniqueItems`를 지운다. 범위 검증은 응답을 받은 뒤 Pydantic이 한다. `format`은 `date`·`date-time`만 남긴다.
+
+- 같은 함수를 챗봇 도구 입력 스키마에도 쓴다. Gemini 구조화 출력이 지원하는 키워드(`type`, `properties`, `required`, `enum`, `items`, `anyOf`, `additionalProperties`, `description`, `format`)만 남는다.
+
+#### 9.1.7 개인정보 규칙
+
+- 프롬프트에 이메일·사용자 ID·계좌번호·카드번호를 넣지 않는다. 표 예시 값의 8자리 이상 숫자는 가린다(04).
+- `personal` 작업을 쓰는 화면은 `AiProviderBadge`(01b)로 데이터가 어디서 처리되는지 보여 준다. 로컬이면 "이 서버의 로컬 AI로 처리돼요", Gemini면 "Google Gemini로 전송돼요".
+- 공급자 응답 원문은 로그에 남기지 않는다.
+
+#### 9.1.8 테스트
+
+- `FakeStructuredLLM`(`fake.py`): `register(task, handler)`, `set_enabled(task, bool)`, `calls`. 테스트는 `fake_llm` 픽스처로 `get_structured_llm` 의존성을 바꾼다.
+- 어댑터 테스트는 SDK 클라이언트 자리에 가짜 객체를 넣어 호출 인자와 응답 처리만 확인한다. Gemini 응답은 `google.genai.interactions.Interaction.model_validate({...})`, Ollama 응답은 `ollama.ChatResponse(...)`로 만든다. 실제 API나 로컬 Ollama 서버를 부르는 테스트는 만들지 않는다.
+- Gemini 가짜 응답은 `steps`로 만든다(예: `{"id": "test", "status": "completed", "steps": [{"type": "model_output", "content": [{"type": "text", "text": "<JSON 문자열>"}]}]}`). SDK 2.31의 `Interaction` 검증기(`_populate_output_helpers`, `_gaos/types/interactions/interaction.py`)가 `output_text`를 마지막 `model_output` 텍스트로 다시 계산해 넣은 값을 덮어쓰기 때문이다.
 
 ### 9.2 증권사 어댑터 (08, `app/integrations/brokers/`)
 
@@ -466,27 +584,33 @@ class BrokerClient(Protocol):
 - 모든 조회·수정 쿼리는 `user_id`로 거른다. 각 모듈 테스트에 "다른 사용자 자원 접근 시 404" 사례를 넣는다.
 - 관리자 경로는 `AdminUser` 의존성(`users.role == "admin"`)으로 막는다. 첫 관리자는 `uv run python -m app.modules.auth.cli make-admin <email>`로 만든다.
 - 투자 권유·세무 고지는 13절 문구를 쓴다.
+- LLM으로 보내는 데이터는 9.1.1·9.1.7절 규칙을 따른다. 개인 금융 데이터는 기본으로 로컬 Ollama에서만 처리하고, Gemini 무료 등급으로는 보내지 않는다.
 
 ## 11. AI 챗봇 에이전트 (09, 15)
 
-- **루프**: 백엔드가 수동 에이전트 루프를 돈다. `get_anthropic_client()`로 `client.beta.messages.stream(...)`(폴백 켜짐) 또는 `client.messages.stream(...)`을 열고, 텍스트 조각을 SSE로 흘리고, `stream.get_final_message()`로 턴을 마무리한다. `stop_reason`이 `tool_use`면 도구를 실행해 같은 사용자 메시지 하나에 모든 `tool_result`를 담아 다시 부른다. 한 요청에서 도구 왕복은 최대 8회다.
-- **도구**: 레지스트리에 등록된 도구만 쓴다. 입력 스키마는 Pydantic 모델에서 만든 strict 스키마(`strict: true`, `additionalProperties: false`)이고 `eager_input_streaming: true`를 켠다. 그래서 입력을 실행 전에 Pydantic으로 다시 검증하고, 실패하면 `is_error: true` 결과를 돌려준다. `stop_reason`이 `max_tokens`나 `refusal`이면 도구를 실행하지 않는다.
-- **기록**: 어시스턴트 응답은 API가 준 content 블록 그대로(`block.model_dump()`) 저장하고 다음 요청에 그대로 다시 보낸다. 이전 턴은 절대 고치지 않는다(append-only). Opus 5.5는 thinking 블록이 대화에 묶여 있어 기록을 고치면 400이 날 수 있다.
-- **캐싱**: 도구 목록(이름순 고정) → 시스템 프롬프트(고정 문자열) 순서로 두고 시스템 블록에 `cache_control: {"type": "ephemeral"}`을 단다. 날짜·사용자 정보 같은 가변 값은 시스템 프롬프트에 넣지 않고 도구로 가져온다.
+- **공급자**: 챗봇은 `personal` 등급 작업(`chat.agent`)이다. 기본은 로컬 Ollama이고, 결제가 연결된 Gemini 키가 있을 때만 Gemini로 바꿀 수 있다(9.1.1). 공급자가 꺼져 있으면 화면이 안내 상태가 된다.
+- **대화와 공급자 묶음**: 대화를 만들 때의 공급자·모델을 `chat_conversations`에 저장한다. 지금 설정과 다르면 그 대화에는 더 보낼 수 없다(`409 CHAT_PROVIDER_CHANGED`). 공급자마다 기록 형식이 다르고, Gemini의 사고 서명은 그 모델의 대화에 묶여 있기 때문이다.
+- **루프**: 백엔드가 수동 에이전트 루프를 돈다. 한 요청에서 도구 왕복은 최대 8회다. 공급자 어댑터(`modules/chat/providers/`)가 한 라운드를 실행해 텍스트 조각과 라운드 결과(`stop`, 텍스트, 도구 호출, 저장할 원본 항목, 사용량, 모델)를 돌려준다. `stop`은 `end`, `tool_use`, `max_tokens`, `refused` 중 하나다.
+  - Ollama: `client.chat(..., stream=True)`로 받는 텍스트 조각을 바로 SSE로 흘린다.
+  - Gemini: `client.interactions.create(..., store=False)`로 라운드를 한 번에 받고 텍스트를 `text_delta` 하나로 보낸다. Interactions 스트리밍의 도구 인자 조각 형식이 공식 문서와 SDK 2.31 사이에 아직 달라서 이번 범위에서는 쓰지 않는다.
+- **도구**: 레지스트리에 등록된 도구만 쓴다. 입력 스키마는 `portable_json_schema(input_model)`(9.1.6)이다. 모델이 준 인자는 실행 전에 Pydantic으로 다시 검증하고, 실패하면 오류 결과를 돌려준다. `stop`이 `max_tokens`나 `refused`면 도구를 실행하지 않는다. 강제 도구 호출은 쓰지 않는다.
+- **기록**: 공급자가 준 항목(Gemini step, Ollama message)을 JSON 그대로 저장하고 다음 요청에 그대로 다시 보낸다. 이전 턴은 고치지 않는다(append-only). Gemini의 `thought` 단계(서명 포함)도 빼지 않는다.
+- **고정 프롬프트**: 날짜·사용자 정보 같은 가변 값은 시스템 프롬프트에 넣지 않고 도구로 가져온다. 도구 목록은 이름순으로 고정한다(Gemini 자동 캐시 적중, 테스트 재현성).
 - **SSE 이벤트**: `message_start`, `text_delta`, `tool_start`, `tool_end`, `message_end`, `error`. 15초마다 `: ping` 주석을 보낸다. 세부 형식은 스펙 09.
 - **카드**: 도구 결과는 모델용 텍스트와 화면용 카드(`{"type": "...", ...}`)를 따로 만든다. 프론트는 카드 타입별 컴포넌트 레지스트리로 그린다.
 - **안전**: 시스템 프롬프트에 정보 제공 목적, 개별 종목 매수·매도 권유 금지, 주문 불가, 숫자는 도구 결과만 인용, 세금은 참고용이라는 규칙을 넣는다.
-- **비용**: 기본 effort는 `medium`(설정으로 변경), 사용자별 하루 메시지 상한 `CHAT_DAILY_MESSAGE_LIMIT`.
+- **부하**: effort는 작업 등록부의 `medium`, 사용자별 하루 메시지 상한은 `CHAT_DAILY_MESSAGE_LIMIT`다. 로컬 모델은 한 번에 한 요청씩 처리할 수 있으므로 응답이 느릴 수 있다고 화면에 안내한다.
 
 ## 12. 프론트엔드 구조
 
 - 데이터가 필요한 화면은 Client Component이고 `features/<module>/hooks.ts`의 TanStack Query 훅을 쓴다. 인증 쿠키가 API origin에 있으므로 서버 컴포넌트에서 API를 부르지 않는다.
 - 라우트 그룹: `(auth)`는 셸 없는 로그인·가입, `(app)`은 앱 셸 + `RequireAuth` + `OnboardingGate`(출생연도 없으면 `/onboarding`) + 챗봇 위젯.
-- 공용 컴포넌트(01b): shadcn/ui 기본 컴포넌트(`components/ui`), 앱 셸(`components/layout`), 차트 래퍼 `DonutChart`·`BarChart`·`LineChart`(`components/charts`), `PageHeader`·`EmptyState`·`ErrorState`·`LoadingState`·`MoneyText`·`SampleDataBadge`·`Disclaimer`·`ConfirmDialog`(`components/common`).
-- 형식 함수(`lib/format.ts`): `formatKRW`(1,234,000원), `formatKRWCompact`(123.4만원, 1.2억원), `formatSignedKRW`, `formatPercent`, `formatDate`, `formatDateTime`(KST).
+- 공용 컴포넌트(01b): shadcn/ui 기본 컴포넌트(`components/ui`), 앱 셸(`components/layout`), 차트 래퍼 `DonutChart`·`BarChart`·`LineChart`(`components/charts`), `PageHeader`·`EmptyState`·`ErrorState`·`LoadingState`·`MoneyText`·`SampleDataBadge`·`Disclaimer`·`ConfirmDialog`·`AiProviderBadge`(`components/common`). AI 공급자 상태는 `lib/ai-status.ts`의 `useAiStatus()`로 읽는다.
+- 형식 함수(`lib/format.ts`): `formatKRW`(1,234,000원), `formatKRWCompact`(5,670만원, 1.2억원. 규칙은 스펙 01 11.2·9절, 백엔드 `app.core.format.format_krw_compact`와 같다), `formatSignedKRW`, `formatPercent`, `formatDate`, `formatDateTime`(KST).
 - 폼은 react-hook-form + zod, 알림은 shadcn `sonner`.
 - 모바일 360px에서 가로 스크롤이 없어야 한다.
 - Next.js 16은 학습 데이터와 다른 부분이 있다. 코드를 쓰기 전에 `frontend/node_modules/next/dist/docs/`의 해당 가이드를 읽는다.
+- `next.config.ts`(01b)는 `cacheComponents`와 `partialPrefetching`을 끈다(create-next-app 16.4 기본값과 다름). 데이터를 모두 클라이언트에서 불러오므로 이점이 거의 없고, 켜 두면 이전 경로가 React Activity로 숨은 채 상태를 유지해 로그아웃·다른 사용자 로그인 뒤에도 폼 상태가 남을 수 있다. 모듈 작업은 숨은 경로 상태를 가정하지 않는다.
 
 ### 12.1 내비게이션
 
@@ -518,6 +642,6 @@ class BrokerClient(Protocol):
 ## 14. 테스트 전략
 
 - 백엔드: pytest + FastAPI `TestClient`. 워크트리 DB에 테스트별 트랜잭션을 열고 롤백한다(gamja-market `tests/conftest.py` 이식). 01a가 `client`, `auth_client`(가입·로그인된 사용자), `other_auth_client`(두 번째 사용자), `admin_client`, `fake_llm` 픽스처를 제공한다.
-- 외부 호출은 테스트에서 금지다. LLM은 `FakeStructuredLLM`, 증권사는 `MockBroker` 또는 `respx`로 고정한 HTTP 응답, CODEF도 `respx`를 쓴다.
+- 외부 호출은 테스트에서 금지다. 구조화 LLM은 `FakeStructuredLLM`, 챗봇은 가짜 공급자 어댑터, 공급자 어댑터 자체는 가짜 SDK 클라이언트(9.1.8), 증권사는 `MockBroker` 또는 `respx`로 고정한 HTTP 응답, CODEF도 `respx`를 쓴다.
 - 프론트: Vitest + Testing Library + jsdom, API는 MSW(`msw/node`)로 가짜 응답을 만든다. 01b가 `tests/setup.ts`에 MSW 서버와 렌더 도우미(`renderWithProviders`)를 둔다.
 - 각 스펙의 "완료 기준"과 "검증 체크리스트"가 검증 워커(codex `gpt-6.1-sol`, `xhigh`)의 판정 기준이다.
