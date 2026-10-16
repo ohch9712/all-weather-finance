@@ -62,8 +62,7 @@ function Section({ step, title, description, children }: { step: number; title: 
       <CardHeader>
         <CardTitle>
           <h2>
-            <span className="mr-1.5 text-muted-foreground tabular-nums">{step}.</span>
-            {title}
+            <span className="text-muted-foreground tabular-nums">{step}.</span> {title}
           </h2>
         </CardTitle>
         {description && <CardDescription>{description}</CardDescription>}
