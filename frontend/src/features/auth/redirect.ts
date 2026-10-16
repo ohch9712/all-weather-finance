@@ -20,21 +20,30 @@ function looksUnsafe(value: string): boolean {
   return CONTROL_CHARACTERS.test(decoded) || decoded.startsWith("//") || decoded.startsWith("/\\");
 }
 
+/** `value`를 `origin` 기준 URL로 해석해 같은 origin이면 정규화한 `pathname + search + hash`, 아니면 null */
+function toSameOriginPath(value: string, origin: string): string | null {
+  try {
+    const url = new URL(value, origin);
+    if (url.origin !== new URL(origin).origin) return null;
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * `next`가 같은 사이트의 경로면 정규화한 `pathname + search + hash`를, 아니면 `/`를 돌려준다.
- * - 제어문자(LF·CR·탭 포함)가 있거나, `/`로 시작하지 않거나, `//`·`/\`로 시작하면 거절한다(퍼센트 인코딩을 한 번 푼 값도 본다).
+ * - 들어온 값: 제어문자(LF·CR·탭 포함)가 있거나, `/`로 시작하지 않거나, `//`·`/\`로 시작하면 거절한다(퍼센트 인코딩을 한 번 푼 값도 본다).
  * - URL로 해석한 뒤 origin이 현재 사이트와 다르면 거절한다(`javascript:`, 절대 URL 포함).
+ * - 돌려줄 값도 다시 검사한다. 정규화(`.`·`..`·`%2e` 구간 제거, `\` → `/`)로 `/.//evil.com`이 `//evil.com`이 될 수 있어서다.
+ *   같은 위험 검사를 통과하고, 다시 해석해도 같은 origin의 같은 값(고정점)일 때만 돌려준다.
  */
 export function getSafeRedirectPath(next: string | null | undefined, origin: string = currentOrigin()): string {
   if (!next || looksUnsafe(next)) return "/";
-  let url: URL;
-  try {
-    url = new URL(next, origin);
-  } catch {
-    return "/";
-  }
-  if (url.origin !== new URL(origin).origin) return "/";
-  return `${url.pathname}${url.search}${url.hash}`;
+  const result = toSameOriginPath(next, origin);
+  if (result === null || looksUnsafe(result)) return "/";
+  if (toSameOriginPath(result, origin) !== result) return "/";
+  return result;
 }
 
 export function getLoginPath(next: string): string {
