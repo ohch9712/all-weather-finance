@@ -296,6 +296,8 @@ def _gift_tax(req: GiftTaxInput, prior: list[ReplayedGift]) -> GiftTaxResult:
 
 
 def calc_gift_tax(req: GiftTaxInput) -> GiftTaxResult:
+    if req.gifted_on < RULES.effective_from:
+        raise field_error("giftedOn", "2024년 1월 1일 이후 증여만 계산할 수 있어요.")
     get_active_rules(req.gifted_on)
     validate_group(req.recipient, req.donor_group)
     if req.recipient.birth_date and req.gifted_on < req.recipient.birth_date:
@@ -336,7 +338,6 @@ def deduction_status(
             (
                 add_years(r.gift.gifted_on, RULES.gift_window_years) + timedelta(days=1)
                 for r in recent
-                if r.deduction > 0
             ),
             default=None,
         )

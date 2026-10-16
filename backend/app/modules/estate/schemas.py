@@ -370,3 +370,22 @@ class EstateCompareResult(CamelModel):
     notes: list[str]
     assumptions: list[str]
     rule_version: str
+
+
+class RuleSource(CamelModel):
+    label: str
+    url: str
+
+
+class RuleBracket(CamelModel):
+    up_to: int | None
+    rate: Decimal
+    progressive_deduction: int
+
+
+class RulesInfo(CamelModel):
+    version: str
+    effective_from: date
+    sources: list[RuleSource]
+    gift_deductions: dict[str, int]
+    brackets: list[RuleBracket]

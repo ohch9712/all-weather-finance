@@ -220,3 +220,26 @@ def test_prefill_fallback(auth_client, monkeypatch, kind):
         "field": "assets",
         "message": "재산 금액을 입력해 주세요.",
     }
+
+
+@freeze_time("2026-10-16T03:00:00Z")
+def test_pre_effective_calculation_and_null_patch_are_field_errors(auth_client):
+    member = create_member(auth_client)
+    response = auth_client.post(
+        f"{BASE}/calc/gift-tax",
+        json={
+            "memberId": member["id"],
+            "giftedOn": "2023-12-31",
+            "amount": 100000000,
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["details"] == [
+        {
+            "field": "giftedOn",
+            "message": "2024년 1월 1일 이후 증여만 계산할 수 있어요.",
+        }
+    ]
+    response = auth_client.patch(f"{BASE}/members/{member['id']}", json={"relation": None})
+    assert response.status_code == 422
+    assert response.json()["error"]["details"][0]["field"] == "relation"

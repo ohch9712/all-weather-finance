@@ -4,6 +4,8 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
+from pydantic import ValidationError
+from pydantic.alias_generators import to_camel
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError, field_error
@@ -22,6 +24,7 @@ from app.modules.estate.calculations import (
     validate_group,
 )
 from app.modules.estate.models import FamilyMember, GiftRecord
+from app.modules.estate.rules.kr_2024_01_01 import RULES_2024_01_01 as RULES
 from app.modules.estate.schemas import (
     CompareAssets,
     CompareMember,
@@ -77,7 +80,7 @@ def member_info(row: FamilyMember) -> MemberInfo:
         **MemberCreate.model_validate(row).model_dump(),
         id=row.id,
         age=age,
-        is_minor=None if age is None else age < 19,
+        is_minor=None if age is None else age < RULES.minor_age,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -85,6 +88,14 @@ def member_info(row: FamilyMember) -> MemberInfo:
 
 def list_members(db: Session, user_id: UUID) -> list[MemberInfo]:
     return [member_info(row) for row in repository.list_members(db, user_id)]
+
+
+def _validate_merged(model, values):
+    try:
+        return model.model_validate(values)
+    except ValidationError as exc:
+        error = exc.errors()[0]
+        raise field_error(to_camel(str(error["loc"][0])), "입력값을 확인해 주세요.") from None
 
 
 def _validate_member(data: MemberCreate) -> None:
@@ -106,8 +117,9 @@ def create_member(db: Session, user_id: UUID, data: MemberCreate) -> MemberInfo:
 
 def update_member(db: Session, user_id: UUID, member_id: UUID, data: MemberUpdate) -> MemberInfo:
     row = _member(db, user_id, member_id)
-    merged = MemberCreate.model_validate(
-        {**MemberCreate.model_validate(row).model_dump(), **data.model_dump(exclude_unset=True)}
+    merged = _validate_merged(
+        MemberCreate,
+        {**MemberCreate.model_validate(row).model_dump(), **data.model_dump(exclude_unset=True)},
     )
     _validate_member(merged)
     for gift in repository.list_gifts(db, user_id, member_id):
@@ -175,8 +187,9 @@ def create_gift(db: Session, user_id: UUID, data: GiftCreate) -> GiftInfo:
 
 def update_gift(db: Session, user_id: UUID, gift_id: UUID, data: GiftUpdate) -> GiftInfo:
     row = _gift(db, user_id, gift_id)
-    merged = GiftCreate.model_validate(
-        {**GiftCreate.model_validate(row).model_dump(), **data.model_dump(exclude_unset=True)}
+    merged = _validate_merged(
+        GiftCreate,
+        {**GiftCreate.model_validate(row).model_dump(), **data.model_dump(exclude_unset=True)},
     )
     _validate_gift(member_recipient(db, user_id, merged.recipient_id), merged)
     for key, value in merged.model_dump().items():

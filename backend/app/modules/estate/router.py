@@ -29,6 +29,7 @@ from app.modules.estate.schemas import (
     MemberInfo,
     MemberList,
     MemberUpdate,
+    RulesInfo,
 )
 
 router = APIRouter(prefix="/estate", tags=["estate"])
@@ -148,7 +149,7 @@ def compare(data: CompareRequest, db: DBSession, user: CurrentUser):
     return service.compare_estate_plans(req)
 
 
-@router.get("/rules")
+@router.get("/rules", response_model=RulesInfo)
 def rules(user: CurrentUser):
     active = get_active_rules(today_kst())
     return {
