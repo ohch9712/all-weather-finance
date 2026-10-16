@@ -122,9 +122,15 @@ def seed_posts(db: Session, entries: list[SeedEntry] | None = None) -> SeedResul
     return SeedResult(created=created, updated=updated, unchanged=unchanged)
 
 
+def load_all_models() -> None:
+    """단독 실행할 때도 FK 대상(users) 메타데이터가 있도록 전 모듈 모델을 불러온다."""
+    import app.db.models  # noqa: F401
+
+
 def main() -> int:
     from app.db.session import SessionLocal
 
+    load_all_models()
     with SessionLocal() as db:
         result = seed_posts(db)
     print(

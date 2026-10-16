@@ -1,3 +1,6 @@
+import subprocess
+import sys
+
 import pytest
 from sqlalchemy import func, select
 
@@ -113,3 +116,16 @@ def test_parse_seed_file_rejects_bad_front_matter(tmp_path):
     no_front.write_text("본문만 있음\n")
     with pytest.raises(ValueError):
         seed.parse_seed_file(no_front)
+
+
+def test_seed_command_resolves_user_foreign_key_standalone():
+    """시드 명령처럼 앱 없이 불러와도 posts.author_id → users FK가 풀린다."""
+    code = (
+        "from app.modules.learn import seed; seed.load_all_models(); "
+        "from app.modules.learn.models import Post; "
+        "print([fk.column.table.name for fk in Post.__table__.foreign_keys])"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "['users']"
