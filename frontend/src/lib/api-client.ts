@@ -63,14 +63,20 @@ export type ApiFetchInit = RequestInit & { timeoutMs?: number };
 /**
  * 백엔드 API 호출. 화면 컴포넌트는 이 함수를 직접 쓰지 않고 `features/<module>/api.ts`를 거친다.
  * - 쿠키 인증이므로 항상 `credentials: "include"`로 보낸다.
- * - 문자열 본문이면 `Content-Type: application/json`을 붙인다.
+ * - 문자열 본문이거나 본문 없는 POST·PUT·PATCH·DELETE면 `Content-Type: application/json`을 붙인다.
  * - 4xx·5xx는 서버 에러 형식(`{ error: { code, message, details } }`)을 `ApiError`로 바꿔 던진다.
  * - 204는 `undefined`를 돌려준다.
  */
 export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promise<T> {
   const { timeoutMs = REQUEST_TIMEOUT_MS, ...requestInit } = init;
   const headers = new Headers(requestInit.headers);
-  if (typeof requestInit.body === "string" && !headers.has("Content-Type")) {
+  // 백엔드는 상태를 바꾸는 요청에 Content-Type: application/json을 요구한다(architecture 4절, require_json).
+  // 본문 없는 POST(로그아웃)·DELETE도 같다. FormData 같은 다른 본문은 브라우저가 정한 형식을 그대로 둔다.
+  const method = (requestInit.method ?? "GET").toUpperCase();
+  const hasBody = requestInit.body !== undefined && requestInit.body !== null;
+  const needsJson =
+    typeof requestInit.body === "string" || (!hasBody && method !== "GET" && method !== "HEAD");
+  if (needsJson && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 

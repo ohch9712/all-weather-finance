@@ -40,6 +40,41 @@ describe("apiFetch", () => {
     expect(contentType).toBe("application/json");
   });
 
+  it.each(["POST", "PUT", "PATCH", "DELETE"])(
+    "본문 없는 %s에도 Content-Type: application/json을 붙인다(require_json)",
+    async (method) => {
+      let contentType: string | null = null;
+      server.use(
+        http.all(apiUrl("/api/things/1"), ({ request }) => {
+          contentType = request.headers.get("Content-Type");
+          return new HttpResponse(null, { status: 204 });
+        }),
+      );
+      await apiFetch("/api/things/1", { method });
+      expect(contentType).toBe("application/json");
+    },
+  );
+
+  it("GET과 FormData 본문에는 JSON Content-Type을 붙이지 않는다", async () => {
+    const seen: (string | null)[] = [];
+    server.use(
+      http.get(apiUrl("/api/things"), ({ request }) => {
+        seen.push(request.headers.get("Content-Type"));
+        return HttpResponse.json([]);
+      }),
+      http.post(apiUrl("/api/imports"), ({ request }) => {
+        seen.push(request.headers.get("Content-Type"));
+        return HttpResponse.json({ ok: true });
+      }),
+    );
+    const form = new FormData();
+    form.append("file", new Blob(["a,b"], { type: "text/csv" }), "card.csv");
+    await apiFetch("/api/things");
+    await apiFetch("/api/imports", { method: "POST", body: form });
+    expect(seen[0]).toBeNull();
+    expect(seen[1]).toMatch(/^multipart\/form-data; boundary=/);
+  });
+
   it("204는 undefined를 돌려준다", async () => {
     server.use(http.post(apiUrl("/api/auth/logout"), () => new HttpResponse(null, { status: 204 })));
     await expect(apiFetch("/api/auth/logout", { method: "POST" })).resolves.toBeUndefined();
