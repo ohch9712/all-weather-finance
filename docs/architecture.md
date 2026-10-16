@@ -609,6 +609,7 @@ class BrokerClient(Protocol):
 - 폼은 react-hook-form + zod, 알림은 shadcn `sonner`.
 - 모바일 360px에서 가로 스크롤이 없어야 한다.
 - Next.js 16은 학습 데이터와 다른 부분이 있다. 코드를 쓰기 전에 `frontend/node_modules/next/dist/docs/`의 해당 가이드를 읽는다.
+- `next.config.ts`(01b)는 `cacheComponents`와 `partialPrefetching`을 끈다(create-next-app 16.4 기본값과 다름). 데이터를 모두 클라이언트에서 불러오므로 이점이 거의 없고, 켜 두면 이전 경로가 React Activity로 숨은 채 상태를 유지해 로그아웃·다른 사용자 로그인 뒤에도 폼 상태가 남을 수 있다. 모듈 작업은 숨은 경로 상태를 가정하지 않는다.
 
 ### 12.1 내비게이션
 
