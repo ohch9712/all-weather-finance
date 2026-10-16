@@ -1,5 +1,8 @@
 "use client"
 
+// 출처: shadcn 레지스트리 new-york-v4의 form(https://ui.shadcn.com/r/styles/new-york-v4/form.json).
+// radix-nova 스타일의 form 항목은 비어 있어(사용 중단) 원본을 가져와 label 경로만 이 프로젝트에 맞췄다.
+
 import * as React from "react"
 import { cn } from "cn"
 import type { Label as LabelPrimitive } from "radix-ui"
