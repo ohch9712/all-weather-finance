@@ -54,7 +54,7 @@
 - `backend/app/integrations/__init__.py`, `backend/app/integrations/llm/**`
 - `backend/app/modules/__init__.py`, `backend/app/modules/auth/**`, 12개 모듈 스텁 `backend/app/modules/<module>/{__init__.py,router.py,models.py}`
 - `backend/logs/.gitkeep`, `backend/tests/__init__.py`, `backend/tests/conftest.py`, `backend/tests/foundation/**`
-- `docs/specs/01-foundation.md`의 `## 구현 결과`(01a 부분)
+- `docs/specs/01-foundation.md` 끝 `## 구현 결과`의 `### 01a` 아래(자리표시 줄을 지우고 채운다. `### 01b` 부분은 건드리지 않는다)
 
 ### 01b
 
@@ -64,7 +64,7 @@
 - `frontend/src/app/(app)/layout.tsx`, `frontend/src/app/(app)/page.tsx`, `frontend/src/app/(app)/onboarding/**`, `frontend/src/app/(app)/settings/profile/**`, 11.6절의 자리표시 페이지 전부
 - `frontend/src/components/**`, `frontend/src/features/auth/**`, `frontend/src/features/chat/components/ChatWidget.tsx`(스텁), `frontend/src/lib/**`, `frontend/src/types/**`
 - `frontend/tests/setup.ts`, `frontend/tests/utils.tsx`, `frontend/tests/foundation/**`
-- `docs/specs/01-foundation.md`의 `## 구현 결과`(01b 부분)
+- `docs/specs/01-foundation.md` 끝 `## 구현 결과`의 `### 01b` 아래(자리표시 줄을 지우고 채운다. `### 01a` 부분은 건드리지 않는다)
 
 > 두 작업은 서로의 디렉터리를 건드리지 않는다. 01b의 워크트리에는 01a가 만드는 루트 스크립트가 아직 없으므로, 01b는 `frontend/`에서 직접 `npm install`과 `.env.local`을 준비한다(`NEXT_PUBLIC_API_BASE_URL=http://localhost:8001`).
 
@@ -568,3 +568,15 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 - 02는 `/onboarding`이 넘겨주는 `/allocation/survey?onboarding=1`을 받아 설문 → 목표·상황 → 자산 간단 입력 → 추천 결과 → 상세 설명으로 잇는다(02 9절).
 - 09는 `features/chat/components/ChatWidget.tsx` 스텁을 실제 위젯으로 바꾼다.
 - 08·17은 `crypto`로 자격증명을 저장한다. 04·10·13·07은 `get_structured_llm`을 쓴다. 09는 `clients.py`·`tasks.py`·`schema.py`와 `get_ai_status()`로 챗봇 공급자 어댑터를 만든다. AI를 쓰는 화면은 01b의 `AiProviderBadge`로 데이터 처리 위치를 보여 준다.
+
+## 구현 결과
+
+두 작업이 같은 파일을 고치므로 자기 소제목 아래만 채운다(병합 충돌 방지).
+
+### 01a
+
+(01a 작업이 이 줄을 지우고 구현한 것, 스펙과 다른 점과 이유, 남은 일을 적는다)
+
+### 01b
+
+(01b 작업이 이 줄을 지우고 구현한 것, 스펙과 다른 점과 이유, 남은 일을 적는다)
