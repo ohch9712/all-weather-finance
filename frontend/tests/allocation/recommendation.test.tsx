@@ -5,7 +5,6 @@ import { RecommendationView, firstSentence } from "@/features/allocation/compone
 import { renderWithProviders } from "../utils";
 import { goal, installFakeAllocationApi } from "./fake-api";
 import {
-  RECOMMENDATION_APPLIED,
   RECOMMENDATION_NEEDS_ASSESSMENT,
   RECOMMENDATION_NEEDS_HOLDINGS,
   RECOMMENDATION_NEEDS_PROFILE,
