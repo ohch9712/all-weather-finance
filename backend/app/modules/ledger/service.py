@@ -3,11 +3,10 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
-from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.errors import AppError
+from app.core.errors import AppError, field_error
 from app.core.schemas import Page, PageParams
 from app.core.time import today_kst
 from app.modules.ledger import repository
@@ -74,9 +73,8 @@ def duplicate_category() -> AppError:
     return AppError(409, "CONFLICT", "이미 있는 카테고리입니다.")
 
 
-def invalid_category() -> RequestValidationError:
-    error = {"type": "value_error", "loc": ("body", "category_id")}
-    return RequestValidationError([{**error, "msg": "카테고리를 확인해 주세요."}])
+def invalid_category() -> AppError:
+    return field_error("categoryId", "카테고리를 확인해 주세요.")
 
 
 # ── 카테고리 ─────────────────────────────────────────────────────────

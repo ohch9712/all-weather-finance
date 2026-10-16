@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.modules.ledger import repository
 from app.modules.ledger.models import LedgerCategory
-from tests.ledger.helpers import add_entry, category_ids, error_of
+from tests.ledger.helpers import add_entry, category_ids, error_of, send_delete
 
 EXPENSE_DEFAULTS = [
     "식비",
@@ -132,7 +132,7 @@ def test_default_category_cannot_be_changed(auth_client):
     default_id = category_ids(auth_client)[("expense", "식비")]
     path = f"/api/ledger/categories/{default_id}"
     message = "기본 카테고리는 수정하거나 삭제할 수 없습니다."
-    for response in (auth_client.patch(path, json={"name": "밥"}), auth_client.delete(path)):
+    for response in (auth_client.patch(path, json={"name": "밥"}), send_delete(auth_client, path)):
         assert error_of(response, 409) == {"code": "CONFLICT", "message": message, "details": []}
     assert ("expense", "식비") in category_ids(auth_client)
 
@@ -148,8 +148,8 @@ def test_delete_category_moves_entries_to_fallback(auth_client):
     side_entry = add_entry(auth_client, "강연", kind="income", amount=300000)
     other_entry = add_entry(auth_client, "식비")
 
-    assert auth_client.delete(f"/api/ledger/categories/{pet['id']}").status_code == 204
-    assert auth_client.delete(f"/api/ledger/categories/{side['id']}").status_code == 204
+    assert send_delete(auth_client, f"/api/ledger/categories/{pet['id']}").status_code == 204
+    assert send_delete(auth_client, f"/api/ledger/categories/{side['id']}").status_code == 204
 
     ids = category_ids(auth_client)
     assert ("expense", "반려동물") not in ids and ("income", "강연") not in ids
@@ -166,7 +166,7 @@ def test_delete_category_moves_entries_to_fallback(auth_client):
     untouched = auth_client.get(f"/api/ledger/entries/{other_entry['id']}").json()
     assert untouched["categoryName"] == "식비"
     # 지운 카테고리는 다시 지울 수 없다.
-    assert error_of(auth_client.delete(f"/api/ledger/categories/{pet['id']}"), 404)
+    assert error_of(send_delete(auth_client, f"/api/ledger/categories/{pet['id']}"), 404)
 
 
 def test_delete_category_is_one_transaction(auth_client, monkeypatch):
@@ -179,7 +179,7 @@ def test_delete_category_is_one_transaction(auth_client, monkeypatch):
         raise RuntimeError("삭제 실패")
 
     monkeypatch.setattr(repository, "remove", broken_remove)
-    assert auth_client.delete(f"/api/ledger/categories/{pet['id']}").status_code == 500
+    assert send_delete(auth_client, f"/api/ledger/categories/{pet['id']}").status_code == 500
     monkeypatch.undo()
     # 옮기기도 함께 되돌아간다.
     assert (
@@ -196,9 +196,9 @@ def test_other_users_category_is_not_found(auth_client, other_auth_client):
     assert ("expense", "반려동물") not in category_ids(other_auth_client)
     for response in (
         other_auth_client.patch(path, json={"name": "남의 것"}),
-        other_auth_client.delete(path),
+        send_delete(other_auth_client, path),
         auth_client.patch(f"/api/ledger/categories/{uuid4()}", json={"name": "없음"}),
-        auth_client.delete(f"/api/ledger/categories/{uuid4()}"),
+        send_delete(auth_client, f"/api/ledger/categories/{uuid4()}"),
     ):
         assert error_of(response, 404)["code"] == "NOT_FOUND"
     assert auth_client.get("/api/ledger/categories").status_code == 200
@@ -213,3 +213,10 @@ def test_categories_require_auth_and_json(client, auth_client):
         headers={"Content-Type": "text/plain"},
     )
     assert error_of(response, 422)["code"] == "VALIDATION_ERROR"
+    mine = auth_client.post(
+        "/api/ledger/categories", json={"kind": "expense", "name": "반려동물"}
+    ).json()
+    # 본문 없는 DELETE도 JSON 형식을 요구한다.
+    response = auth_client.delete(f"/api/ledger/categories/{mine['id']}")
+    assert error_of(response, 422)["details"][0]["field"] == "body"
+    assert ("expense", "반려동물") in category_ids(auth_client)

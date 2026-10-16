@@ -3,7 +3,7 @@ from uuid import uuid4
 import pytest
 from freezegun import freeze_time
 
-from tests.ledger.helpers import add_entry, category_ids, error_of
+from tests.ledger.helpers import add_entry, category_ids, error_of, send_delete
 
 ENTRY_FIELDS = {
     "id",
@@ -61,7 +61,7 @@ def test_entry_crud(auth_client):
     response = auth_client.patch(path, json={"kind": "income", "categoryId": salary})
     assert (response.json()["kind"], response.json()["categoryName"]) == ("income", "급여")
 
-    assert auth_client.delete(path).status_code == 204
+    assert send_delete(auth_client, path).status_code == 204
     assert error_of(auth_client.get(path), 404) == {
         "code": "NOT_FOUND",
         "message": "내역을 찾을 수 없습니다.",
@@ -186,10 +186,10 @@ def test_other_users_entry_is_not_found(auth_client, other_auth_client):
     for response in (
         other_auth_client.get(path),
         other_auth_client.patch(path, json={"amount": 1}),
-        other_auth_client.delete(path),
+        send_delete(other_auth_client, path),
         auth_client.get(f"/api/ledger/entries/{uuid4()}"),
         auth_client.patch(f"/api/ledger/entries/{uuid4()}", json={"amount": 1}),
-        auth_client.delete(f"/api/ledger/entries/{uuid4()}"),
+        send_delete(auth_client, f"/api/ledger/entries/{uuid4()}"),
     ):
         assert error_of(response, 404)["code"] == "NOT_FOUND"
     assert other_auth_client.get("/api/ledger/entries?month=2026-10").json()["total"] == 0

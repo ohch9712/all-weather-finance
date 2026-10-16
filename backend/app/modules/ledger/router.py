@@ -4,9 +4,9 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response
-from fastapi.exceptions import RequestValidationError
 
 from app.api.deps import CurrentUser, DBSession, PageQuery, require_json
+from app.core.errors import AppError, field_error
 from app.core.schemas import Page
 from app.modules.ledger import service
 from app.modules.ledger.repository import EntryFilter
@@ -28,10 +28,8 @@ MONTH_PATTERN = re.compile(r"^[1-9]\d{3}-(0[1-9]|1[0-2])$")
 KINDS = ("income", "expense")
 
 
-def query_error(field: str) -> RequestValidationError:
-    return RequestValidationError(
-        [{"type": "value_error", "loc": ("query", field), "msg": "형식이 올바르지 않습니다."}]
-    )
+def query_error(field: str) -> AppError:
+    return field_error(field, "형식이 올바르지 않습니다.")
 
 
 def get_month(month: Annotated[str | None, Query()] = None) -> date:
@@ -60,7 +58,7 @@ def get_entry_filter(
         try:
             parsed_category = UUID(category_id)
         except ValueError as exc:
-            raise query_error("category_id") from exc
+            raise query_error("categoryId") from exc
     return EntryFilter(
         start=month,
         end=service.month_end(month),

@@ -1,3 +1,11 @@
+JSON_HEADERS = {"Content-Type": "application/json"}
+
+
+def send_delete(client, path: str):
+    """상태를 바꾸는 요청은 본문이 없어도 JSON 형식이어야 한다(require_json)."""
+    return client.delete(path, headers=JSON_HEADERS)
+
+
 def category_ids(client) -> dict[tuple[str, str], str]:
     """{(kind, name): id} — 기본 카테고리와 내 카테고리"""
     response = client.get("/api/ledger/categories")
