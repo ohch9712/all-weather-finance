@@ -95,11 +95,11 @@
 
 백엔드 `dev` 그룹: `pytest`, `respx`, `freezegun`, `ruff`
 
-프론트 `dependencies`: `next`, `react`, `react-dom`, `@tanstack/react-query`, `react-hook-form`, `@hookform/resolvers`, `zod`, `recharts`, `react-markdown`, `remark-gfm`, `lucide-react`, `sonner`, 그리고 shadcn CLI가 추가하는 패키지(`class-variance-authority`, `clsx`, `tailwind-merge`, `tw-animate-css`, `cmdk`, Radix 패키지 등)
+프론트 `dependencies`: `next`, `react`, `react-dom`, `@tanstack/react-query`, `react-hook-form`, `@hookform/resolvers`, `zod`, `recharts`, `react-markdown`, `remark-gfm`, `lucide-react`, `sonner`, 그리고 shadcn CLI가 추가하는 패키지(CLI 4.21.x, radix 기반 기준: `class-variance-authority`, `cn`(clsx+tailwind-merge 대체, `shadcn-ui/cn`), `radix-ui`(통합 Radix 패키지), `tw-animate-css`, `cmdk`, `next-themes`(sonner 컴포넌트용), `shadcn`(`globals.css`의 `shadcn/tailwind.css` import용). `clsx`·`tailwind-merge`·개별 `@radix-ui/*`는 따로 설치하지 않는다)
 
 프론트 `devDependencies`: `typescript`, `@types/*`, `eslint`, `eslint-config-next`, `tailwindcss`, `@tailwindcss/postcss`, `vitest`, `@vitejs/plugin-react`, `jsdom`, `@testing-library/react`, `@testing-library/jest-dom`, `@testing-library/user-event`, `msw`
 
-shadcn 컴포넌트: `accordion`, `alert`, `alert-dialog`, `avatar`, `badge`, `button`, `card`, `checkbox`, `command`, `dialog`, `dropdown-menu`, `form`, `input`, `label`, `popover`, `progress`, `radio-group`, `scroll-area`, `select`, `separator`, `sheet`, `skeleton`, `sonner`, `switch`, `table`, `tabs`, `textarea`, `tooltip`
+shadcn 컴포넌트: `accordion`, `alert`, `alert-dialog`, `avatar`, `badge`, `button`, `card`, `checkbox`, `command`, `dialog`, `dropdown-menu`, `form`, `input`, `label`, `popover`, `progress`, `radio-group`, `scroll-area`, `select`, `separator`, `sheet`, `skeleton`, `sonner`, `switch`, `table`, `tabs`, `textarea`, `tooltip`. `form`은 현재 스타일 레지스트리에서 빠져 있어 new-york-v4 레지스트리의 react-hook-form 연동 `form.tsx`를 import 경로만 맞춰 `components/ui/form.tsx`로 둔다
 
 ## 5. 백엔드 구조 (01a)
 
