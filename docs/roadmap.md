@@ -207,6 +207,8 @@ gh pr merge <PR 번호> --merge
 
 - **codex 업데이트 안내**: codex가 새 버전 안내를 띄우면 `worker-start`가 `agent_readiness` 단계에서 `Agent startup blocked: agent-update-prompt`로 실패한다. 실패한 시도는 영수증대로 `worker-release`하고, Orca가 띄우는 codex의 버전 파일(`~/Library/Application Support/orca/codex-accounts/<계정 id>/home/version.json`. `~/.codex/version.json`이 아니다)의 `dismissed_version`을 `latest_version`과 같게 적거나(그 버전 건너뛰기) codex를 올린 뒤 `--retry-of`로 다시 띄운다. 디스패치 전에 `npm view @openai/codex version`으로 확인한다.
 - **슬롯 포트 충돌**: 이 기기에서는 다른 프로젝트가 8000을 쓰고 있다. `scripts/start.sh`는 점유 프로세스를 죽이지 않고 멈춘다(정상). 슬롯 00 통합 검증은 백엔드 8090(`FRONTEND_ORIGIN=http://localhost:3090`)·프론트 3090(`NEXT_PUBLIC_API_BASE_URL=http://localhost:8090`)으로 직접 띄워 진행하고, 디스패치 전에 `lsof -nP -iTCP:<port> -sTCP:LISTEN`으로 확인한다.
+- **localhost 쿠키 충돌**(웨이브 2): 쿠키는 포트를 구분하지 않아서 여러 워크트리 서버가 공용 Orca 브라우저 프로필에서 `finance_session`을 서로 덮어쓴다. 동시에 도는 워커의 화면 확인은 독립 브라우저 컨텍스트(Orca isolated 프로필, Playwright 새 context)에서 로그인한다. 디스패치 spec이나 메시지에 적어 준다.
+- **디스크 부족**(웨이브 2): 워크트리마다 `node_modules`·`.venv`가 약 1GB이고 build 산출물도 쌓여, 4개 동시 진행 중 여유 공간이 117MB까지 떨어지고 Docker Desktop(공용 Postgres)이 멈췄다. 디스패치 전에 `df -h /`로 여유 15GB 이상을 확인한다. Docker가 `unable to start`로 멈추면 앱을 종료한 뒤 다시 열거나 재부팅한다.
 - **수정 브랜치**: 통합 검증에서 나온 결함은 그 모듈의 기존 워크트리에서 `git switch -c feature/NN-<slug>-fix-<번호> origin/develop`으로 브랜치를 만들고 `orca worktree show --worktree path:<경로>`로 Orca를 갱신한 뒤 디스패치한다(의존성·DB 슬롯을 다시 쓸 수 있다).
 
 ## 5. 웨이브별 통합 확인 항목 (6.4 블록이 참조)
