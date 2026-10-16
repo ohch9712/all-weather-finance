@@ -588,4 +588,54 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 
 ### 01b
 
-(01b 작업이 이 줄을 지우고 구현한 것, 스펙과 다른 점과 이유, 남은 일을 적는다)
+#### 구현한 것
+
+- 프로젝트: `create-next-app` 16.4.2(Next.js 16.4.2, React 19.3, TypeScript strict, Tailwind CSS 4, ESLint 9, App Router, `src/`, `@/*`, npm). 4.1의 프론트 의존성 전부와 shadcn CLI 4.21.5(radix 기반, 스타일 `radix-nova`)로 28개 컴포넌트를 설치했다. 스크립트는 `dev`·`build`·`start`·`lint`·`test`(`vitest run`)·`test:watch`.
+- 디자인 시스템(`globals.css`): shadcn neutral 토큰, 자산군 `--asset-stock|bond|gold|cash|other`, 계열 색 `--chart-1~6`, 금액 증감 `--money-up`(빨강)·`--money-down`(파랑)을 라이트·다크 두 벌로 둔다. Tailwind 유틸리티 `bg-asset-stock`, `text-money-up` 등으로도 쓸 수 있다. 차트 색은 dataviz 검증기로 확인했고 결과를 파일 주석에 적었다(자산군: 라이트 색약 ΔE 최소 10.6·일반 16.3, 다크 8.4·15.9. 계열 색: 라이트 9.1·19.6, 다크 8.4·19.3. 인접 쌍과 도넛의 처음·끝 쌍 기준).
+- 차트 래퍼(`components/charts`): `DonutChart`·`BarChart`·`LineChart`(Recharts 3.10 `responsive`), `palette.ts`(`assetColor`, `seriesColor`, `CHART_CHROME`, `readCssColor`), 공용 범례·툴팁·숨김 표(`ChartParts.tsx`). 모든 차트가 `role="img"`+`aria-label`과 같은 데이터의 `sr-only` 표를 그리고, 2개 이상 계열이면 범례를 붙인다. 색은 `var(--...)`를 SVG에 그대로 넘겨 테마 전환이 다시 렌더링 없이 반영된다.
+- 공용 컴포넌트(`components/common`): 11.1의 10종. `Disclaimer`는 architecture 13절 문구를 `DISCLAIMER_TEXT`로 내보낸다.
+- 앱 셸(`components/layout`): `AppShell`(데스크톱 고정 사이드바 240px, 상단 바, 본문 최대 1200px·모바일 좌우 16px, 본문 건너뛰기 링크), `Sidebar`, `MobileNav`(Sheet), `UserMenu`(이메일, 프로필 설정, 로그아웃), 둘이 함께 쓰는 `NavLinks`.
+- `lib/`: `api-client`(gamja-market 이식), `format`, `navigation`, `domain`, `query`(`createQueryClient`, `shouldRetry`), `site`(`APP_NAME`), `ai-status`(`useAiStatus`), `form-errors`(`toSubmitErrors`·`applyFieldErrors`: 서버 에러 → 필드 에러·폼 위 문구), `utils`(`cn`). `types/api.ts`: `ErrorResponse`, `ErrorDetail`, `Page<T>`.
+- 인증(`features/auth`): `api.ts`, `types.ts`, `validation.ts`(zod 4), `redirect.ts`(`getSafeRedirectPath`, `getLoginPath`), `hooks.ts`(`useLogin`, `useSignup`, `useUpdateProfile`, `useRedirectIfAuthenticated`), `AuthProvider`, `components/`(`LoginForm`, `SignupForm`, `RequireAuth`, `OnboardingGate`, `ProfileForm`, `AuthGateFallback`, `FormAlert`).
+- 화면: `/login`, `/signup`, `/onboarding`, `/settings/profile`, 404, 11.6의 자리표시 18개, `ChatWidget` 스텁(null).
+- 테스트(`tests/`): `setup.ts`(jest-dom, MSW `onUnhandledRequest: "error"`, `next/navigation` 메모리 라우터 목, jsdom 폴리필), `utils.tsx`(`renderWithProviders(ui, { route, auth })`, `server`, `apiUrl`, `errorResponse`, `authPayload`, `mockMe`, `memoryRouter`), `foundation/` 12개 파일 146개 테스트(13.2 항목 전부 + 고지 문구 글자 대조, 공용 컴포넌트, fetch·apiFetch 사용 위치 구조 검사).
+
+#### 검사 결과
+
+- `npm run lint` 통과, `npx tsc --noEmit` 통과, `npm run test` 12 files / 146 tests 통과, `npm run build` 통과(22개 경로 생성).
+- `npm run dev -- --port 3001`로 모든 자리표시 경로와 로그인·가입·온보딩·프로필이 200으로 렌더링된다. 백엔드가 꺼져 있으면 `(app)` 화면은 "서버에 연결할 수 없습니다…" 오류 상태와 "다시 시도"를, 로그인·가입은 폼을 정상으로 보여 준다.
+- 헤드리스 Chrome(CDP)으로 360px·1280px × 라이트·다크에서 홈·프로필·설문 자리표시·종목 상세·로그인·가입·온보딩·모바일 메뉴·차트 데모(커밋하지 않음)를 열어 `scrollWidth == clientWidth`(가로 스크롤 없음)와 화면 대비를 확인했다.
+- develop 병합 후 `scripts/worktree-setup.sh`가 이 lock 파일로 `npm ci`까지 성공했고, `scripts/start.sh backend`로 띄운 01a 백엔드와 실제 브라우저 흐름(미인증 접근 → `/login?next=/ledger`, 가입 → `/onboarding`, 출생연도 저장 → `/allocation/survey?onboarding=1`, 프로필 화면, 로그아웃 → `/login`·`/api/auth/me` 401, 재로그인 → `/ledger`)이 통과했다.
+
+#### 스펙과 다른 점과 이유
+
+1. `next.config.ts`는 create-next-app 16.4 기본값인 `cacheComponents`·`partialPrefetching`을 끈다(코디네이터 결정, architecture 12절). 데이터를 모두 클라이언트에서 불러와 이점이 적고, Activity가 숨긴 이전 경로 상태가 다른 사용자에게 남을 수 있다.
+2. Tailwind: 스캐폴드가 넣은 `@tailwindcss/turbopack`(+turbopack 규칙)을 빼고 4.1대로 `@tailwindcss/postcss` + `postcss.config.mjs`로 바꿨다.
+3. shadcn CLI 4.21이 넣은 패키지(`cn`, `radix-ui`, `next-themes`, `shadcn`)를 그대로 쓴다(코디네이터 승인, 4.1 갱신). `form`은 현재 스타일 레지스트리에서 비어 있어 new-york-v4 `form.tsx`를 경로만 맞춰 두었다(파일 맨 위에 출처 주석). zod 변환(문자열 → 정수)을 쓰는 폼을 받도록 `FormField`에 `TTransformedValues` 제네릭을 더했다. `components/ui`의 영어 문구(Close, Command Palette)는 한국어로 바꿨다.
+4. 버전: MSW는 최신 3.x 대신 스펙대로 2.x(2.15), `@types/node`는 vitest 5의 peer 요구로 24, zod는 4(최신).
+5. `frontend/CLAUDE.md`: Next 16.4의 `next dev`는 `AGENTS.md`만 만들므로 gamja-market·저장소 루트와 같은 `@AGENTS.md` 한 줄을 직접 두었다.
+6. 폰트: `next/font`로 받지 않고 시스템 한글 글꼴 스택(`--font-sans`: Apple SD Gothic Neo, Malgun Gothic, Noto Sans KR …)을 쓴다. 빌드할 때 네트워크가 필요 없고 한글 글리프가 없는 Geist를 쓰지 않기 위해서다. 템플릿의 `src/app/favicon.ico`는 소유 경로인 `public/favicon.ico`로 옮겼다.
+7. 다크 모드는 OS 설정(`prefers-color-scheme`)을 따른다. shadcn의 `dark:` 변형을 미디어 쿼리로 바꿨다(스크립트가 없어 첫 화면 깜빡임·하이드레이션 문제가 없다). 테마 전환 UI는 없다.
+8. 자산군 색은 11.1의 색 계열을 검증기로 고른 값이다. 채권은 금(호박)과 적록 색약에서 구분되도록 청록 쪽 초록(라이트 `#1baf7a`, 다크 `#199e70`)이다. 현금성 자산 회색은 스펙상 중립색이라 채도 기준의 예외다. 3:1 미만인 색(라이트 채권 2.82, 다크 기타 2.81)은 범례·값·숨김 표로 보완한다.
+9. `formatKRWCompact`는 스펙 11.2·9절 규칙(만 단위 정수)이다(코디네이터 확인, architecture 12절 예시 수정 f320063). `AGE_BAND_LABEL`은 짧은 이름이고 "20세 미만 포함"은 주석으로 둔다(코디네이터 확인).
+10. `apiFetch`는 문자열 본문뿐 아니라 본문 없는 POST·PUT·PATCH·DELETE에도 `Content-Type: application/json`을 붙인다. 01a의 로그아웃이 architecture 4절대로 `require_json`을 걸어, 본문 없는 요청은 422가 났기 때문이다(실제 백엔드 흐름 확인 중 발견). `FormData` 본문(업로드)에는 붙이지 않는다. jsdom·Node에서 `DOMException` realm이 달라 취소 판별은 `instanceof` 대신 이름과 호출자 signal로 한다.
+11. 스펙에 없던 세부(가장 단순한 쪽으로 정함)
+    - `AuthProvider` 값에 `error`(`/me`가 401이 아닌 이유로 실패)와 `signedOut`(이 화면에서 로그아웃함)을 더했다. `RequireAuth`는 `error`가 있으면 로그인으로 보내지 않고 오류 상태와 다시 시도를 보여 준다. `logout`은 요청이 실패하면 상태를 유지하고 에러를 던지며, 사용자 메뉴·프로필 화면은 토스트로 알린다. `refresh`는 로그인된 상태에서 실패하면 화면을 유지한다.
+    - `next`에는 쿼리 문자열도 담는다(`/login?next=/allocation/survey%3Fonboarding%3D1`). `RequireAuth`·`LoginForm`은 `useSearchParams`를 쓰므로 `(app)/layout.tsx`와 로그인 페이지에서 `Suspense`로 감쌌다.
+    - 내비게이션 그룹: `main`(홈·자산배분·가계부·매매일지·상속·증여·배우기·AI 상담), `stocks`(관심종목·조건검색, 제목 "주식"), `settings`(프로필·증권사 연결), `admin`(학습 콘텐츠 관리). 배열 순서는 architecture 12.1 표와 같다. 상단 바 제목은 현재 메뉴 이름(`findActiveNavItem`)이다.
+    - `formatPercent(value, digits = 1)`은 소수 자릿수를 고정한다(`50` → `"50.0%"`, 정수는 `digits = 0`). `formatDate`는 시각 문자열도 받아 KST 날짜로 바꾼다. `currentKstYear()`를 더했다.
+    - `ConfirmDialog`에 `trigger`·`open`·`onOpenChange`·`cancelLabel`을 더했고 `onConfirm`이 Promise면 끝난 뒤 닫는다. `DonutChart`에 `valueFormatter`, `BarChart`·`LineChart`에 `height`를 더했다. `BarChart`의 `layout`은 Recharts와 같은 뜻이다(`horizontal` 기본 = 세로 막대, `vertical` = 가로 막대). `MoneyText`는 `compact`일 때 원래 금액을 `title`로 둔다. `seriesColor`는 7번째 계열부터 회색을 준다(돌려 쓰지 않는다).
+    - 프로필 저장에 성공하면 모든 쿼리를 무효화한다(나이대가 바뀌면 다른 모듈 결과도 바뀐다). 온보딩 닉네임은 앞뒤 공백을 걷고 빈 값이면 `null`로 보낸다. 출생연도 미선택 문구는 "출생연도를 선택해 주세요."다.
+    - 쿼리 기본값: `staleTime` 30초, 4xx는 재시도하지 않고 그 밖에는 1회, 창 포커스 재요청 끔. `useAiStatus`는 5분.
+
+#### 다음 작업이 쓰는 법
+
+- API: `features/<module>/api.ts`에서 `apiFetch<T>(path, init)`를 부르고 `hooks.ts`에서 TanStack Query 훅으로 감싼다. 폼 서버 에러는 `toSubmitErrors(error, FIELDS, { codeToField })` → `applyFieldErrors(form.setError, …)`, 남는 문구는 `FormAlert`처럼 폼 위에 둔다.
+- 차트 색: 자산군은 `assetColor("stock")`, 그 밖의 계열은 `seriesColor(0..5)`.
+- 테스트: `renderWithProviders(<Page />, { route: "/ledger?month=2026-10", auth: authPayload() })` 후 `server.use(http.get(apiUrl("/api/..."), …))`. 이동은 돌려받은 `router.push`·`router.replace`(vi.fn)나 `memoryRouter.pathname`으로 확인한다. 처리하지 않은 요청은 테스트 실패다.
+
+#### 남은 일
+
+- 두 브랜치를 합친 실제 흐름은 로드맵의 웨이브 1 통합 검증에서 다시 확인한다(위 브라우저 흐름은 사전 확인이다).
+- 다른 API 호출 중 세션이 만료되면(401) 해당 화면은 오류 상태만 보여 주고 로그인 화면으로 자동 이동하지 않는다. 필요하면 공통 처리(쿼리 캐시의 401 감지 → `refresh()`)를 추가한다.
+- 테마 전환 UI, 로그인 시도 제한 안내는 범위 밖이다. `npm audit`의 high 9건은 create-next-app·shadcn 의존성에서 온 것이라 이번 범위에서 손대지 않았다.
