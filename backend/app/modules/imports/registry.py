@@ -56,6 +56,7 @@ class ImportKind:
     label: str
     fields: tuple[TargetField, ...]
     normalize_row: Callable[[dict[str, Any]], Any]
+    # 저장 함수는 flush까지만 한다. commit·rollback은 임포트 엔진이 맡는다.
     commit: Callable[[Session, UUID, list[Any], CommitContext], ImportResult]
     presets: tuple[ImportPreset, ...] = ()
     llm_hint: str = ""

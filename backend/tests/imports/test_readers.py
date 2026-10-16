@@ -87,3 +87,26 @@ def test_charset_fallback_and_long_csv_cell():
     assert read_file(table.encode("utf-16")).sheets["Sheet1"][0] == ["날짜", "금액", "제목"]
     data = ("날짜,금액,제목\n2026-10-16,1," + "x" * 200000).encode()
     assert len(read_file(data).sheets["Sheet1"][1][2]) == 200000
+
+
+def test_xls_cell_named_encrypted_package_is_not_a_stream():
+    from tests.imports.fixtures.generate import make_xls
+
+    book = read_file(make_xls([["EncryptedPackage"], ["가짜 셀"]]))
+    assert book.file_type == "xls"
+
+
+def test_delimiter_consistency_with_intro_and_amount_commas():
+    data = (
+        "가짜 안내\n안내 두번째\n날짜;금액;제목\n"
+        "2026-10-16;1,234,567,890;가짜\n2026-10-17;1,234,567,890;다음\n"
+    ).encode()
+    assert read_file(data).sheets["Sheet1"][2] == ["날짜", "금액", "제목"]
+
+
+def test_html_preserves_text_identifier_and_amount():
+    data = (
+        "<table><tr><td>날짜</td><td>금액</td><td>제목</td></tr>"
+        "<tr><td>2026-10-16</td><td>12,000</td><td>005930</td></tr></table>"
+    ).encode()
+    assert read_file(data).sheets["Sheet1"][1] == ["2026-10-16", "12,000", "005930"]

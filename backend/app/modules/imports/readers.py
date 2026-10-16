@@ -2,6 +2,7 @@ import csv
 import io
 import re
 import struct
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -108,10 +109,13 @@ def read_file(data: bytes) -> Workbook:
             finally:
                 book.close()
         if data.startswith(OLE):
-            # OLE 디렉터리의 UTF-16 스트림 이름도 확인해 손상된 암호 파일을 안내한다.
-            if "EncryptedPackage".encode("utf-16-le") in data:
-                raise encrypted()
-            compound = CompDoc(data, logfile=io.StringIO())
+            try:
+                compound = CompDoc(data, logfile=io.StringIO())
+            except (CompDocError, struct.error, ValueError):
+                # 손상된 암호 파일 흉내도 안내하되 정상 XLS의 셀 내용과 혼동하지 않는다.
+                if "EncryptedPackage".encode("utf-16-le") in data or b"EncryptedPackage" in data:
+                    raise encrypted() from None
+                raise
             if compound.locate_named_stream("EncryptedPackage")[0] is not None:
                 raise encrypted()
             book = xlrd.open_workbook(file_contents=data, logfile=io.StringIO())
@@ -149,11 +153,21 @@ def read_file(data: bytes) -> Workbook:
                     th.tag = "td"
                 for thead in table.xpath(".//thead"):
                     thead.tag = "tbody"
+                markup = etree.tostring(table, encoding="unicode")
                 frame = pd.read_html(
-                    io.StringIO(etree.tostring(table, encoding="unicode")),
+                    io.StringIO(markup),
                     flavor="lxml",
                     header=None,
                     keep_default_na=False,
+                )[0]
+                # HTML 셀은 원래 문자열이다. 숫자처럼 보이는 식별자의 앞자리 0을 보존한다.
+                frame = pd.read_html(
+                    io.StringIO(markup),
+                    flavor="lxml",
+                    header=None,
+                    keep_default_na=False,
+                    converters={i: cell_string for i in range(len(frame.columns))},
+                    thousands=None,
                 )[0]
                 sheets[f"Sheet{index}"] = [[cell_string(v) for v in row] for row in frame.values]
             return Workbook("html", sheets)
@@ -163,10 +177,16 @@ def read_file(data: bytes) -> Workbook:
         try:
             delimiter = csv.Sniffer().sniff(sample, delimiters=",\t;").delimiter
         except csv.Error:
-            scores = {
-                d: sum(line.count(d) for line in sample.splitlines()) for d in (",", "\t", ";")
-            }
-            delimiter = max(scores, key=scores.get)
+
+            def score(delimiter):
+                widths = Counter(
+                    len(row)
+                    for row in csv.reader(io.StringIO(sample), delimiter=delimiter)
+                    if len(row) > 1
+                )
+                return max(widths.values(), default=0), -len(widths)
+
+            delimiter = max((",", "\t", ";"), key=score)
         csv.field_size_limit(
             max(csv.field_size_limit(), get_settings().import_max_file_mb * 1024 * 1024)
         )

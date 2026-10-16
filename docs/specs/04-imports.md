@@ -321,11 +321,41 @@ def create_job_from_table(db, user_id, *, kind_key: str, file_name: str,
 
 ## 구현 결과
 
-### 중간 저장 (2026-10-17, 재부팅 전)
+### 구현한 것
 
-- 레지스트리, 날짜·시각·금액·소수·텍스트·열거값 변환, CSV/CP949/탭/XLSX/XLS/HTML 판별·읽기, 헤더 탐지, 프리셋·동의어·개인 등급 LLM 매핑과 숫자 가림을 구현했다. 가짜 파일 6종과 암호화 파일 흉내·PDF 거부 픽스처를 추가했다.
-- 원본 행 번호 유지, 합계·빈 행 제외, 5,000행 제한, 도메인 정규화 오류와 미리보기 집계·페이지 처리를 구현했다. DB 모델·revision `imports_0001`·사용자별 저장소는 초안을 작성했으며 아직 DB에 적용하지 않았다.
-- 재사용 `ImportWizard`, API 함수와 TanStack Query 훅, 4단계 진행·필수 매핑·오류 제외·만료·공급자/AI 고지를 구현했다. 별도 임시 Vite 하네스에서 Playwright로 360px 각 단계와 1280px 결과 화면의 가로 스크롤 없음(문서 너비=뷰포트)을 확인했고 하네스와 브라우저·서버를 정리했다. 스크린샷은 저장소 밖 `/tmp/imports-04-visual`에 있다.
-- 확인한 명령: 순수 백엔드 `uv run pytest tests/imports -q` 62개 통과(아래 오류 도우미 대기용 변경 전), 프론트 `npm run lint` 통과, `npx tsc --noEmit` 통과, `npm run test` 211개 통과. 공용 Postgres 장애 안내에 따라 DB 검사와 build는 아직 실행하지 않았다.
-- 코디네이터 확인: 금지 대상은 원본 파일 바이트이며 정제 `rows`·`columns`는 스펙대로 DB에 둔다. `RequestValidationError` 우회는 사용하지 않고 코디네이터가 develop에 추가할 `AppError.details`/`field_error`를 사용한다. 현재 `validation.py`는 그 반영을 기다리는 명시적 미구현 자리이며 관련 테스트도 공용 오류 방식으로 수정해야 한다.
-- 재개 후 남은 일: 업로드를 설치된 `python-multipart` 저수준 스트리밍 파서+`BytesIO`로 교체(현재 email 파서 구현은 교체 대상), 공용 오류 도우미 반영·테스트 수정, 서비스와 API 전체 흐름 연결, 사용자 격리·만료·원자 커밋·6종 파일 전체 흐름 테스트, 빈 DB 마이그레이션 순환, 전체 백엔드 검사 및 프론트 build, 구현 결과 최종 갱신과 PR 생성. 실제 소비 종류·카드사/증권사 프리셋은 등록하지 않았다.
+- `ImportKind`·`TargetField`·`ImportPreset`·`CommitContext`·`ImportResult`·`RowValidationError`와 등록/조회 API를 구현했다. 실제 종류나 카드사·증권사 프리셋은 등록하지 않았다.
+- CSV(UTF-8/CP949/추정 인코딩, 쉼표/탭/세미콜론), XLSX, XLS, HTML의 내용 우선 판별·읽기, 다중 시트/표 선택, 머리행 탐지, 빈 행·합계 행 제외, 원본 행 번호 유지와 5,000행 제한을 구현했다. HTML의 숫자처럼 보이는 텍스트 식별자 앞자리 0도 보존한다.
+- 날짜·KST 시각·정수 원 금액·Decimal·텍스트·열거값 변환, 프리셋→동의어→LLM→사용자 매핑, LLM 결과 정리와 숫자 가림을 구현했다. LLM은 `get_structured_llm`/`StructuredLLMDep`와 `imports.column_mapping`만 쓰고 오류가 나면 경고와 수동 매핑으로 진행한다.
+- `python-multipart` 저수준 스트리밍 파서와 `BytesIO`로 원본 파일을 메모리에서만 받으며 제한 초과를 읽는 도중 413으로 중단한다. `tempfile`·`SpooledTemporaryFile`을 사용하지 않는다.
+- `imports_0001`과 사용자별 `import_jobs`, 24시간 만료·새 작업 생성 시 자기 만료 작업 정리, 종류 조회/생성/조회/매핑/미리보기/커밋/삭제 API와 `create_job_from_table`을 구현했다. 필드별 422는 공용 `field_error`를 사용한다.
+- 커밋 시 행 잠금과 하나의 트랜잭션으로 소비 모듈 저장·결과 집계·상태 갱신·`rows=[]`를 처리하며, 실패하면 전부 롤백한다. 소비 모듈의 저장 함수는 `flush`까지만 호출하고 트랜잭션 종료는 엔진이 맡는다. 오류 응답의 행 오류는 최대 100개다.
+- 재사용 `ImportWizard`와 API 함수·TanStack Query 훅, 파일 끌어 놓기/선택·다중 시트 선택·열/예시 확인·필수 매핑·미리보기/오류 필터/페이지 이동·오류 행 제외·결과·만료 재시작·AI 공급자 배지와 고지를 구현했다.
+
+### 검증 결과
+
+| 명령/항목 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 04 환경 준비와 마이그레이션 성공 |
+| `cd backend && uv run ruff check .` | 통과 |
+| `cd backend && uv run ruff format --check .` | 110개 파일 통과 |
+| `cd backend && uv run pytest` | 205개 통과(임포트 테스트 94개 포함), 기반 TestClient의 사용 중단 경고 1개 |
+| 별도 빈 DB `finance_04_migration_check` | `uv run alembic upgrade heads` → `uv run alembic downgrade base` → `uv run alembic upgrade heads` 통과 후 DB 삭제 |
+| `cd frontend && npm run lint` | 통과 |
+| `cd frontend && npx tsc --noEmit` | 통과 |
+| `cd frontend && npm run test` | 208개 통과(위저드 MSW 테스트 6개 포함) |
+| `cd frontend && npm run build` | Next.js 16.4.2 프로덕션 빌드 통과 |
+| 360px·1280px 브라우저 확인 | 별도 임시 Vite 하네스/Playwright에서 360px의 파일·매핑·미리보기·결과와 1280px 결과 확인, 문서 너비=뷰포트 너비, 긴 예시/제목과 AI 고지 표시 확인 |
+| 실제 서버 HTTP 확인 | health 200, 인증 전 kinds 401, 인증 후 kinds 200(실제 종류 없음), 알 수 없는 kind 422/필드 details, 프론트 login 200 |
+| 경로·보안 점검 | `git diff --name-only develop...HEAD`가 소유 범위에만 포함, 사용자별 모든 작업 API의 타인 접근 404, 외부 호출 차단, 원본 바이트 저장 없음 |
+| 서버/검사 데이터 정리 | `scripts/stop.sh` 실행, 임시 하네스·브라우저·검사 계정·검사 DB 정리 |
+
+### 스펙과 다른 점과 이유
+
+- 코디네이터 확인에 따라 저장 금지 대상은 **원본 파일 바이트**이며, 정제된 `rows`·`columns`는 스펙대로 DB에 둔다. 원본 바이트는 임시 파일로도 저장하지 않는다.
+- XLSX 압축 해제 후 총 크기가 100MB를 넘으면 기존 `VALIDATION_ERROR(field="file")`로 거부하는 메모리 보호 한도를 추가했다. 의존성·공유 파일·API 필드·revision·공개 함수 시그니처 변경은 없다.
+- 소비 모듈에 노출되는 `presetKey`는 스키마에 별도 컬럼이 없어 저장된 머리행과 등록된 프리셋의 일치 여부로 계산한다. 커밋 후 `rowCount`는 결과의 저장·중복·실패 수 합계로 유지한다.
+
+### 남은 일
+
+- 04 범위 안의 미구현 항목은 없다. 별도 검증 워커의 검증과 PR 병합은 코디네이터가 진행한다.
+- 10·11에서 실제 종류·도메인 저장 함수를 등록하고 각 업로드 페이지에 위저드를 넣는다. 기관별 프리셋은 실제 비식별 샘플이 확보된 뒤 추가한다.

@@ -382,7 +382,7 @@ def test_llm_upload_mapping_and_failure(auth_client, fake_llm):
     assert job["mappingSource"] == "llm" and job["mapping"]["title"] == 2
     prompt = json.loads(fake_llm.calls[0].content[0].text)
     assert prompt["samples"][0] == ["20****16", "12000", "12********12"]
-    assert mapped(auth_client, job)["mappingSource"] == "llm"
+    assert mapped(auth_client, job, job["mapping"])["mappingSource"] == "llm"
 
     def fail(_):
         raise AppError(503, "LLM_UNAVAILABLE", "실패")
