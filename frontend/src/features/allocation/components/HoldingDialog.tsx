@@ -51,10 +51,13 @@ interface HoldingDialogProps {
 
 /** 보유 자산 추가·수정 다이얼로그(9.3) */
 export function HoldingDialog({ target, onClose }: HoldingDialogProps) {
+  // 닫히는 애니메이션 동안에도 마지막 내용을 그대로 보여 준다(target이 먼저 null이 된다).
+  const [shown, setShown] = useState(target);
+  if (target !== null && target !== shown) setShown(target);
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md">
-        {target && <HoldingForm key={target.mode === "edit" ? target.holding.id : "create"} target={target} onDone={onClose} />}
+        {shown && <HoldingForm key={shown.mode === "edit" ? shown.holding.id : "create"} target={shown} onDone={onClose} />}
       </DialogContent>
     </Dialog>
   );

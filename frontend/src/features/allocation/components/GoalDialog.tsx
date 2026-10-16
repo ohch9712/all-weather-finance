@@ -30,10 +30,13 @@ interface GoalDialogProps {
 
 /** 목표 추가·수정 다이얼로그(9.4): 종류 칩 7개, 이름, 금액, 목표일 */
 export function GoalDialog({ target, onClose }: GoalDialogProps) {
+  // 닫히는 애니메이션 동안에도 마지막 내용을 그대로 보여 준다(target이 먼저 null이 된다).
+  const [shown, setShown] = useState(target);
+  if (target !== null && target !== shown) setShown(target);
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md">
-        {target && <GoalForm key={target.mode === "edit" ? target.goal.id : "create"} target={target} onDone={onClose} />}
+        {shown && <GoalForm key={shown.mode === "edit" ? shown.goal.id : "create"} target={shown} onDone={onClose} />}
       </DialogContent>
     </Dialog>
   );
