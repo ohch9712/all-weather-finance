@@ -318,3 +318,14 @@ def create_job_from_table(db, user_id, *, kind_key: str, file_name: str,
 
 - 10: `ledger_card` 종류(카드 이용내역)를 등록하고, 카드사 프리셋은 실제 샘플이 있을 때만 추가한다.
 - 11: `journal_trades` 종류(매매내역)를 등록한다.
+
+## 구현 결과
+
+### 중간 저장 (2026-10-17, 재부팅 전)
+
+- 레지스트리, 날짜·시각·금액·소수·텍스트·열거값 변환, CSV/CP949/탭/XLSX/XLS/HTML 판별·읽기, 헤더 탐지, 프리셋·동의어·개인 등급 LLM 매핑과 숫자 가림을 구현했다. 가짜 파일 6종과 암호화 파일 흉내·PDF 거부 픽스처를 추가했다.
+- 원본 행 번호 유지, 합계·빈 행 제외, 5,000행 제한, 도메인 정규화 오류와 미리보기 집계·페이지 처리를 구현했다. DB 모델·revision `imports_0001`·사용자별 저장소는 초안을 작성했으며 아직 DB에 적용하지 않았다.
+- 재사용 `ImportWizard`, API 함수와 TanStack Query 훅, 4단계 진행·필수 매핑·오류 제외·만료·공급자/AI 고지를 구현했다. 별도 임시 Vite 하네스에서 Playwright로 360px 각 단계와 1280px 결과 화면의 가로 스크롤 없음(문서 너비=뷰포트)을 확인했고 하네스와 브라우저·서버를 정리했다. 스크린샷은 저장소 밖 `/tmp/imports-04-visual`에 있다.
+- 확인한 명령: 순수 백엔드 `uv run pytest tests/imports -q` 62개 통과(아래 오류 도우미 대기용 변경 전), 프론트 `npm run lint` 통과, `npx tsc --noEmit` 통과, `npm run test` 211개 통과. 공용 Postgres 장애 안내에 따라 DB 검사와 build는 아직 실행하지 않았다.
+- 코디네이터 확인: 금지 대상은 원본 파일 바이트이며 정제 `rows`·`columns`는 스펙대로 DB에 둔다. `RequestValidationError` 우회는 사용하지 않고 코디네이터가 develop에 추가할 `AppError.details`/`field_error`를 사용한다. 현재 `validation.py`는 그 반영을 기다리는 명시적 미구현 자리이며 관련 테스트도 공용 오류 방식으로 수정해야 한다.
+- 재개 후 남은 일: 업로드를 설치된 `python-multipart` 저수준 스트리밍 파서+`BytesIO`로 교체(현재 email 파서 구현은 교체 대상), 공용 오류 도우미 반영·테스트 수정, 서비스와 API 전체 흐름 연결, 사용자 격리·만료·원자 커밋·6종 파일 전체 흐름 테스트, 빈 DB 마이그레이션 순환, 전체 백엔드 검사 및 프론트 build, 구현 결과 최종 갱신과 PR 생성. 실제 소비 종류·카드사/증권사 프리셋은 등록하지 않았다.

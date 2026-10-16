@@ -2,14 +2,14 @@ import { screen } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { expect, it, vi } from "vitest";
 import { ImportWizard } from "@/features/imports";
-import type { ImportJob } from "@/features/imports/types";
+import type { ImportJob, ImportPreview } from "@/features/imports/types";
 import { apiUrl, errorResponse, renderWithProviders, server } from "../utils";
 const fields = [
   { key: "date", label: "날짜", type: "date" as const, required: true },
   { key: "amount", label: "금액", type: "amount" as const, required: true },
   { key: "title", label: "제목", type: "text" as const, required: true },
 ];
-const preview = { validCount: 1, invalidCount: 1, page: 1, pageSize: 50, total: 2, rows: [
+const preview: ImportPreview = { validCount: 1, invalidCount: 1, page: 1, pageSize: 50, total: 2, rows: [
   { rowNumber: 2, values: { date: "2026-10-16", amount: 12000, title: "식사" }, errors: [] },
   { rowNumber: 3, values: { date: "2026-10-16", title: "오류 데이터" }, errors: [{ rowNumber: 3, field: "amount", message: "금액 형식이 아닙니다." }] },
 ] };

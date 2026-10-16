@@ -1,9 +1,6 @@
 from typing import NoReturn
 
-from fastapi.exceptions import RequestValidationError
-
 
 def invalid(field: str, message: str) -> NoReturn:
-    raise RequestValidationError(
-        [{"type": "value_error", "loc": ("body", field), "msg": f"Value error, {message}"}]
-    )
+    # 코디네이터의 공용 field_error 도우미 반영 후 연결한다.
+    raise NotImplementedError("공용 필드 오류 도우미 반영을 기다리고 있습니다.")
