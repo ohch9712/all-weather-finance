@@ -95,11 +95,11 @@
 
 백엔드 `dev` 그룹: `pytest`, `respx`, `freezegun`, `ruff`
 
-프론트 `dependencies`: `next`, `react`, `react-dom`, `@tanstack/react-query`, `react-hook-form`, `@hookform/resolvers`, `zod`, `recharts`, `react-markdown`, `remark-gfm`, `lucide-react`, `sonner`, 그리고 shadcn CLI가 추가하는 패키지(`class-variance-authority`, `clsx`, `tailwind-merge`, `tw-animate-css`, `cmdk`, Radix 패키지 등)
+프론트 `dependencies`: `next`, `react`, `react-dom`, `@tanstack/react-query`, `react-hook-form`, `@hookform/resolvers`, `zod`, `recharts`, `react-markdown`, `remark-gfm`, `lucide-react`, `sonner`, 그리고 shadcn CLI가 추가하는 패키지(CLI 4.21.x, radix 기반 기준: `class-variance-authority`, `cn`(clsx+tailwind-merge 대체, `shadcn-ui/cn`), `radix-ui`(통합 Radix 패키지), `tw-animate-css`, `cmdk`, `next-themes`(sonner 컴포넌트용), `shadcn`(`globals.css`의 `shadcn/tailwind.css` import용). `clsx`·`tailwind-merge`·개별 `@radix-ui/*`는 따로 설치하지 않는다)
 
 프론트 `devDependencies`: `typescript`, `@types/*`, `eslint`, `eslint-config-next`, `tailwindcss`, `@tailwindcss/postcss`, `vitest`, `@vitejs/plugin-react`, `jsdom`, `@testing-library/react`, `@testing-library/jest-dom`, `@testing-library/user-event`, `msw`
 
-shadcn 컴포넌트: `accordion`, `alert`, `alert-dialog`, `avatar`, `badge`, `button`, `card`, `checkbox`, `command`, `dialog`, `dropdown-menu`, `form`, `input`, `label`, `popover`, `progress`, `radio-group`, `scroll-area`, `select`, `separator`, `sheet`, `skeleton`, `sonner`, `switch`, `table`, `tabs`, `textarea`, `tooltip`
+shadcn 컴포넌트: `accordion`, `alert`, `alert-dialog`, `avatar`, `badge`, `button`, `card`, `checkbox`, `command`, `dialog`, `dropdown-menu`, `form`, `input`, `label`, `popover`, `progress`, `radio-group`, `scroll-area`, `select`, `separator`, `sheet`, `skeleton`, `sonner`, `switch`, `table`, `tabs`, `textarea`, `tooltip`. `form`은 현재 스타일 레지스트리에서 빠져 있어 new-york-v4 레지스트리의 react-hook-form 연동 `form.tsx`를 import 경로만 맞춰 `components/ui/form.tsx`로 둔다
 
 ## 5. 백엔드 구조 (01a)
 
@@ -575,7 +575,16 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 
 ### 01a
 
-(01a 작업이 이 줄을 지우고 구현한 것, 스펙과 다른 점과 이유, 남은 일을 적는다)
+- 구현: Python 3.13/uv 프로젝트와 4.1절 백엔드·dev 의존성 25개를 설치하고 `backend/uv.lock`으로 고정했다. FastAPI 공통 설정·에러·CORS·camelCase 스키마·페이지네이션, Argon2id 비밀번호, SHA-256 서버 세션과 쿠키, Fernet·시간·금액 형식·로그 마스킹 유틸을 구현했다.
+- 인증·프로필: 7절 API 전체, `AdminUser`, `make-admin` CLI, 공개 서비스 `ProfileInfo`/`get_profile`/`compute_age_band`를 구현했다. 가입 시 빈 프로필을 만들며, 로그인 시 기존 세션을 교체하고 만료 세션은 삭제한다. 응답 시각은 DB 시간대와 관계없이 UTC `Z`로 직렬화한다.
+- DB·모듈: `users`, `sessions`, `user_profiles`와 `foundation_0001`(foundation 브랜치)을 추가했다. auth와 12개 모듈의 모델 import 및 라우터 등록을 준비했다. 빈 모듈에는 임의 엔드포인트를 만들지 않고 OpenAPI 태그 메타데이터를 명시했다(health/auth/profile/ai + 12개 모듈 = 16개).
+- AI: 작업 등록부, 데이터 등급별 라우팅·상태 API, Gemini Interactions/Ollama 어댑터, 이식 가능한 JSON 스키마 변환, PDF→PNG, `FakeStructuredLLM`을 구현했다. personal Gemini의 결제 조건은 라우터와 직접 어댑터 호출 모두에서 검사하며 자동 폴백은 없다. 모든 Gemini 호출에 `store=False`가 있다. 어댑터는 SDK 클라이언트를 주입할 수 있다.
+- 인프라: 공용 Postgres 17 compose, 슬롯별 DB/포트·환경설정 준비, 설정값 보존, 잠금·PID 소유권 검사·프로세스 그룹 정리·로그 회전·헬스체크를 구현했다. 포트 점유 프로세스는 종료하지 않으며 stop은 현재 워크트리의 검증된 PID 기록만 사용한다. 이 브랜치에서 frontend 디렉터리는 만들지 않았다.
+- 검증: `docker compose up -d postgres`, `scripts/worktree-setup.sh` 두 차례 실행으로 슬롯 01/DB `finance_01`/8001·3001/마이그레이션을 확인했다. `scripts/start.sh backend` 후 실제 HTTP로 가입→프로필 수정→로그아웃→재로그인, 기본 프로필·쿠키 속성·401/404/405/409/422·사용자 분리·AI 상태·OpenAPI를 확인했고 `scripts/stop.sh backend`로 종료했다. 검증용 사용자는 삭제했다.
+- 검사 결과: `uv run ruff check .`, `uv run ruff format --check .` 통과, `uv run pytest -q` **97개 통과**. 테스트 HTTP 전송을 차단하며 실제 Gemini·Ollama·증권사·CODEF는 호출하지 않는다. 추가로 스크립트 Python의 ruff 검사와 Bash 구문 검사도 통과했다. 별도 빈 DB `finance_01_impl_verify`에서 `uv run alembic upgrade heads` → `uv run alembic downgrade base` → `uv run alembic upgrade heads`가 통과했고 `uv run alembic check`에 추가 작업이 없었다. 검증 DB는 삭제했다.
+- 계약 확인: 코디네이터 승인에 따라 CORS 사전 요청 거부와 기타 프레임워크 오류는 원래 HTTP 상태 + `HTTP_ERROR`를 사용한다(갱신된 architecture 4.1 반영). Gemini 가짜 응답은 google-genai 2.31.0 `_gaos/types/interactions/interaction.py`의 `_populate_output_helpers`에 맞춰 `steps`로 생성한다(코디네이터 승인 및 architecture 9.1.8 반영). Orca 1.4.224 `out/shared/orca-yaml.js` 기준으로 `scripts.setup` 인식 확인.
+- 스펙과 다른 점: 없음. 명세되지 않은 내부 동작은 단순하게 정했고, 테스트 픽스처는 기존 개발 데이터를 트랜잭션 안에서만 지운 뒤 롤백한다. 테스트의 공개 고정 Fernet 키는 테스트 전용이다.
+- 남은 일: 코디네이터의 별도 검증·PR 병합 및 01b와의 통합 검증. 설치된 Starlette 1.8.0은 TestClient의 httpx 사용에 deprecation 경고 1건을 표시하지만 테스트는 통과하며, 계약 밖 패키지 `httpx2`는 추가하지 않았다. 실제 외부 AI 연결은 이번 테스트 범위 밖이다.
 
 ### 01b
 
