@@ -33,7 +33,5 @@ RISK_PROFILE_LABEL = dict(
         RiskProfile, ["안정형", "안정추구형", "위험중립형", "적극투자형", "공격투자형"], strict=True
     )
 )
-AGE_BAND_LABEL = dict(
-    zip(AgeBand, ["20대(20세 미만 포함)", "30대", "40대", "50대", "60대 이상"], strict=True)
-)
+AGE_BAND_LABEL = dict(zip(AgeBand, ["20대", "30대", "40대", "50대", "60대 이상"], strict=True))
 AGE_BAND_REPRESENTATIVE_AGE = {"20s": 25, "30s": 35, "40s": 45, "50s": 55, "60s": 65}

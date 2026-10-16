@@ -254,3 +254,18 @@ def test_health_and_openapi(client):
         "dashboard",
         "connectors",
     }
+
+
+def test_created_at_is_always_utc():
+    from datetime import datetime
+
+    from app.core.time import KST
+    from app.modules.auth.schemas import UserOut
+
+    user = UserOut(
+        id=uuid4(),
+        email="time@example.com",
+        role="user",
+        created_at=datetime(2026, 10, 16, 12, 21, 45, tzinfo=KST),
+    )
+    assert user.model_dump(mode="json", by_alias=True)["createdAt"] == "2026-10-16T03:21:45Z"

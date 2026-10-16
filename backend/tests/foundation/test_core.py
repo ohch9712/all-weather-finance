@@ -108,3 +108,17 @@ def test_secret_masking(key):
 
 def test_settings_no_real_api_keys():
     assert get_settings().gemini_api_key == ""
+
+
+def test_masking_multiword_password():
+    record = logging.LogRecord(
+        "test", logging.INFO, "", 0, "password=%s", ("first second third",), None
+    )
+    SecretMaskingFilter().filter(record)
+    assert record.getMessage() == "password=***"
+
+
+def test_settings_validation_does_not_print_secrets():
+    with pytest.raises(ValidationError) as exc:
+        Settings(app_encryption_key="invalid", gemini_api_key="fake-sensitive-value")
+    assert "fake-sensitive-value" not in str(exc.value)

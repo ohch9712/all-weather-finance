@@ -1,8 +1,8 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import EmailStr, Field, field_validator
+from pydantic import EmailStr, Field, field_serializer, field_validator
 from pydantic_core import PydanticCustomError
 
 from app.core.domain import AgeBand
@@ -36,6 +36,10 @@ class UserOut(CamelModel):
     email: str
     role: str
     created_at: datetime
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value: datetime) -> str:
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 class ProfileOut(CamelModel):
