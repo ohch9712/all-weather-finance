@@ -5,10 +5,12 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from functools import lru_cache
+from typing import Annotated
 from uuid import UUID
 
 import httpx
 from cryptography.fernet import InvalidToken
+from fastapi import Depends
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
@@ -83,6 +85,9 @@ def get_market_data_client() -> BrokerClient:
         if settings.market_data_provider == "kiwoom"
         else settings.toss_client_secret,
     )
+
+
+MarketDataClientDep = Annotated[BrokerClient, Depends(get_market_data_client)]
 
 
 def _owned_connection(db, user_id, connection_id):

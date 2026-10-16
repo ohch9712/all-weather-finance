@@ -311,3 +311,70 @@ class SnapshotSet:
 - 13: `list_snapshot_rows`, 키움 `list_conditions`·`run_condition`.
 - 14: `get_holdings`.
 - 18: 운영에서 고정 아웃바운드 IP와 스냅샷 배치 일정(장 마감 후 1회)을 정한다.
+
+## 구현 결과
+
+### 구현 내용
+
+- 조회 전용 `BrokerClient`와 고정 MockBroker, 키움·토스 어댑터, 오류 변환, 토큰 캐시·갱신, 호출 제한 및 429 최대 3회 재시도를 구현했다.
+- KOSPI 50개·KOSDAQ 30개의 종목 식별 정보를 KRX KIND 상장법인 목록과 대조했다. 가격·지표·계좌 5종목·예수금·체결 20건·조건식 2개는 결정적인 가상 데이터다.
+- `market_0001` 마이그레이션에 종목·스냅샷·연결 테이블을 추가했다. 연결 자격증명은 공통 Fernet 함수로 암호화하고 API에는 끝 4자리만 반환한다. 사용자별 연결 조회·검증·삭제는 소유자를 확인한다.
+- 인증된 종목 검색·상세·시세·일봉·스냅샷 상태 API와 연결 CRUD·검증·공인 IP 조회 API, 30초 시세 캐시, 최신일 조인 스냅샷 공개 함수를 구현했다. 다른 모듈에서 가져올 수 있도록 `service.MarketDataClientDep`를 노출했다.
+- `refresh-stocks`, `refresh-snapshot`(기준일·개수·재개·성공률), `prune-snapshots`, `seed-mock` 배치 명령을 구현했다.
+- `/settings/connections`에 조회 전용·IP 등록 안내, 시장 데이터 상태, 샘플 배지·고지, 연결 추가·확인·삭제를 구현했다. `BrokerConnectionsSection`을 분리하여 17의 자동 수집 섹션을 같은 페이지에 조합할 수 있다.
+
+### 증권사별 구현 및 공식 근거
+
+키움은 [공식 저장소](https://github.com/Kiwoom-Securities/Kiwoom-REST-API/tree/953e5db)의 `kiwoom/_data/kiwoom_api_spec.json`과 `kiwoom/core/ws_client.py`, 토스는 [공식 OpenAPI JSON](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json) 버전 **1.2.24**를 확인했다(2026-10-17). 구현한 경로·필드의 출처는 어댑터 코드에도 기록했다.
+
+| 증권사 | 기능 | 구현 여부·제한 | 공식 근거(스펙 파일·API) |
+| --- | --- | --- | --- |
+| 키움 | 인증 | 구현. 만료 5분 전 갱신, IP·키·한도 오류 변환 | `kiwoom_api_spec.json`: `au10001`, `error_codes` |
+| 키움 | 종목 목록 | 구현. KOSPI·KOSDAQ·KONEX와 연속 조회 | 같은 파일: `ka10099`, `list.code/name/upName` |
+| 키움 | 기본정보·시세 | 구현. 부호 문자열·250일 최고/최저 처리, 시가총액 억원→원. 거래대금은 미제공으로 null | 같은 파일: `ka10001`, `mac`, `250hgst`, `250lwst` |
+| 키움 | 일봉 | 구현. KRX·수정주가·연속 조회·기간 필터 | 같은 파일: `ka10081` |
+| 키움 | 잔고 | 구현. 토큰에 연결된 국내 잔고. 시장 구분 정보·예수금 미제공으로 `market=OTHER`, `cash_krw=None` | 같은 파일: `kt00018` |
+| 키움 | 개별 체결 | 구현. 날짜별·매수/매도 필터별 조회, 날짜·주문번호·체결번호로 안정적 ID. **수수료·세금 미제공으로 fee/tax=Decimal(0)**(코디네이터 합의) | 같은 파일: `kt00009`, `cntr_no/cntr_tm/cntr_qty/cntr_uv` |
+| 키움 | 조건검색 | 구현. LOGIN→CNSRLST→CNSRREQ(단발·KRX), PING 응답·연속 조회 | 같은 파일: `ka10171`, `ka10172`; `ws_client.py` |
+| 토스 | 인증 | 구현. 폼 인코딩, `expires_in` 캐시·갱신, 401/403 변환 | `openapi.json` 1.2.24: `issueOAuth2Token` |
+| 토스 | 종목 목록 | 구현. 시장별 전체 종목, 업종 미제공으로 null | 같은 파일: `listStocks` (`/api/v1/stocks/all`) |
+| 토스 | 기본정보·시세 | 구현. 가격·기준시각 조회. 미제공 PER·PBR·ROE 등 지표·거래량·등락률은 null | 같은 파일: `getPrices`, `PriceResponse` |
+| 토스 | 일봉 | 구현. `nextBefore` 페이지네이션·기간 필터·중복 제거 | 같은 파일: `getCandles`, `CandlePageResponse` |
+| 토스 | 잔고 | 구현. `X-Tossinvest-Account`에는 **계좌번호 대신 accountSeq**. KRW 평가액만 원 정수, 원화 환산값이 없는 USD 보유는 `eval_amount=None`; 예수금·시장 구분은 미제공 | 같은 파일: `getHoldings`, `AccountSeq`, `HoldingsOverview` |
+| 토스 | 개별 체결 | 미지원(`BROKER_NOT_SUPPORTED`). 주문별 누적 수량·평균가·최종시각으로 개별 체결을 만들지 않는다 | 같은 파일: 조회용 `OrderExecution` 스키마는 개별 체결 ID·목록을 제공하지 않음 |
+| 토스 | 조건검색 | 미지원(`BROKER_NOT_SUPPORTED`) | 공식 OpenAPI에 해당 기능 없음 |
+
+종목 회사명·업종의 근거: [KRX KIND 상장법인 목록](https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13). 어떤 어댑터에도 주문 생성·정정·취소 경로·함수를 추가하지 않았다.
+
+### 스펙과 다른 점 및 세부 결정
+
+- 코디네이터 합의에 따라 토스 최신 명세의 `STOCK`, `STOCK_ALL`, `ASSET` 그룹명을 사용했다. 명세에 명시적인 초당 수치가 없는 그룹은 스펙의 시세 계열 15회·계좌 계열 1회를 사용하며 AUTH 5회·차트 20회를 유지한다. 공통 한도 모듈은 ORDER_INFO의 09:00~09:10 KST 3회 제한도 제공한다.
+- 외화 잔고의 원화 평가액은 임의 환산하지 않는다. 코디네이터가 develop `100dea6`에서 보완한 `BrokerHolding.eval_amount: int | None` 계약을 병합·반영했다.
+- 키움 `kt00009`의 수수료·세금 0 반환은 코디네이터와 합의했다. 이후 11의 체결 동기화에서 이 제한을 고려해야 한다.
+- 개발 화면의 샘플 증권사 선택은 Next.js `NODE_ENV=development`에서만 보인다. 백엔드는 별도로 `APP_ENV=production`에서 Mock 연결 생성을 필드별 422로 거부한다.
+- 공인 IP는 `api.ipify.org`를 프로세스당 캐시하여 조회하며 실패·잘못된 응답은 null이다. 테스트에서는 respx로 대체하고 브라우저 확인에서도 해당 IP 응답을 가로채 실제 외부 서비스를 부르지 않았다.
+- 공통 외부 HTTP 차단을 유지하기 위해 respx는 `using="httpx"`, `assert_all_mocked=True`로 실행한다. 로컬 TestClient 요청만 통과시키며, 조건검색은 스펙에 따른 로컬 웹소켓 서버로 검증했다.
+
+### 검증 결과
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 08(8008·3008·finance_08) 준비 성공 |
+| `uv run alembic upgrade heads` | market_0001 포함 적용 성공 |
+| `uv run python -m app.modules.market.jobs seed-mock` | 종목 80행·스냅샷 80행, 실패 0 |
+| `uv run ruff check .` / `uv run ruff format --check .` | 통과 |
+| `uv run pytest` | 전체 760개 통과(시장 모듈 28개), 공통 Starlette TestClient 사용 중단 안내 1건 |
+| `npm run lint` / `npx tsc --noEmit` | 통과 |
+| `npm run test` | 26개 파일·289개 테스트 통과(시장 화면 4개) |
+| `npm run build` | Next.js 16.4.2 프로덕션 빌드 성공 |
+| 빈 `finance_08_verify` DB: `upgrade heads`→`downgrade base`→`upgrade heads` | 전 과정 성공, 검증 DB 삭제 완료 |
+| 독립 Playwright Chrome context: `/stocks?q=삼성`, `/stocks/005930`, `/quotes`, `/snapshot/status` | 모두 실제 백엔드 HTTP 200·source=mock, 스냅샷 count=80 |
+| 같은 context의 연결 추가→확인→삭제 | 성공. 정상 상태·마스킹·삭제 확인 대화상자 확인 |
+| 360·768·1280px 화면 | document.scrollWidth가 viewport 너비 이하, 360px 추가 다이얼로그 포함 확인, 브라우저 오류 0 |
+| 소유 경로·비밀값·주문 코드 점검 | 소유 범위 내 변경, 환경 파일 미추적, 주문 생성·정정·취소 코드 없음 |
+| `scripts/stop.sh` | 기동한 frontend·backend 종료, 브라우저 검증 사용자 정리 완료 |
+
+### 남은 일
+
+- 구현 범위의 남은 작업은 없다. 별도 검증 워커의 계약 검증·PR 검토·병합은 코디네이터가 진행한다.
+- 실제 키·허용 IP가 필요한 실서비스 연동은 외부 호출 없이 공식 응답을 고정한 테스트로 확인했다. 토스 개별 체결·조건검색, 외화 평가액 미제공과 키움 체결 비용 미제공 제한은 위 표와 같다.

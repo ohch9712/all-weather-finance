@@ -1,12 +1,13 @@
 """공식 스펙: https://github.com/Kiwoom-Securities/Kiwoom-REST-API
 kiwoom/_data/kiwoom_api_spec.json (au10001, ka10099, ka10001, ka10081,
-kt00018, ka10171, ka10172와 error_codes), kiwoom/core/ws_client.py.
+kt00018, kt00009, ka10171, ka10172와 error_codes), kiwoom/core/ws_client.py.
 """
 
 import json
 import re
 import threading
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 import httpx
 from websockets.exceptions import WebSocketException
@@ -17,6 +18,7 @@ from app.integrations.brokers.base import (
     BrokerHolding,
     Candle,
     ConditionInfo,
+    Execution,
     Fundamentals,
     HoldingsSnapshot,
     Market,
@@ -59,7 +61,7 @@ def krx_code(value):
 class KiwoomBroker(UnsupportedBroker):
     provider = "kiwoom"
     capabilities = frozenset(
-        {"STOCK_LIST", "FUNDAMENTALS", "QUOTES", "CANDLES", "HOLDINGS", "CONDITIONS"}
+        {"STOCK_LIST", "FUNDAMENTALS", "QUOTES", "CANDLES", "HOLDINGS", "EXECUTIONS", "CONDITIONS"}
     )
 
     def __init__(
@@ -256,8 +258,56 @@ class KiwoomBroker(UnsupportedBroker):
                 )
         return HoldingsSnapshot(result, None, now_utc())
 
-    # ka10076은 주문시간·누적 체결량만 제공해 안정적인 개별 체결 ID/시각을 만들 수 없다.
-    # 검증하지 않은 체결 내역은 상속한 BROKER_NOT_SUPPORTED로 유지한다.
+    @parsed_response
+    def get_executions(self, start: date, end: date):
+        # 공식 kiwoom_api_spec.json의 kt00009(계좌별주문체결현황) 조회만 사용한다.
+        # 수수료·세금 미제공이라 fee/tax는 0이다(코디네이터 합의).
+        # 매도수 구분은 요청 필터 1/2로 확정하며 응답 문자열로 추측하지 않는다.
+        result = {}
+        day = start
+        while day <= end:
+            for sell_tp, side in (("1", "sell"), ("2", "buy")):
+                body = {
+                    "ord_dt": day.strftime("%Y%m%d"),
+                    "stk_bond_tp": "1",
+                    "mrkt_tp": "0",
+                    "sell_tp": sell_tp,
+                    "qry_tp": "1",
+                    "stk_cd": "",
+                    "fr_ord_no": "",
+                    "dmst_stex_tp": "KRX",
+                }
+                for page in self._pages(
+                    "kt00009", "/api/dostk/acnt", body, "acnt_ord_cntr_prst_array"
+                ):
+                    for row in page:
+                        quantity = dec(row["cntr_qty"])
+                        if not quantity or quantity <= 0:
+                            continue
+                        price = dec(row["cntr_uv"], absolute=True)
+                        if not price or not row.get("cntr_no", "").strip("0 "):
+                            raise BrokerError("BROKER_UNAVAILABLE")
+                        executed_at = datetime.combine(
+                            day,
+                            datetime.strptime(row["cntr_tm"], "%H:%M:%S").time(),
+                            tzinfo=KST,
+                        )
+                        external_id = f"{day:%Y%m%d}:{row['ord_no']}:{row['cntr_no']}"
+                        result[external_id] = Execution(
+                            external_id,
+                            executed_at,
+                            krx_code(row["stk_cd"]),
+                            row["stk_nm"],
+                            "OTHER",
+                            side,
+                            quantity,
+                            price,
+                            Decimal(0),
+                            Decimal(0),
+                            "KRW",
+                        )
+            day += timedelta(days=1)
+        return sorted(result.values(), key=lambda row: (row.executed_at, row.external_id))
 
     def _receive(self, ws, trnm):
         while True:

@@ -23,7 +23,7 @@ def parsed_response(function):
     def wrapped(*args, **kwargs):
         try:
             return function(*args, **kwargs)
-        except (ValueError, TypeError, KeyError, InvalidOperation):
+        except (ValueError, TypeError, KeyError, AttributeError, InvalidOperation):
             raise BrokerError("BROKER_UNAVAILABLE") from None
 
     return wrapped

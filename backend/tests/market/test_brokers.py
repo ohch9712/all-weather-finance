@@ -214,9 +214,6 @@ def test_kiwoom_candles_and_holdings(respx_mock, monkeypatch):
     assert candle.open == 70000 and candle.low == 69000
     holding = broker.get_holdings().holdings[0]
     assert holding.code == "005930" and holding.eval_amount == 710000
-    with pytest.raises(BrokerError) as exc:
-        broker.get_executions(date(2026, 1, 1), date(2026, 10, 16))
-    assert exc.value.as_app_error().status_code == 501
 
 
 def test_kiwoom_condition_local_websocket(monkeypatch):
@@ -379,3 +376,40 @@ def test_toss_errors(respx_mock, status, code):
     with pytest.raises(BrokerError) as exc:
         toss.TossBroker("test-client", "test-secret").get_token()
     assert exc.value.code == code
+
+
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_kiwoom_executions_dates_side_and_cost_defaults(respx_mock, monkeypatch):
+    monkeypatch.setattr(kiwoom, "now_utc", lambda: datetime(2026, 10, 16, tzinfo=UTC))
+    kiwoom_token(respx_mock)
+    requests = []
+
+    def response(request):
+        assert request.headers["api-id"] == "kt00009"
+        body = json.loads(request.content)
+        requests.append(body)
+        rows = []
+        if body["ord_dt"] == "20261016":
+            rows = [
+                {
+                    "ord_no": "0000001",
+                    "cntr_no": body["sell_tp"],
+                    "stk_cd": "A005930",
+                    "stk_nm": "삼성전자",
+                    "cntr_qty": "0000000002",
+                    "cntr_uv": "-0000071000",
+                    "cntr_tm": "13:07:47",
+                }
+            ]
+        return httpx.Response(200, json={"return_code": 0, "acnt_ord_cntr_prst_array": rows})
+
+    respx_mock.post("https://mockapi.kiwoom.com/api/dostk/acnt").mock(side_effect=response)
+    broker = kiwoom.KiwoomBroker("test-app", "test-secret")
+    assert "EXECUTIONS" in broker.capabilities
+    rows = broker.get_executions(date(2026, 10, 15), date(2026, 10, 16))
+    assert len(rows) == 2 and len(requests) == 4
+    assert {row.side for row in rows} == {"buy", "sell"}
+    assert len({row.external_id for row in rows}) == 2
+    assert all(row.price == 71000 and row.quantity == 2 and row.fee == row.tax == 0 for row in rows)
+    assert rows[0].executed_at == datetime(2026, 10, 16, 4, 7, 47, tzinfo=UTC)
+    assert all(r["qry_tp"] == "1" and r["dmst_stex_tp"] == "KRX" for r in requests)

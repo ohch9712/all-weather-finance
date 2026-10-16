@@ -7,13 +7,12 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.api.deps import CurrentUser, DBSession, require_json
 from app.core.errors import AppError, field_error
-from app.integrations.brokers.base import BrokerClient, Market
+from app.integrations.brokers.base import Market
 from app.integrations.brokers.errors import BrokerError
 from app.modules.market import schemas, service
-from app.modules.market.service import get_market_data_client
+from app.modules.market.service import MarketDataClientDep
 
 router = APIRouter(prefix="/market", tags=["market"])
-MarketDataClientDep = Annotated[BrokerClient, Depends(get_market_data_client)]
 
 
 @router.get("/stocks", response_model=schemas.StockList)
