@@ -100,6 +100,7 @@ def find_previous_score(db: Session, user_id: UUID, before: date) -> AllocationS
         .where(AllocationScore.user_id == user_id, AllocationScore.scored_on < before)
         .order_by(AllocationScore.scored_on.desc())
         .limit(1)
+        .execution_options(populate_existing=True)
     )
 
 
@@ -109,12 +110,17 @@ def list_scores(db: Session, user_id: UUID, since: date) -> list[AllocationScore
             select(AllocationScore)
             .where(AllocationScore.user_id == user_id, AllocationScore.scored_on >= since)
             .order_by(AllocationScore.scored_on)
+            .execution_options(populate_existing=True)
         )
     )
 
 
 def upsert_score(db: Session, *, user_id: UUID, scored_on: date, values: dict) -> None:
-    """사용자·날짜당 한 행. 같은 날 다시 계산하면 값을 덮어쓴다."""
+    """사용자·날짜당 한 행. 같은 날 다시 계산하면 값을 덮어쓴다.
+
+    Core INSERT … ON CONFLICT라 세션에 올라온 AllocationScore 객체는 갱신되지 않는다.
+    점수 조회 쿼리는 populate_existing으로 다시 읽는다.
+    """
     now = now_utc()
     statement = insert(AllocationScore).values(
         user_id=user_id, scored_on=scored_on, created_at=now, updated_at=now, **values

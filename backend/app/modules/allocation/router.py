@@ -1,13 +1,9 @@
-from collections.abc import Callable, Coroutine
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response
-from fastapi.routing import APIRoute
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.api.deps import CurrentUser, DBSession, require_json
-from app.core.errors import error_response
-from app.core.schemas import ErrorDetail
 from app.modules.allocation import service
 from app.modules.allocation.schemas import (
     AllocationReport,
@@ -33,28 +29,7 @@ from app.modules.allocation.schemas import (
     TargetTableOut,
 )
 
-
-class AllocationRoute(APIRoute):
-    """서비스의 FieldValidationError를 공통 422 형식으로 바꾼다(`items.0.amount` 같은 위치 포함)."""
-
-    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
-        handler = super().get_route_handler()
-
-        async def route_handler(request: Request) -> Response:
-            try:
-                return await handler(request)
-            except service.FieldValidationError as exc:
-                return error_response(
-                    422,
-                    "VALIDATION_ERROR",
-                    "입력값을 확인해 주세요.",
-                    [ErrorDetail(field=field, message=message) for field, message in exc.details],
-                )
-
-        return route_handler
-
-
-router = APIRouter(prefix="/allocation", tags=["allocation"], route_class=AllocationRoute)
+router = APIRouter(prefix="/allocation", tags=["allocation"])
 JSON_BODY = [Depends(require_json)]
 
 

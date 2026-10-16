@@ -11,7 +11,8 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.domain import AgeBand, AssetClass, RiskProfile
-from app.core.errors import AppError
+from app.core.errors import AppError, field_error
+from app.core.schemas import ErrorDetail
 from app.core.time import now_utc, today_kst
 from app.modules.allocation import recommendation as calc
 from app.modules.allocation import repository, rules
@@ -78,12 +79,14 @@ class AssetBreakdown:
     excluded_total: int  # 점수 계산에서 뺀 자산 합계(실거주 주택 등)
 
 
-class FieldValidationError(Exception):
-    """422 VALIDATION_ERROR. 라우터가 `details`(필드, 문구)를 공통 에러 형식으로 바꾼다."""
-
-    def __init__(self, details: Sequence[tuple[str, str]]) -> None:
-        super().__init__("입력값을 확인해 주세요.")
-        self.details = list(details)
+def validation_error(details: Sequence[tuple[str, str]]) -> AppError:
+    """422 VALIDATION_ERROR. 필드가 여럿이거나 위치(`items.0.amount`)가 붙는 경우에 쓴다."""
+    return AppError(
+        422,
+        "VALIDATION_ERROR",
+        "입력값을 확인해 주세요.",
+        [ErrorDetail(field=field, message=message) for field, message in details],
+    )
 
 
 NOT_FOUND_HOLDING = "보유 자산을 찾을 수 없습니다."
@@ -311,7 +314,7 @@ def _validate_answers(answers: dict[str, Any]) -> dict[str, int]:
             valid[question.id] = value
     errors.extend((key, CHOICE_MESSAGE) for key in answers if key not in rules.QUESTION_BY_ID)
     if errors:
-        raise FieldValidationError(errors)
+        raise validation_error(errors)
     return valid
 
 
@@ -319,7 +322,7 @@ def create_risk_assessment(
     db: Session, user_id: UUID, data: RiskAssessmentCreate
 ) -> RiskAssessmentCreated:
     if data.survey_version != rules.SURVEY_VERSION:
-        raise FieldValidationError([("surveyVersion", "설문이 바뀌었습니다. 새로고침해 주세요.")])
+        raise field_error("surveyVersion", "설문이 바뀌었습니다. 새로고침해 주세요.")
     answers = _validate_answers(data.answers)
     score = rules.survey_score(answers)
     assessment = RiskAssessment(
@@ -434,7 +437,7 @@ def _pydantic_message(error: dict[str, Any]) -> str:
 def bulk_create_holdings(db: Session, user_id: UUID, items: list[Any]) -> HoldingList:
     """1~20개를 한 번에 만든다. 하나라도 틀리면 아무것도 저장하지 않는다(7.6)."""
     if not 1 <= len(items) <= rules.MAX_BULK_HOLDINGS:
-        raise FieldValidationError([("items", "자산은 한 번에 1~20개까지 입력할 수 있어요.")])
+        raise field_error("items", "자산은 한 번에 1~20개까지 입력할 수 있어요.")
     parsed: list[HoldingCreate] = []
     errors: list[tuple[str, str]] = []
     for index, item in enumerate(items):
@@ -445,7 +448,7 @@ def bulk_create_holdings(db: Session, user_id: UUID, items: list[Any]) -> Holdin
                 path = ".".join(str(part) for part in (index, *error["loc"]))
                 errors.append((f"items.{path}", _pydantic_message(error)))
     if errors:
-        raise FieldValidationError(errors)
+        raise validation_error(errors)
     # 요청 순서가 생성순으로 남도록 1마이크로초씩 띄운다.
     base = now_utc()
     holdings = [
@@ -544,7 +547,7 @@ def list_goals(db: Session, user_id: UUID) -> GoalList:
 
 def create_goal(db: Session, user_id: UUID, data: GoalCreate) -> GoalOut:
     if repository.count_goals(db, user_id) >= rules.MAX_GOALS:
-        raise FieldValidationError([("goals", "목표는 10개까지 만들 수 있어요.")])
+        raise field_error("goals", "목표는 10개까지 만들 수 있어요.")
     now = now_utc()
     goal = FinancialGoal(
         user_id=user_id,
