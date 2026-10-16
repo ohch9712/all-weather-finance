@@ -1,0 +1,19 @@
+name: finance
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: finance
+      POSTGRES_PASSWORD: finance_local_password
+      POSTGRES_DB: finance_00
+    ports:
+      - "127.0.0.1:${FINANCE_PG_PORT:-5433}:5432"
+    volumes:
+      - finance_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finance -d finance_00"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  finance_pg_data:

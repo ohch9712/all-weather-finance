@@ -1,0 +1,25 @@
+[project]
+name = "finance-backend"
+version = "0.1.0"
+description = "개인 자산배분 플랫폼 백엔드"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi", "uvicorn[standard]", "sqlalchemy>=2.0,<2.1", "psycopg[binary]", "alembic",
+  "pydantic[email]", "pydantic-settings", "argon2-cffi", "python-multipart",
+  "google-genai>=2.31,<3", "ollama>=0.6.3,<0.7", "pypdfium2>=5.14,<6", "pillow",
+  "httpx", "websockets", "cryptography", "pandas", "openpyxl", "xlrd", "lxml", "charset-normalizer",
+]
+
+[dependency-groups]
+dev = ["pytest", "respx", "freezegun", "ruff"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
