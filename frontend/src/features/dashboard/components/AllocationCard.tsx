@@ -56,7 +56,7 @@ function AllocationBody({ data }: { data: AllocationSection }) {
             )}
           </div>
           {data.classes && (
-            <div className="mx-auto w-full max-w-56">
+            <div className="mx-auto w-full max-w-40">
               <DonutChart
                 ariaLabel="실제 자산 비중"
                 centerLabel={<span className="text-xs text-muted-foreground">실제 비중</span>}
