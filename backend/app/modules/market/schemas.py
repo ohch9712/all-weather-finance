@@ -17,6 +17,7 @@ class StockSummary(CamelModel):
     name: str
     market: Market
     sector: str | None
+    kind: Literal["stock", "etf"]
 
 
 class Quote(CamelModel):
