@@ -2,7 +2,6 @@
 
 import type { KeyboardEvent } from "react";
 import { ArrowUp, Square } from "lucide-react";
-import { Disclaimer } from "@/components/common/Disclaimer";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -66,7 +65,6 @@ export function Composer({ value, onChange, onSend, onStop, sending, disabled, r
         {location && <p className="break-keep">{LOCATION_TEXT[location]}</p>}
         {remaining !== null && <p className="shrink-0">오늘 남은 횟수 {remaining.toLocaleString("ko-KR")}회</p>}
       </div>
-      <Disclaimer variant="ai" />
     </div>
   );
 }

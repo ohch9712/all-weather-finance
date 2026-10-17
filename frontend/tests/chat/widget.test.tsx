@@ -1,6 +1,6 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { EXAMPLE_QUESTIONS } from "@/features/chat/components/ChatThread";
+import { EXAMPLE_QUESTIONS, PROVIDER_OFF_TEXT } from "@/features/chat/components/ChatThread";
 import { ChatWidget } from "@/features/chat/components/ChatWidget";
 import { openChatWidget } from "@/features/chat";
 import { renderWithProviders } from "../utils";
@@ -58,6 +58,18 @@ describe("챗봇 위젯", () => {
     const { user } = renderWidget();
     await user.click(screen.getByRole("button", { name: "AI 상담 열기" }));
     expect(await screen.findByRole("button", { name: EXAMPLE_QUESTIONS[1] })).toBeInTheDocument();
+  });
+
+  it("공급자가 꺼져 있어도 위젯에 AI 고지를 붙인다", async () => {
+    mockChatApi({
+      status: { enabled: false, provider: null, location: null, model: null, dailyLimit: 100, usedToday: 0 },
+      location: null,
+    });
+    const { user } = renderWidget();
+    await user.click(screen.getByRole("button", { name: "AI 상담 열기" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(PROVIDER_OFF_TEXT)).toBeInTheDocument();
+    expect(dialog.querySelectorAll('[data-variant="ai"]')).toHaveLength(1);
   });
 
   it("openChatWidget({ draft })로 열면 입력창에 문장을 채우고 보내지는 않는다", async () => {

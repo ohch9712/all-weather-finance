@@ -216,3 +216,53 @@ describe("저장된 대화", () => {
     expect(await screen.findByText("아직 대화가 없어요.")).toBeInTheDocument();
   });
 });
+
+describe("AI 고지", () => {
+  // 저장된 AI 답변이 보이면 입력 가능 여부와 상관없이 고지가 붙어야 한다(AGENTS.md 보안·고지).
+  function aiNotices() {
+    return document.querySelectorAll('[data-variant="ai"]');
+  }
+
+  it("읽기 전용 대화의 기존 응답에도 고지를 붙인다", async () => {
+    const old = conversation({ canContinue: false, provider: "gemini", model: "gemini-3.8-flash" });
+    mockChatApi({
+      conversations: [old],
+      details: { [CONVERSATION_ID]: { conversation: old, messages: displayMessages() } },
+    });
+    renderPage(`/chat?c=${CONVERSATION_ID}`);
+    expect(await screen.findByText(READ_ONLY_TEXT)).toBeInTheDocument();
+    expect(screen.getByText("답변", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "질문 입력" })).not.toBeInTheDocument();
+    expect(aiNotices()).toHaveLength(1);
+    expect(aiNotices()[0]).toHaveTextContent(DISCLAIMER_TEXT.ai);
+  });
+
+  it("공급자가 꺼진 상태의 기존 응답에도 고지를 붙인다", async () => {
+    const old = conversation({ canContinue: false });
+    mockChatApi({
+      status: chatStatus({ enabled: false, provider: null, location: null, model: null }),
+      location: null,
+      conversations: [old],
+      details: { [CONVERSATION_ID]: { conversation: old, messages: displayMessages() } },
+    });
+    renderPage(`/chat?c=${CONVERSATION_ID}`);
+    expect(await screen.findByText(PROVIDER_OFF_TEXT)).toBeInTheDocument();
+    expect(screen.getByText("답변", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "질문 입력" })).not.toBeInTheDocument();
+    expect(aiNotices()).toHaveLength(1);
+    expect(aiNotices()[0]).toHaveTextContent(DISCLAIMER_TEXT.ai);
+  });
+
+  it("입력할 수 있는 대화에도 고지를 하나 붙인다", async () => {
+    mockChatApi({
+      conversations: [conversation()],
+      details: { [CONVERSATION_ID]: { conversation: conversation(), messages: displayMessages() } },
+    });
+    renderPage(`/chat?c=${CONVERSATION_ID}`);
+    expect(await screen.findByRole("textbox", { name: "질문 입력" })).toBeInTheDocument();
+    expect(screen.getByText("답변", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.getByText(LOCATION_TEXT.local)).toBeInTheDocument();
+    expect(aiNotices()).toHaveLength(1);
+    expect(aiNotices()[0]).toHaveTextContent(DISCLAIMER_TEXT.ai);
+  });
+});

@@ -98,8 +98,9 @@ interface StreamOptions {
 export async function streamChatMessage(conversationId: string, content: string, { signal, onEvent }: StreamOptions) {
   let response: Response;
   try {
-    // 스트리밍 응답이라 lib/api-client의 공용 호출 함수(10초 타임아웃·JSON 본문)를 쓸 수 없다(스펙 09 9.3).
-    response = await globalThis.fetch(
+    // 스트리밍 응답이라 lib/api-client의 공용 호출 함수(10초 타임아웃·JSON 본문)를 쓸 수 없다.
+    // 구조 테스트가 이 파일만 직접 fetch 예외로 둔다(스펙 09 9.3).
+    response = await fetch(
       `${API_BASE_URL.replace(/\/+$/, "")}/api/chat/conversations/${conversationId}/messages`,
       {
         method: "POST",

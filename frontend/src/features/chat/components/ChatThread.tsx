@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, MessageCircle, Plus } from "lucide-react";
+import { Disclaimer } from "@/components/common/Disclaimer";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingState } from "@/components/common/LoadingState";
 import { Button } from "@/components/ui/button";
@@ -100,7 +101,7 @@ export function ChatThread({ conversationId, onConversationCreated, onNewConvers
     footer = (
       <>
         {limitReached && (
-          <p role="note" className="mb-2 rounded-lg bg-muted px-3 py-2 text-sm break-keep">
+          <p role="note" className="rounded-lg bg-muted px-3 py-2 text-sm break-keep">
             {LIMIT_TEXT}
           </p>
         )}
@@ -168,7 +169,11 @@ export function ChatThread({ conversationId, onConversationCreated, onNewConvers
           </div>
         )}
       </div>
-      {footer && <div className="border-t px-3 py-3 sm:px-4">{footer}</div>}
+      <div className="space-y-2 border-t px-3 py-3 sm:px-4">
+        {footer}
+        {/* AI 고지는 입력 가능 여부(읽기 전용·공급자 꺼짐)와 상관없이 늘 붙인다. 저장된 AI 답변에도 필요하다. */}
+        <Disclaimer variant="ai" />
+      </div>
     </div>
   );
 }
