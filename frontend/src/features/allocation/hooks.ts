@@ -115,3 +115,13 @@ export function useDeleteGoal() {
   const invalidate = useInvalidateAllocation();
   return useMutation({ mutationFn: api.deleteGoal, onSuccess: invalidate });
 }
+
+
+export function useBrokerConnections(enabled = true) {
+  return useQuery({ queryKey: ["allocation", "broker-connections"], queryFn: api.listBrokerConnections, enabled });
+}
+
+export function useSyncHoldings() {
+  const invalidate = useInvalidateAllocation();
+  return useMutation({ mutationFn: api.syncHoldings, onSuccess: invalidate });
+}

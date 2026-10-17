@@ -1,6 +1,8 @@
 import { apiFetch } from "@/lib/api-client";
 import type {
   AllocationReport,
+  BrokerConnection,
+  HoldingSyncResult,
   Goal,
   GoalInput,
   Holding,
@@ -110,4 +112,14 @@ export function updateGoal(id: string, input: Partial<GoalInput>): Promise<Goal>
 
 export async function deleteGoal(id: string): Promise<void> {
   await apiFetch<void>(`${BASE}/goals/${id}`, { method: "DELETE" });
+}
+
+
+export async function listBrokerConnections(): Promise<BrokerConnection[]> {
+  const body = await apiFetch<{ items: BrokerConnection[] }>("/api/market/connections");
+  return body.items;
+}
+
+export function syncHoldings(connectionId: string): Promise<HoldingSyncResult> {
+  return apiFetch<HoldingSyncResult>(`${BASE}/holdings/sync`, json("POST", { connectionId }));
 }

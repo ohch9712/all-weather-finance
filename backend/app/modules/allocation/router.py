@@ -15,6 +15,8 @@ from app.modules.allocation.schemas import (
     HoldingCreate,
     HoldingList,
     HoldingOut,
+    HoldingSyncRequest,
+    HoldingSyncResult,
     HoldingUpdate,
     LatestAssessmentOut,
     Recommendation,
@@ -90,6 +92,11 @@ def create_holding(data: HoldingCreate, db: DBSession, user: CurrentUser):
 @router.post("/holdings/bulk", status_code=201, response_model=HoldingList, dependencies=JSON_BODY)
 def bulk_create_holdings(data: HoldingBulkCreate, db: DBSession, user: CurrentUser):
     return service.bulk_create_holdings(db, user.id, data.items)
+
+
+@router.post("/holdings/sync", response_model=HoldingSyncResult, dependencies=JSON_BODY)
+def sync_holdings(data: HoldingSyncRequest, db: DBSession, user: CurrentUser):
+    return service.sync_holdings(db, user.id, data.connection_id)
 
 
 @router.patch("/holdings/{holding_id}", response_model=HoldingOut, dependencies=JSON_BODY)

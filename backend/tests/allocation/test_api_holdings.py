@@ -19,6 +19,9 @@ HOLDING_KEYS = [
     "memo",
     "createdAt",
     "updatedAt",
+    "connectionId",
+    "syncedAt",
+    "classOverride",
 ]
 
 
