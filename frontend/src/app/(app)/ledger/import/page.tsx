@@ -1,8 +1,5 @@
-import type { Metadata } from "next";
-import { ComingSoon } from "@/components/common/ComingSoon";
+import { LedgerImportPage } from "@/features/ledger/components/LedgerImportPage";
 
-export const metadata: Metadata = { title: "카드 이용내역 가져오기" };
-
-export default function LedgerImportPage() {
-  return <ComingSoon title="카드 이용내역 가져오기" taskId="10" />;
+export default function Page() {
+  return <LedgerImportPage />;
 }

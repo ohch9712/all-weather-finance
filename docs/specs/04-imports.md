@@ -278,6 +278,7 @@ def create_job_from_table(db, user_id, *, kind_key: str, file_name: str,
 - 단계: ① 파일 선택(끌어 놓기 + 버튼, `.csv,.xlsx,.xls,.html,.htm`) → ② 열 매핑(목표 필드별 열 선택 `Select`, 각 열의 예시 값 표시, 필수 표시, `mappingSource` 배지 "자동 인식"/"AI 추천"/"직접 지정"/"알려진 형식", "AI 추천" 옆에 `AiProviderBadge scope="personal" compact`) → ③ 미리보기(정상·오류 수, 오류 행 강조와 메시지, "오류 행 제외하고 저장" 토글) → ④ 결과(저장·중복·실패 수, `onCommitted` 호출).
 - 시트가 여러 개면 ①에서 시트 선택을 보여 준다(다시 업로드).
 - 업로드 진행 표시, 만료(410) 시 처음으로 돌아가는 안내.
+- 저장(commit)이 성공한 뒤에는 그 작업의 미리보기를 다시 요청하지 않는다(커밋된 작업의 preview는 `409`. 갱신 2026-10-17, 웨이브 3 통합 검증 K1).
 - `api.ts`: `listImportKinds`, `createImportJob(kind, file, sheetName?)`(FormData, `apiFetch`는 FormData일 때 Content-Type을 넣지 않는다), `getImportJob`, `updateMapping`, `getPreview`, `commitImportJob`, `deleteImportJob`. `hooks.ts`에 대응 훅.
 
 ## 10. 테스트
@@ -359,3 +360,15 @@ def create_job_from_table(db, user_id, *, kind_key: str, file_name: str,
 
 - 04 범위 안의 미구현 항목은 없다. 별도 검증 워커의 검증과 PR 병합은 코디네이터가 진행한다.
 - 10·11에서 실제 종류·도메인 저장 함수를 등록하고 각 업로드 페이지에 위저드를 넣는다. 기관별 프리셋은 실제 비식별 샘플이 확보된 뒤 추가한다.
+
+
+### 웨이브 3 통합 검증 수정
+
+- 발견 사항 K1: 저장 성공 처리가 활성 미리보기 쿼리까지 무효화해 이미 커밋된 작업의 미리보기를 재요청하고 409를 남겼다.
+- `useSaveJob`은 작업 캐시를 갱신한 뒤 상태가 `committed`면 미리보기 무효화를 건너뛴다. 업로드·매핑 확정의 기존 무효화 흐름은 유지한다.
+- MSW 회귀 테스트로 저장 이후 미리보기 요청 0회, 작업 캐시·결과·콜백 갱신과 매핑 재확정 후 미리보기 갱신을 확인했다. 수정 전에는 새 회귀 테스트가 저장 후 미리보기 요청 1회로 실패했고 수정 후 임포트 테스트 8개가 통과했다.
+- 검사: `scripts/worktree-setup.sh`, `npm run lint`, `npx tsc --noEmit`, `npm run test -- --maxWorkers=2`(43개 파일·418개 테스트), `npm run build` 통과. 최초 기본 병렬 테스트는 동시 실행 부하 중 시간 초과 등으로 25개 실패했으며 실행 수만 제한한 전체 재실행에서 모두 통과했다.
+- 실제 슬롯 04 서버와 독립 Chrome 컨텍스트 로그인 후 `/ledger/import`·`/journal/import`에 메모리로 만든 가짜 CSV를 업로드했다. 두 흐름 모두 저장 200·저장 1건, 저장 후 미리보기 요청 0회·임포트 409 응답 0회, 결과 표시와 카드 검토 화면 이동 정상, 360px 가로 스크롤 없음을 확인했다.
+- 임시 검사 계정·연관 데이터를 정리하고 `scripts/stop.sh`로 프론트·백엔드를 종료했다.
+- 스펙과 다른 점: 없음. 백엔드·의존성·다른 모듈은 변경하지 않았다.
+- 남은 일: 코디네이터의 별도 검증과 PR 병합.

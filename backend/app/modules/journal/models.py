@@ -31,7 +31,15 @@ class Trade(Base):
         CheckConstraint("fee >= 0", name="fee"),
         CheckConstraint("tax >= 0", name="tax"),
         CheckConstraint("broker in ('kiwoom','toss','other')", name="broker"),
-        CheckConstraint("source in ('manual','import','kiwoom','toss')", name="source"),
+        CheckConstraint("source in ('manual','import','kiwoom','toss','mock')", name="source"),
+        Index(
+            "uq_trades_user_connection_external",
+            "user_id",
+            "connection_id",
+            "external_id",
+            unique=True,
+            postgresql_where=text("external_id IS NOT NULL"),
+        ),
         Index("ix_trades_user_traded", "user_id", "traded_at"),
         Index("ix_trades_user_symbol", "user_id", "symbol_code"),
         Index(
@@ -53,11 +61,15 @@ class Trade(Base):
     quantity: Mapped[Decimal] = mapped_column(Numeric(20, 6))
     price: Mapped[Decimal] = mapped_column(Numeric(20, 6))
     currency: Mapped[str] = mapped_column(String(3))
+    cost_estimated: Mapped[bool] = mapped_column(server_default=text("false"))
     fee: Mapped[Decimal] = mapped_column(Numeric(20, 6), server_default="0")
     tax: Mapped[Decimal] = mapped_column(Numeric(20, 6), server_default="0")
     broker: Mapped[str | None] = mapped_column(String(10))
     account_label: Mapped[str | None] = mapped_column(String(30))
     source: Mapped[str] = mapped_column(String(8), server_default="manual")
+    connection_id: Mapped[UUID | None] = mapped_column()
+    external_id: Mapped[str | None] = mapped_column(String(64))
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dedup_hash: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(
@@ -88,6 +100,23 @@ class TradeNote(Base):
     tags: Mapped[list[str]] = mapped_column(ARRAY(String(20)), server_default=text("'{}'"))
     emotion: Mapped[str | None] = mapped_column(String(12))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
+class TradeCostSettings(Base):
+    __tablename__ = "trade_cost_settings"
+    __table_args__ = tuple(
+        CheckConstraint(f"{name} >= 0 AND {name} <= 5", name=name)
+        for name in ("krx_commission_rate", "krx_sell_tax_rate", "us_commission_rate")
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    krx_commission_rate: Mapped[Decimal] = mapped_column(Numeric(6, 4))
+    krx_sell_tax_rate: Mapped[Decimal] = mapped_column(Numeric(6, 4))
+    us_commission_rate: Mapped[Decimal] = mapped_column(Numeric(6, 4))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=now_utc, onupdate=now_utc
     )

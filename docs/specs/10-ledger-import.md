@@ -3,6 +3,7 @@
 > 웨이브 3 · 브랜치 `feature/10-ledger-import` · 구현 codex · 검증 codex `gpt-6.1-sol` / `xhigh`
 > 선행: 03(가계부), 04(임포트 엔진)가 develop에 병합된 상태.
 > **착수 직전 갱신**: 코디네이터는 디스패치 전에 03·04의 실제 코드(`ledger/service.py`, `imports/registry.py`, `imports/service.py`)와 이 문서를 대조하고, 다른 점을 고친 뒤 디스패치한다.
+> **갱신함(2026-10-17, develop `8a5d8f4` 기준)**: 04의 `ImportKind.normalize_row(values)`는 `user_id`를 받지 않고 `commit(db, user_id, rows, CommitContext(job_id, file_name))`은 flush까지만 한다(commit·rollback은 엔진). 03의 기본 지출 카테고리 16개(`ledger_0001`)에 6절 표의 이름이 모두 있다. 이에 맞춰 5·6·7·9절에 중복 키 계산 위치, 같은 파일 안 같은 거래, LLM 얻는 방법, 짧은 영문 키워드, 순액 경계 규칙을 더했다.
 
 ## 1. 목표
 
@@ -70,9 +71,10 @@ UNIQUE `(user_id, merchant_key)`.
 | `installment` | 할부 | text | 아니오 | 할부, 할부개월, 할부기간, 이용구분 |
 | `merchantCategory` | 업종 | text | 아니오 | 업종, 가맹점업종, 업종명 |
 
-- `normalize_row`: 금액이 음수이거나 `status=cancelled`면 `is_cancellation=True`, 금액은 절댓값. 금액 0은 오류("금액이 0입니다."). `kind`는 항상 `expense`.
-- `dedup_hash` = `sha256("{user_id}|{occurred_on}|{merchant_key}|{amount}|{approval_no or ''}|{is_cancellation}")` 16진수.
-- `commit`: 분류(6절) → 삽입(`source='import'`, `import_batch_id=job_id`) → 같은 `dedup_hash`가 있으면 `skipped_duplicates`. 한 트랜잭션.
+- `normalize_row`: 금액이 음수이거나 `status=cancelled`면 `is_cancellation=True`, 금액은 절댓값. 금액 0은 오류("금액이 0입니다."). `kind`는 항상 `expense`. 결과는 `LedgerImportRow`(9절)다.
+- `dedup_hash` = `sha256("{user_id}|{occurred_on}|{merchant_key}|{amount}|{approval_no or ''}|{is_cancellation}")` 16진수. `normalize_row`에는 `user_id`가 없으므로 `import_entries`(9절)가 계산한다.
+  - 같은 호출(한 파일) 안에 위 문자열이 같은 행이 여러 개면, 두 번째부터 문자열 끝에 `|{n}`을 붙인다(n은 1, 2, …, 파일 안 순서대로). 승인번호 없는 파일의 같은 날 같은 금액 거래 두 건(커피 두 잔)을 둘 다 저장하면서, 같은 파일이나 기간이 겹치는 파일을 다시 올리면 같은 키가 나와 중복으로 걸러진다.
+- `commit`: `import_entries(db, user_id, rows, source="import", batch_id=ctx.job_id)`를 부른다. 분류(6절) → 삽입(`source='import'`, `payment_method='card'`, `import_batch_id=job_id`) → 같은 `dedup_hash`가 이미 있으면 `skipped_duplicates`. flush까지만 하고 commit·rollback은 04 엔진이 한다(한 트랜잭션).
 - `llm_hint`: "한국 신용·체크카드 이용내역 표다. 결제일·결제예정금액 열은 이용일·이용금액이 아니다."
 
 ## 6. 카테고리 자동 분류 (`ledger/categorize.py`)
@@ -97,15 +99,19 @@ UNIQUE `(user_id, merchant_key)`.
 | 생활용품 | 다이소, 올리브영, 이마트, 홈플러스, 롯데마트, 코스트코, 편의점, GS25, CU, 세븐일레븐, 이마트24 |
 | 쇼핑 | 쿠팡, 11번가, G마켓, 지마켓, 옥션, 무신사, SSG, 네이버페이, 카카오페이, 위메프, 티몬, 29CM |
 
+- 영문·숫자로만 된 3자 이하 키워드(`KT`, `CU`, `SKT`, `SRT`, `CGV`, `SSG` 등)는 앞뒤가 영문·숫자가 아닐 때만 일치로 본다(`CU 강남점`은 일치, `CUCKOO`는 불일치). 나머지 키워드는 포함 여부로 본다.
+
 3. LLM 일괄 분류: 1·2로 정하지 못한 **서로 다른 가맹점**을 최대 200개씩 묶어 `llm.generate(task="ledger.categorize", system=…, content=JSON, output=CategorizeOutput)`(personal 등급, effort·max_tokens는 작업 등록부). `content` = `{"categories": [지출 카테고리 이름들], "merchants": [{"merchant": "…", "merchantCategory": "업종" | null}]}`(금액·카드번호·승인번호는 보내지 않는다). 출력 `{"items": [{"merchant": "…", "category": "식비" | null}]}`. 모르는 이름·null은 4로.
 4. "기타 지출".
 
 - LLM이 꺼져 있거나 오류면 3을 건너뛴다. 저장은 실패시키지 않는다.
+- 04의 `commit` 콜백과 `import_entries`에는 LLM 인자가 없다. 분류 모듈이 `app.integrations.llm.deps.get_structured_llm()`을 직접 불러 얻는다(04의 `create_job_from_table`과 같은 방식). 테스트는 이 호출을 monkeypatch로 `FakeStructuredLLM`으로 바꾼다.
 
 ### 6.1 규칙 학습
 
-- `PATCH /api/ledger/entries/{id}`로 `source`가 `import`·`codef`인 내역의 카테고리를 바꾸면 그 가맹점의 내 규칙을 upsert한다.
-- `POST /api/ledger/merchant-rules` `{"merchant": "김밥천국 강남점", "categoryId": "…", "applyToExisting": true}` → 규칙 upsert, `applyToExisting`이면 같은 `merchant_key`의 내 임포트 내역을 모두 그 카테고리로 바꾸고 바뀐 개수를 돌려준다. `GET /api/ledger/merchant-rules`, `DELETE /api/ledger/merchant-rules/{id}`.
+- `PATCH /api/ledger/entries/{id}`로 `source`가 `import`·`codef`인 내역의 카테고리를 바꾸면 그 가맹점의 내 규칙을 upsert한다(가맹점이 비어 있으면 건너뛴다). 규칙의 카테고리는 지출 카테고리만 된다(아니면 03과 같은 `categoryId` `422`).
+- `POST /api/ledger/merchant-rules` `{"merchant": "김밥천국 강남점", "categoryId": "…", "applyToExisting": true}` → 규칙 upsert, `applyToExisting`이면 같은 `merchant_key`의 내 내역 중 `source`가 `import`·`codef`인 것을 모두 그 카테고리로 바꾸고 바뀐 개수를 돌려준다(수동 입력 내역은 바꾸지 않는다).
+- 규칙의 카테고리가 지워지면(03의 내 카테고리 삭제) 규칙도 함께 지워진다(FK `ON DELETE CASCADE`). `GET /api/ledger/merchant-rules`, `DELETE /api/ledger/merchant-rules/{id}`.
 
 ### 6.2 가져오기 묶음 조회
 
@@ -115,8 +121,12 @@ UNIQUE `(user_id, merchant_key)`.
 
 ## 7. 요약 계산 변경
 
-- 지출 합계·카테고리별·일별·상위 사용처는 `is_cancellation=false` 금액 합에서 `is_cancellation=true` 금액 합을 뺀 순액이다. 수입은 영향 없다.
-- 03의 테스트는 그대로 통과해야 하고, 취소 거래 테스트를 더한다.
+- 지출 합계·카테고리별·일별·상위 사용처는 `is_cancellation=false` 금액 합에서 `is_cancellation=true` 금액 합을 뺀 순액이다. 수입은 영향 없다. 추이(`GET /api/ledger/trend`)의 월 지출도 같은 순액이다.
+- 지난달 결제를 이번 달에 취소하면 순액이 음수가 될 수 있다. 경계 규칙:
+  - 지출 합계와 일별 지출은 0 미만이면 0으로 둔다.
+  - 카테고리별·상위 사용처에는 순액이 0보다 큰 항목만 넣는다. 카테고리 비율의 분모는 표에 넣은 지출 카테고리 금액의 합이다(0으로 나누지 않는다).
+  - 상위 사용처의 `count`는 취소가 아닌 내역의 건수다.
+- 03의 테스트는 그대로 통과해야 하고, 취소 거래 테스트(같은 달 취소, 지난달 결제의 이번 달 취소)를 더한다.
 
 ## 8. PDF·이미지 추출
 
@@ -143,7 +153,8 @@ class LedgerImportRow:
 def import_entries(db, user_id, rows: list[LedgerImportRow], *, source: Literal["import", "codef"], batch_id: UUID | None = None) -> ImportResult
 ```
 
-- 분류·중복 제거·삽입을 한다. `ImportResult`는 04의 타입이다. 17이 CODEF 승인내역 저장에 쓴다.
+- 분류·중복 제거·삽입을 한다. `ImportResult`는 04의 타입(`app.modules.imports.registry`)이고, `errors`의 `row_number`는 `rows`의 1부터 센 순서다. 17이 CODEF 승인내역 저장에 쓴다.
+- flush까지만 하고 commit하지 않는다. 04 엔진의 `commit` 콜백(5절)과 17의 동기화가 트랜잭션을 끝낸다.
 
 ## 10. 화면 명세
 
@@ -184,3 +195,50 @@ def import_entries(db, user_id, rows: list[LedgerImportRow], *, source: Literal[
 5. `import_entries` 시그니처가 9절과 같다(17의 전제).
 6. 업로드·추출 파일이 저장되지 않는다.
 7. 사용자 격리 404.
+
+## 구현 결과
+
+### 구현한 것
+
+- `ledger_0002`에 카드명·승인번호·취소 여부·가져오기 묶음 컬럼, 사용자별 가맹점 규칙과 카테고리 삭제 연쇄 처리를 추가했다.
+- `ledger_card`를 5절의 전체 필드·동의어로 등록했다. 금액 부호와 취소 상태를 정규화하고, 한 파일 안 동일 거래에는 순번을 붙인다. 사용자별 SHA-256 키와 DB 중복 제약으로 재업로드를 걸러낸다.
+- 내 규칙 → 기본 키워드 → personal LLM(서로 다른 가맹점 최대 200개씩) → 기타 지출 순서로 분류한다. 분류 입력에는 가맹점·업종·카테고리 이름만 포함하며 금액·카드 정보·승인번호를 넣지 않는다. AI 오류는 저장을 중단하지 않는다.
+- 규칙 조회·저장·삭제, 카테고리 수정 시 학습, 기존 import·codef 내역 일괄 적용, `importBatchId` 필터와 공개 `import_entries` 함수를 구현했다. 저장 콜백은 flush까지만 수행한다.
+- 취소를 뺀 월·일·카테고리·사용처·추이를 계산한다. 음수 경계와 카테고리 비율 분모는 7절을 따른다. 기존 가계부 목록에도 취소 배지·환입 부호와 날짜별 순액을 반영했다.
+- PDF·PNG·JPEG는 메모리 multipart 파서로 읽는다. 파일을 디스크에 저장하지 않고 동의·형식·용량·PDF 쪽 수를 검사한 뒤 personal 작업 키로 추출해 공용 임포트 작업을 만든다.
+- 파일/AI 두 탭, 개인 AI 상태에 맞춘 처리 위치·동의·고지, 추출 결과 매핑·미리보기·오류 제외 저장, 카테고리별 리뷰와 같은 가맹점 일괄 변경을 구현했다.
+
+### 스펙과 다른 점과 이유
+
+- 04 `ImportWizard`에는 기존 `ImportJob`을 받아 매핑 단계부터 시작하는 prop이 없다. 코디네이터 승인에 따라 일반 파일 탭은 공개 `ImportWizard`를 사용하고, 추출 탭 전용 연결 컴포넌트를 10 소유 경로에 만들었다. 04의 내부 hooks·API·컴포넌트는 import하지 않고, 공개 타입과 HTTP 계약을 10의 `api.ts`·`hooks.ts`에서 사용한다. 04 파일은 수정하지 않았다.
+- 가맹점 규칙 저장 응답은 규칙 필드와 `updatedCount`를 반환한다. 변경 개수는 카테고리가 실제로 바뀐 기존 내역 수다.
+- 실제 카드사 샘플이 없어 프리셋을 만들지 않았다. 테스트 파일은 범용 헤더로 직접 생성한 CSV·XLSX·HTML형 XLS·취소/합계 포함 CSV이며 실제 카드사 형식으로 표시하지 않는다.
+
+### 검증 결과
+
+- `scripts/worktree-setup.sh` 성공: 슬롯 10, 백엔드 8010, 프론트 3010, DB `finance_10`.
+- 백엔드 `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest -q`(1,047개) 통과. 분류 우선순위·입력 최소화·AI 오류/꺼짐·200개 묶음, 규칙 학습·사용자 격리 404, 동일 파일 재업로드·중복 키, 취소 경계·0원 오류, FakeStructuredLLM 추출·동의·용량·쪽 수·형식 검증을 포함한다.
+- 별도 빈 DB `finance_10_verify`에서 `uv run alembic upgrade heads` → `uv run alembic downgrade base` → `uv run alembic upgrade heads` 성공 후 DB를 삭제했다.
+- 프론트 `npm run lint`, `npx tsc --noEmit`, `npm run test`(357개), `npm run build` 통과. MSW로 두 탭의 저장·리뷰 이동, 로컬/Gemini/꺼짐 상태, 만료 안내, 단건·일괄 분류 수정을 확인했다.
+- 독립 Playwright `ledger10` 세션에서 실제 서버에 범용 CSV 업로드 → 자동 매핑 → 정상 4행 미리보기 → 저장 4건 → 리뷰 → 지출 순액 16,000원 반영을 확인했다. 같은 파일 재업로드는 중복 4건, 같은 가맹점 3건 일괄 변경도 확인했다.
+- 360px 업로드·리뷰·AI 꺼짐 화면 및 1280px 리뷰·AI 탭의 문서 너비가 뷰포트 너비와 같았다. 360px 리뷰 스크린샷도 확인했다.
+- 실제 외부 API·LLM은 호출하지 않았다. 서버는 `scripts/stop.sh`, 독립 브라우저는 세션 close로 종료했다.
+- 브라우저 저장 요청과 테스트 정리 DELETE가 겹친 실행에서 DB 잠금 충돌이 한 번 발생했다. 서버·브라우저를 종료하고 백엔드 전체 검사를 단독 재실행해 1,047개 통과를 확인했다.
+
+### 참고 사항
+
+- 일반 파일 탭 저장 직후 04의 `useCommitImportJob`이 미리보기 쿼리를 무효화하면서 이미 저장된 작업의 preview 요청이 409를 반환하는 배경 콘솔 오류를 관찰했다. 저장과 리뷰 이동은 정상이다. 04 소유 코드여서 수정하지 않았으며 코디네이터에게 알렸다.
+
+### 남은 일
+
+- 구현 범위의 남은 일은 없다. 코디네이터의 별도 검증과 병합이 남았다.
+- 실제 카드사별 프리셋은 개인정보를 지운 사용자 샘플이 제공된 뒤 별도 작업으로 추가한다.
+
+### 독립 검증 후 수정: 저장 후 가계부 캐시 갱신
+
+- PR #16의 중요 발견(일반 파일 저장 후 30초 staleTime 안의 가계부 합계·목록이 유지됨)을 수정했다. `features/ledger/hooks.ts`의 공통 무효화 함수가 요약·내역·추이·카테고리 쿼리를 함께 갱신한다.
+- 일반 파일과 AI 추출 탭 모두 같은 저장 완료 콜백에서 무효화를 기다린 뒤 리뷰로 이동한다. AI 추출 저장 훅의 개별 무효화는 없애 중복 갱신을 피했고, 리뷰의 단건·같은 가맹점 일괄 분류 변경도 같은 공통 함수를 사용한다.
+- MSW 회귀 테스트는 요약·목록·추이·카테고리의 기존 캐시에 `staleTime: 30_000`을 적용하고 두 탭에서 저장 후 새 합계·건수·추이·카테고리 재조회를 확인한다. 수정 전 일반 파일 경로는 5,000원 캐시가 남아 실패했고, 수정 후 10,000원으로 갱신된다. 리뷰 분류 변경 후에도 캐시된 카테고리별 요약이 즉시 바뀌는지 확인했다.
+- `npm run lint`, `npx tsc --noEmit`, `npm run test`(36개 파일·359개 테스트), `npm run build`가 모두 통과했다. 백엔드는 수정하지 않았다.
+- 실제 서버와 독립 Playwright `ledger10fix` 컨텍스트에서 `/ledger`의 지출 14,000원·내역 2건을 먼저 읽은 뒤, 1.249초 안에 범용 CSV 업로드 → 매핑 → 저장 → 리뷰 → 가계부 요약 보기로 돌아왔다. 리뷰의 카테고리는 바꾸지 않았고 새 지출 21,000원·내역 3건이 바로 표시됐다. 360px 문서 가로 넘침도 확인했다.
+- 경미 발견인 저장 직후 preview 409는 04 소유 훅의 동작이므로 이 수정에서는 다루지 않는다. 코디네이터가 04 후속 작업으로 처리한다. 04 파일은 수정하지 않았다.

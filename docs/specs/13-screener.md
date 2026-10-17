@@ -4,6 +4,7 @@
 > 선행: 08(증권사 게이트웨이)이 develop에 병합된 상태. 결과의 "관심종목 담기"는 12의 `POST /api/watchlist`를 호출한다(병렬 개발이므로 테스트는 MSW로 흉내 낸다).
 > **착수 직전 갱신**: 코디네이터는 08의 `SnapshotRow` 실제 필드와 `## 구현 결과`의 지표 구현 여부(토스는 PER 등 없음)를 확인해 4.1 필드 표를 맞춘다.
 > **ETF(08b)**: `SnapshotRow`에 `kind`(`stock`·`etf`)가 생긴다. 착수 전에 `ScreenFilter`에 `kinds: list[Literal["stock", "etf"]] | None`(없으면 주식만)을 더하고, ETF는 PER·PBR·ROE·EPS·BPS·외국인 비율이 null이라 그 조건에서 자연히 빠진다는 점과 "ETF 중에서 …" 같은 자연어 해석 예를 4절에 반영한다.
+> **갱신함(2026-10-17, develop `4766e99` 기준, 08·08b 병합 후)**: 08의 `SnapshotRow`(`market.service`)는 `as_of, code, price, change_rate, volume, trading_value, market_cap, per, pbr, roe, eps, bps, foreign_ratio, high_52w, low_52w, source, created_at, name, market, sector, kind`로 4.1 필드가 모두 있다. 공급자별로 비는 값이 다르다: 토스는 가격 외 지표가 모두 null, 키움 ETF(`ka40004`)는 거래대금·시가총액·재무지표·52주 고저가 null, Mock ETF는 재무지표 6개(`per, pbr, roe, eps, bps, foreignRatio`)가 null. 08b의 ETF `market`은 키움 시장 코드가 없으면 `KOSPI`다(Mock ETF 10개는 모두 KOSPI). 이에 맞춰 4·5·6·9절에 `kinds`, null 정렬, ETF 표현을 더했다.
 
 ## 1. 목표
 
@@ -55,6 +56,7 @@ class SortSpec(CamelModel):
 
 class ScreenFilter(CamelModel):
     markets: list[Literal["KOSPI", "KOSDAQ"]] | None = None
+    kinds: list[Literal["stock", "etf"]] | None = None   # None이면 주식만(08b). 중복 없이 1~2개
     sectors: list[str] | None = None          # 스냅샷 업종명과 정확히 일치
     conditions: list[Condition] = []          # 최대 10개
     sort: SortSpec | None = None
@@ -77,8 +79,8 @@ class ScreenFilter(CamelModel):
 | `high52wGapRate` | 52주 최고가 대비 | % | (현재가 − 52주 최고) ÷ 52주 최고 × 100(0 이하) |
 | `low52wGapRate` | 52주 최저가 대비 | % | (현재가 − 52주 최저) ÷ 52주 최저 × 100(0 이상) |
 
-- 값이 null인 종목은 그 필드 조건에서 제외하고 `excludedForMissingData`로 센다.
-- 평가는 `market.service.list_snapshot_rows()`가 주는 최신일 전 종목 목록(국내 약 2,500개 이하)을 파이썬에서 거른다. 정렬 기본값은 `marketCap desc`.
+- 값이 null인 종목은 그 필드 조건에서 제외하고 `excludedForMissingData`로 센다. ETF는 재무지표가 비어 있어 PER·PBR·ROE·EPS·BPS·외국인 비율 조건에서 자연히 빠진다(키움 데이터면 시가총액·거래대금·52주 조건에서도 빠진다).
+- 평가는 `market.service.list_snapshot_rows()`가 주는 최신일 전 종목 목록(국내 약 2,500개 이하)을 파이썬에서 거른다. 먼저 `kinds`(없으면 `["stock"]`)와 `markets`·`sectors`로 거른 뒤 조건을 적용한다. 정렬 기본값은 `marketCap desc`. 정렬 필드 값이 null인 종목은 방향과 상관없이 맨 뒤에 두고, 같은 값끼리는 `code` 오름차순이다.
 
 ### 4.2 용어 기준표 (`get_filter_guide()`가 돌려주는 고정 문자열의 내용)
 
@@ -96,9 +98,12 @@ class ScreenFilter(CamelModel):
 | 급등 / 급락 | `changeRate gte 5` / `changeRate lte -5` |
 | 외국인 많이 보유 | `foreignRatio gte 30` |
 | 코스피 / 코스닥 | `markets` |
+| ETF | `kinds: ["etf"]` |
+| 주식과 ETF 모두, ETF 포함 | `kinds: ["stock", "etf"]` |
 
 - 숫자 단위: 1만 = 10,000, 1억 = 100,000,000, 1조 = 1,000,000,000,000. 사용자가 숫자를 말하면 기준표보다 사용자 숫자를 따른다.
-- 지원하지 않는 표현(배당, 매출 성장, 영업이익률, 부채비율, 테마, 뉴스 등)은 `unsupported`로 돌려준다.
+- 종류를 말하지 않으면 `kinds`를 비운다(주식만). 예: "ETF 중에서 오늘 3% 넘게 오른 것" → `kinds: ["etf"]` + `changeRate gte 3`. "ETF 중 PER 10 이하"처럼 ETF에 없는 지표를 말하면 필터는 만들되 `explanation`에 ETF는 그 지표가 없어 결과가 비어 있을 수 있다고 적는다.
+- 지원하지 않는 표현(배당, 매출 성장, 영업이익률, 부채비율, 테마, 뉴스, ETF 구성종목·NAV·괴리율 등)은 `unsupported`로 돌려준다.
 
 ## 5. 자연어 해석 `POST /api/screener/parse`
 
@@ -119,7 +124,7 @@ class ScreenFilter(CamelModel):
   "chips": [ { "label": "코스피" }, { "label": "시가총액 ≥ 10조원" }, { "label": "0 < PER ≤ 10" } ] }
 ```
 
-- `chips`는 서버가 필터에서 만든 표시용 문자열이다(LLM이 만들지 않는다).
+- `chips`는 서버가 필터에서 만든 표시용 문자열이다(LLM이 만들지 않는다). `kinds`가 `["etf"]`면 "ETF", `["stock", "etf"]`면 "주식·ETF" 칩을 맨 앞에 둔다(주식만이면 칩 없음).
 - 출력이 `ScreenFilter` 검증을 통과하지 못하면 `503 LLM_UNAVAILABLE`("조건을 이해하지 못했어요. 조금 다르게 말해 주세요."). 거절은 `422 LLM_REFUSED`, LLM 꺼짐 `503`.
 
 ## 6. 실행 `POST /api/screener/run`
@@ -129,7 +134,7 @@ class ScreenFilter(CamelModel):
 
 ```json
 { "asOf": "2026-10-16", "source": "mock", "total": 7, "excludedForMissingData": 2,
-  "items": [ { "code": "005930", "name": "삼성전자", "market": "KOSPI", "sector": "반도체",
+  "items": [ { "code": "005930", "name": "삼성전자", "market": "KOSPI", "sector": "반도체", "kind": "stock",
                "price": "71200", "changeRate": -1.11, "marketCap": 425000000000000,
                "per": "12.40", "pbr": "1.30", "roe": "10.50", "tradingValue": 879000000000 } ] }
 ```
@@ -163,9 +168,9 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 
 ## 9. 화면 명세 (`/stocks/screener`)
 
-- 상단 AI 입력창: "원하는 조건을 말해 보세요", 예시 버튼 4개("코스피 대형주 중 PER 10 이하", "52주 신고가 근처 코스닥 종목", "ROE 15% 이상 저PBR", "오늘 5% 넘게 오른 종목"). LLM 꺼짐이면 입력창 대신 "직접 조건 추가"만. 입력창 옆에 `AiProviderBadge scope="general" compact`, 아래에 "조건 문장은 AI 공급자로 전송돼요. 개인정보는 적지 마세요." 안내.
+- 상단 AI 입력창: "원하는 조건을 말해 보세요", 예시 버튼 4개("코스피 중형주 중 PER 10 이하", "거래대금 많은 코스닥 종목", "ROE 15% 이상 저PBR", "오늘 3% 넘게 오른 종목"). LLM 꺼짐이면 입력창 대신 "직접 조건 추가"만. 입력창 옆에 `AiProviderBadge scope="general" compact`, 아래에 "조건 문장은 AI 공급자로 전송돼요. 개인정보는 적지 마세요." 안내.
 - 해석 결과: 설명 한 문단, 조건 칩(눌러서 필드·연산자·값 수정, 삭제, "조건 추가"), `unsupported` 경고 상자.
-- "검색" → 결과 표(정렬 가능한 열: 종목명, 시장, 현재가, 등락률, 시가총액, PER, PBR, ROE), 행의 "관심종목 담기"(12 API, 409면 "이미 있어요"), 종목명은 `/stocks/[code]` 링크, 기준일·`SampleDataBadge`, 지표 없는 종목 제외 수.
+- "검색" → 결과 표(정렬 가능한 열: 종목명, 시장, 현재가, 등락률, 시가총액, PER, PBR, ROE), 행의 "관심종목 담기"(12 API, 409면 "이미 있어요"), 종목명은 `/stocks/[code]` 링크, `kind=etf` 행에는 "ETF" 배지, null 지표는 "—", 기준일·`SampleDataBadge`, 지표 없는 종목 제외 수.
 - 저장한 검색 목록(불러오기·삭제), "이 조건 저장".
 - "내 키움 조건식" 탭: 연결 선택(없으면 운영자 데이터), 조건식 목록, 실행 결과 표.
 - `?f=`가 있으면 그 필터를 칩으로 보여 주고 바로 실행.
@@ -189,7 +194,8 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 ## 11. 완료 기준
 
 - [ ] 공통 완료 기준(AGENTS.md) 전 항목
-- [ ] `seed-mock` 후 예시 4개가 Mock 데이터에서 결과를 낸다(general 공급자(Gemini 키)가 켜져 있으면 수동 확인, 없으면 칩 직접 입력으로 확인)
+- [ ] `seed-mock` 후 예시 4개가 Mock 데이터에서 결과를 낸다(general 공급자(Gemini 키)가 켜져 있으면 수동 확인, 없으면 칩 직접 입력으로 확인). 코디네이터가 develop의 seed-mock 스냅샷(주식 80개)으로 센 기대 건수: 코스피 중형주(`marketCap between 1조~10조`)+`0 < PER ≤ 10` 4건, 코스닥+`tradingValue ≥ 1,000억` 27건, `ROE ≥ 15`+`0 < PBR ≤ 1` 5건, `changeRate > 3` 14건.
+- 참고(2026-10-17): 08 Mock 고정 데이터는 시가총액이 모두 5조 미만이고, 52주 최고가 대비 −5% 안이나 최저가 대비 +10% 안인 종목이 없으며, 등락률 최대가 4.96%다. 그래서 "대형주"·"52주 신고가 근처"·"5% 넘게 오른" 조건은 Mock에서 0건이 정상이다(결과 없음 안내). 처음 예시 문구는 이 때문에 위처럼 바꿨다.
 
 ## 12. 검증 체크리스트
 
@@ -199,3 +205,24 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 4. URL 인코딩 규칙이 백엔드·프론트에서 같다(같은 필터 → 같은 문자열).
 5. 서비스 함수 시그니처가 8절과 같다(15의 전제).
 6. 사용자 격리 404.
+
+## 구현 결과
+
+- 화이트리스트 필터 모델(추가 필드 금지, 연산자·범위·조건 10개·limit·종류 중복 검증), 최신 스냅샷의 AND 평가, 52주 비율, 누락 지표 제외 수, null 마지막·동률 코드순 정렬을 구현했다. 기본 종류는 주식만이며 ETF와 주식·ETF 선택을 지원한다.
+- `screener.parse` general 작업을 공통 `StructuredLLM`으로 호출한다. 시스템 프롬프트는 `get_filter_guide()`의 필드·단위·계산식·기준표를 그대로 포함하며, 검증 실패 503·거절 422·꺼짐 503과 서버 생성 칩을 제공한다.
+- 인증이 필요한 5~7절 API, 저장 검색 CRUD·사용자당 20개·이름 중복·사용자 격리, `screener_0001` 마이그레이션을 구현했다. 동시 저장 요청도 상한을 지키도록 사용자별 트랜잭션 잠금을 사용한다.
+- 키움 조건식은 허용된 08 서비스 함수로 클라이언트를 얻고 `CONDITIONS` 능력을 확인한다. Mock 조건식 2개와 501 처리를 검증했다. 코디네이터 답변에 따라 스냅샷에 없는 코드의 이름은 공개 `search_stocks(db, code, limit=1)`로 정확히 일치하는 첫 항목만 보완하고, 마스터에도 없으면 코드로 표시한다. 지표는 null이다.
+- `/stocks/screener`에 AI 입력·수정/삭제 가능한 조건 칩·직접 조건 추가·종류/시장/업종/limit·결과 정렬·관심종목 담기(409 안내)·저장/불러오기/삭제·연결별 키움 탭을 구현했다. 작은 화면은 결과 카드, 큰 화면은 표로 표시하며 ETF 배지·null 표시·기준일·누락 지표 수·AI 공급자 배지와 필요한 고지를 붙였다. 숫자 열은 백엔드에서 다시 정렬하고, DSL 필드에 없는 종목명·시장은 현재 표시 결과를 정렬한다.
+- `encode_filter`와 `encodeFilter`는 기본값을 포함한 camelCase JSON의 키를 재귀 정렬하고, UTF-8 base64url에서 패딩을 제거한다. 소수 문자열의 끝자리 0과 Python Decimal의 지수 표기를 보존하며, 한국어 업종·소수 조건을 포함한 고정 사례로 두 구현의 결과 일치를 확인했다. `?f=` 진입은 필터 검증 후 자동 실행하며 잘못된 링크는 안내한다.
+- `seed-mock`으로 종목/스냅샷 90개(주식 80·ETF 10)를 준비한 뒤 실제 API와 독립 Playwright 컨텍스트에서 갱신된 예시의 결과를 확인했다: 코스피 중형주+`0 < PER ≤ 10` **4건**, 코스닥+거래대금 1,000억 이상 **27건**, ROE 15 이상+저PBR **5건**, 등락률 3 초과 **14건**. general AI가 꺼져 있어 실제 LLM 호출 없이 직접 조건/필터 링크로 확인했고, 자연어 흐름은 FakeStructuredLLM·MSW로 검증했다.
+- 검증: `scripts/worktree-setup.sh`, `uv run alembic upgrade heads`, `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`(전체 1,065개, screener 28개), `npm run lint`, `npx tsc --noEmit`, `npm run test`(전체 359개, screener 8개), `npm run build` 통과. 기존 Starlette TestClient deprecation 경고 1건이 있으며 실패는 없다.
+- 별도 빈 DB `finance_13_impl_verify`에서 `upgrade heads → downgrade base → upgrade heads`를 통과하고 DB를 삭제했다. 360px·1280px에서 문서 가로 넘침이 없고 브라우저 pageerror가 없음을 확인했으며, 조건 수정·실행과 Mock 키움 탭도 확인했다. `scripts/stop.sh`로 두 서버를 종료했다.
+- 스펙과 다른 점: 없음. 코디네이터가 갱신한 예시 문구(develop `1975b0c`)와 이름 보완 지침을 반영했다. 공유 파일·08 모듈·증권사 어댑터·의존성은 수정하지 않았고 테스트에서 실제 외부 API/LLM은 호출하지 않았다.
+- 남은 일: 별도 검증 워커의 PR 검증과 코디네이터 병합. 실제 Gemini·증권사 연결 확인은 이 작업에서 수행하지 않았다.
+
+### PR 검증 후 정렬 상태 수정
+
+- 중요 발견 1번을 수정했다. 숫자 열의 정렬 표시와 다음 방향 계산은 상위 `ScreenFilter.sort`를 사용하고, 명시적인 필터 변경/불러오기 외의 재조회에서는 마지막 성공 결과를 유지한다. 재조회 중 표를 유지하고 `aria-busy`·로딩 문구를 표시하며 정렬 조작을 잠시 비활성화한다. 종목명·시장 및 키움 결과의 화면 내 정렬만 별도 표시 상태로 처리한다.
+- 회귀 테스트 3개를 추가했다. 수정 전 3개 모두 실패한 것을 확인한 뒤, 숫자 열 두 번 클릭의 `asc → desc` 요청 순서·헤더 방향·지연 응답 중 동일한 표 유지, 모바일 선택 필드 유지·방향 전환, URL 및 저장 검색의 sort 복원을 모두 통과했다.
+- 수정 후 `npm run lint`, `npx tsc --noEmit`, `npm run test`(전체 **362개**, screener **11개**), `npm run build` 통과. 백엔드·의존성·공유 파일은 수정하지 않았다.
+- 실제 서버와 독립 Playwright Chrome 컨텍스트에서 1280px PER `asc → desc`, 360px PBR 선택 후 `asc → desc`, 응답 지연 중 표 유지, URL ROE `desc → asc`, 저장 검색 현재가 `desc → asc` 요청과 표시를 확인했다. 두 너비의 문서 가로 넘침과 pageerror는 없었고 실제 외부 API/LLM은 호출하지 않았다. `scripts/stop.sh`로 서버를 종료했다.

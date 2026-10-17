@@ -65,7 +65,7 @@ export interface TargetTable {
 
 // ── 보유 자산 ────────────────────────────────────────────────────────────
 
-export type HoldingSource = "manual" | "kiwoom" | "toss" | "codef";
+export type HoldingSource = "manual" | "kiwoom" | "toss" | "codef" | "mock";
 
 export interface Holding {
   id: string;
@@ -74,6 +74,9 @@ export interface Holding {
   amount: number;
   includeInAllocation: boolean;
   source: HoldingSource;
+  connectionId: string | null;
+  syncedAt: string | null;
+  classOverride: boolean;
   memo: string | null;
   createdAt: string;
   updatedAt: string;
@@ -234,4 +237,20 @@ export interface Recommendation {
   reasons: Reason[];
   assetClassNotes: AssetClassNote[];
   answerContributions: AnswerContribution[];
+}
+
+
+export interface BrokerConnection {
+  id: string;
+  provider: "mock" | "kiwoom" | "toss";
+  label: string;
+  status: "unverified" | "active" | "error";
+}
+
+export interface HoldingSyncResult {
+  created: number;
+  updated: number;
+  removed: number;
+  skipped: { name: string; reason: string }[];
+  syncedAt: string;
 }

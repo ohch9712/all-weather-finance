@@ -7,7 +7,7 @@ from app.core.time import now_utc
 from app.modules.market.models import BrokerConnection, Stock, StockSnapshot
 
 
-def search_stocks(db, query, limit, market=None):
+def search_stocks(db, query, limit, market=None, kind=None):
     query = query.strip()
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     stmt = select(Stock).where(
@@ -19,6 +19,8 @@ def search_stocks(db, query, limit, market=None):
     )
     if market:
         stmt = stmt.where(Stock.market == market)
+    if kind is not None:
+        stmt = stmt.where(Stock.kind == kind)
     rank = case(
         (Stock.code == query, 0), (Stock.name.ilike(f"{escaped}%", escape="\\"), 1), else_=2
     )
@@ -89,12 +91,16 @@ def delete_connection(db, row):
     db.commit()
 
 
-def refresh_stocks(db, rows, source):
+def refresh_stocks(db, rows, source, *, kinds):
     codes = [r.code for r in rows]
-    # 다른 공급자의 종목도 현재 수집한 국내 유니버스에서 사라졌다면 비상장으로 표시한다.
+    # 이번에 목록을 받은 종류만 비상장 여부를 판단한다.
     db.execute(
         update(Stock)
-        .where(Stock.market.in_(["KOSPI", "KOSDAQ"]), Stock.code.not_in(codes))
+        .where(
+            Stock.market.in_(["KOSPI", "KOSDAQ"]),
+            Stock.kind.in_(kinds),
+            Stock.code.not_in(codes),
+        )
         .values(listed=False, updated_at=now_utc())
     )
     for row in rows:
@@ -103,6 +109,7 @@ def refresh_stocks(db, rows, source):
             name=row.name,
             market=row.market,
             sector=row.sector,
+            kind=row.kind,
             source=source,
             listed=True,
             updated_at=now_utc(),

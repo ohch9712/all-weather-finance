@@ -25,6 +25,7 @@ describe("자리표시 페이지", () => {
     ["learn/[slug]", "07"],
     ["admin/learn", "07"],
     ["settings/connections", "08"],
+    ["settings/trading-costs", "05b"],
   ])("/%s → 작업 %s", (route, taskId) => {
     const file = join(process.cwd(), "src/app/(app)", route, "page.tsx");
     expect(existsSync(file)).toBe(true);

@@ -191,6 +191,26 @@ class HoldingOut(CamelModel):
     memo: str | None
     created_at: UtcDateTime
     updated_at: UtcDateTime
+    connection_id: UUID | None
+    synced_at: UtcDateTime | None
+    class_override: bool
+
+
+class HoldingSyncRequest(CamelModel):
+    connection_id: UUID
+
+
+class HoldingSyncSkipped(CamelModel):
+    name: str
+    reason: str
+
+
+class HoldingSyncResult(CamelModel):
+    created: int
+    updated: int
+    removed: int
+    skipped: list[HoldingSyncSkipped] = Field(default_factory=list)
+    synced_at: UtcDateTime
 
 
 class HoldingList(CamelModel):

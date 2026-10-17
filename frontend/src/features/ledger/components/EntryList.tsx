@@ -13,11 +13,11 @@ import { useEntries } from "../hooks";
 import type { Entry, EntryFilters } from "../types";
 import { PAGE_SIZE, PAYMENT_METHOD_LABEL, SOURCE_LABEL, formatDayHeader, groupByDate } from "../utils";
 
-/** 수입은 `+`와 파란색, 지출은 `-`와 기본 글자색 */
-function EntryAmount({ kind, amount, className }: { kind: Entry["kind"]; amount: number; className?: string }) {
+/** 수입과 지출 취소는 `+`, 승인된 지출은 `-`로 표시한다. */
+function EntryAmount({ kind, amount, isCancellation = false, className }: { kind: Entry["kind"]; amount: number; isCancellation?: boolean; className?: string }) {
   return (
     <span className={cn("tabular-nums", kind === "income" && "text-money-down", className)}>
-      {kind === "income" ? "+" : "-"}
+      {kind === "income" || isCancellation ? "+" : "-"}
       {formatKRW(amount)}
     </span>
   );
@@ -38,6 +38,7 @@ function EntryRow({ entry, onSelect }: { entry: Entry; onSelect: (entry: Entry) 
           <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             <Badge variant="secondary">{entry.categoryName}</Badge>
             <span>{PAYMENT_METHOD_LABEL[entry.paymentMethod]}</span>
+            {entry.isCancellation && <Badge variant="outline">취소 거래</Badge>}
             {source && (
               <Badge variant="outline" className="h-4 px-1.5 text-[11px]">
                 {source}
@@ -45,7 +46,7 @@ function EntryRow({ entry, onSelect }: { entry: Entry; onSelect: (entry: Entry) 
             )}
           </span>
         </span>
-        <EntryAmount kind={entry.kind} amount={entry.amount} className="shrink-0 text-sm font-semibold" />
+        <EntryAmount kind={entry.kind} amount={entry.amount} isCancellation={entry.isCancellation} className="shrink-0 text-sm font-semibold" />
         <span className="sr-only">수정</span>
       </button>
     </li>

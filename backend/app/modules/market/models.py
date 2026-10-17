@@ -28,9 +28,11 @@ class Stock(Base):
             "market in ('KOSPI','KOSDAQ','KONEX','NASDAQ','NYSE','AMEX','OTHER')", name="market"
         ),
         CheckConstraint("source in ('mock','kiwoom','toss')", name="source"),
+        CheckConstraint("kind in ('stock','etf')", name="kind"),
         Index("ix_stocks_name", "name"),
     )
     code: Mapped[str] = mapped_column(String(20), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(5), server_default="stock")
     market: Mapped[str] = mapped_column(String(8))
     name: Mapped[str] = mapped_column(String(100))
     sector: Mapped[str | None] = mapped_column(String(50))

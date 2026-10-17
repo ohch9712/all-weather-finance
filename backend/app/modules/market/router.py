@@ -1,6 +1,6 @@
 from dataclasses import asdict
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -22,10 +22,11 @@ def stocks(
     client: MarketDataClientDep,
     q: str = "",
     market: Market | None = None,
+    kind: Literal["stock", "etf"] | None = None,
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
 ):
     return schemas.StockList(
-        items=service.search_stocks_in_market(db, q, limit=limit, market=market),
+        items=service.search_stocks_in_market(db, q, limit=limit, market=market, kind=kind),
         source=client.provider,
     )
 

@@ -17,16 +17,19 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Label } from "@/components/ui/label";
 import { getErrorMessage } from "@/lib/api-client";
 import { ASSET_CLASSES, ASSET_CLASS_LABEL } from "@/lib/domain";
-import { formatKRWCompact, formatPercent } from "@/lib/format";
+import { formatDateTime, formatKRWCompact, formatPercent } from "@/lib/format";
 import { ALLOCATION_PATHS, MAX_AMOUNT, ONBOARDING_QUERY, QUICK_ADD_PRESETS, SIMPLE_INPUT_ROWS } from "../constants";
-import { useBulkCreateHoldings, useDeleteHolding, useHoldings } from "../hooks";
+import { useBrokerConnections, useBulkCreateHoldings, useDeleteHolding, useHoldings } from "../hooks";
 import type { Holding, HoldingInput } from "../types";
 import { allocationMessages, parseAmount } from "../validation";
 import { AmountInput } from "./AmountInput";
 import { HoldingDialog, type HoldingDialogTarget } from "./HoldingDialog";
+import { classificationReason } from "../classify";
+import { HoldingSyncDialog } from "./HoldingSyncDialog";
 import { OnboardingProgress, useIsOnboarding } from "./OnboardingProgress";
 
 const NEXT_AFTER_ONBOARDING = `${ALLOCATION_PATHS.recommendation}${ONBOARDING_QUERY}`;
@@ -35,7 +38,10 @@ const NEXT_AFTER_ONBOARDING = `${ALLOCATION_PATHS.recommendation}${ONBOARDING_QU
 export function AssetsManager() {
   const onboarding = useIsOnboarding();
   const holdings = useHoldings();
+  const connections = useBrokerConnections(holdings.data?.some((item) => !!item.connectionId && item.source !== "codef") ?? false);
   const [dialog, setDialog] = useState<HoldingDialogTarget | null>(null);
+
+  const [syncTarget, setSyncTarget] = useState<{ connectionId?: string } | null>(null);
 
   function content() {
     if (holdings.isPending) return <LoadingState rows={4} />;
@@ -45,6 +51,13 @@ export function AssetsManager() {
       <>
         <QuickAdd onPick={(preset) => setDialog({ mode: "create", preset })} />
         <HoldingList holdings={holdings.data} onEdit={(holding) => setDialog({ mode: "edit", holding })} />
+        <div className="flex flex-wrap gap-2">
+          {Array.from(new Map(holdings.data.filter((item) => item.connectionId && item.source !== "codef").map((item) => [item.connectionId!, item])).values()).map((item) => (
+            <Button key={item.connectionId} className="h-auto max-w-full whitespace-normal wrap-anywhere" variant="outline" size="sm" onClick={() => setSyncTarget({ connectionId: item.connectionId! })}>
+              {connections.data?.find((connection) => connection.id === item.connectionId)?.label ?? SOURCE_LABEL[item.source]} 다시 동기화
+            </Button>
+          ))}
+        </div>
         {onboarding && (
           <Button asChild size="lg" className="w-full sm:w-auto">
             <Link href={NEXT_AFTER_ONBOARDING}>
@@ -73,7 +86,10 @@ export function AssetsManager() {
           )
         }
       />
+      <Button type="button" variant="outline" className="max-w-full" onClick={() => setSyncTarget({})}>증권사 잔고 불러오기</Button>
       {content()}
+      {syncTarget && <HoldingSyncDialog initialConnectionId={syncTarget.connectionId} onClose={() => setSyncTarget(null)} />}
+      {holdings.data?.some((item) => item.source === "mock") && <Disclaimer variant="sample" />}
       <HoldingDialog target={dialog} onClose={() => setDialog(null)} />
       <Disclaimer variant="investment" />
     </div>
@@ -97,6 +113,8 @@ function QuickAdd({ onPick }: { onPick: (preset: (typeof QUICK_ADD_PRESETS)[numb
     </section>
   );
 }
+
+const SOURCE_LABEL = { manual: "직접 입력", kiwoom: "키움증권", toss: "토스증권", codef: "CODEF", mock: "샘플 증권사" };
 
 function HoldingList({ holdings, onEdit }: { holdings: Holding[]; onEdit: (holding: Holding) => void }) {
   const deleteHolding = useDeleteHolding();
@@ -151,9 +169,18 @@ function HoldingList({ holdings, onEdit }: { holdings: Holding[]; onEdit: (holdi
                       <p className="flex flex-wrap items-center gap-1.5 font-medium break-keep">
                         <span className="min-w-0 wrap-anywhere">{holding.name}</span>
                         {!holding.includeInAllocation && <Badge variant="outline">점수 계산 제외</Badge>}
-                        {holding.source !== "manual" && <Badge variant="secondary">증권사 연동</Badge>}
+                        {holding.source !== "manual" && <Badge variant="secondary">{holding.connectionId ? SOURCE_LABEL[holding.source] : "증권사 연동"}</Badge>}
+                        {holding.source === "mock" && <Badge variant="outline">샘플</Badge>}
+                        {holding.classOverride && <Badge variant="outline">직접 지정</Badge>}
                       </p>
                       <MoneyText value={holding.amount} className="text-sm" />
+                      {holding.connectionId && <div className="space-y-1 text-xs text-muted-foreground">
+                        {holding.syncedAt && <p>마지막 동기화 {formatDateTime(holding.syncedAt)}</p>}
+                        <Tooltip>
+                          <TooltipTrigger asChild><button type="button" className="underline underline-offset-2">자동 분류 근거</button></TooltipTrigger>
+                          <TooltipContent>{classificationReason(holding.name)}{holding.classOverride && " 현재는 직접 지정한 자산군을 사용해요."}</TooltipContent>
+                        </Tooltip>
+                      </div>}
                       {holding.memo && <p className="text-xs text-muted-foreground wrap-anywhere">{holding.memo}</p>}
                     </div>
                     <div className="flex shrink-0 items-center">
@@ -168,7 +195,7 @@ function HoldingList({ holdings, onEdit }: { holdings: Holding[]; onEdit: (holdi
                       </Button>
                       <ConfirmDialog
                         title="자산을 삭제할까요?"
-                        description={<span className="wrap-anywhere">{`'${holding.name}'을(를) 삭제하면 점수와 추천이 다시 계산돼요.`}</span>}
+                        description={<span className="wrap-anywhere">{`'${holding.name}'을(를) 삭제하면 점수와 추천이 다시 계산돼요.${holding.connectionId ? ' 다음 동기화에서 다시 생길 수 있어요.' : ''}`}</span>}
                         confirmLabel="삭제"
                         destructive
                         onConfirm={async () => {

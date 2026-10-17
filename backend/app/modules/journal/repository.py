@@ -3,7 +3,7 @@ from datetime import UTC, datetime, time, timedelta
 from sqlalchemy import func, or_, select
 
 from app.core.time import KST
-from app.modules.journal.models import Trade, TradeNote
+from app.modules.journal.models import Trade, TradeCostSettings, TradeNote
 
 
 def owned_trade(db, user_id, trade_id):
@@ -98,3 +98,21 @@ def delete(db, item):
     db.delete(item)
     db.commit()
     db.expire_all()
+
+
+def cost_settings(db, user_id):
+    return db.scalar(select(TradeCostSettings).where(TradeCostSettings.user_id == user_id))
+
+
+def lock_imports(db, user_id):
+    # 빈 매매 목록에서도 같은 사용자의 파일 저장·체결 동기화를 직렬화한다.
+    from sqlalchemy import text
+
+    db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": user_id.int % (2**63)})
+
+
+def add_trade(db, values):
+    trade = Trade(**values)
+    db.add(trade)
+    db.flush()
+    return trade

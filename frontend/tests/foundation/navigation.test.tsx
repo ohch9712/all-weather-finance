@@ -18,6 +18,7 @@ describe("내비게이션 데이터(architecture 12.1)", () => {
       ["AI 상담", "/chat"],
       ["프로필", "/settings/profile"],
       ["증권사 연결", "/settings/connections"],
+      ["매매 수수료·세금", "/settings/trading-costs"],
       ["학습 콘텐츠 관리", "/admin/learn"],
     ]);
     expect(NAV_ITEMS.filter((item) => item.adminOnly).map((item) => item.href)).toEqual(["/admin/learn"]);

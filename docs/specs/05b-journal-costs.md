@@ -3,6 +3,7 @@
 > 선행: 05(매매일지)와 08b(국내 ETF 종류 구분)가 develop에 병합된 상태. 브랜치 `feature/05-journal-costs`(develop에서 새로 만든다. 05 워크트리와 슬롯 05를 다시 쓴다). 11은 이 작업이 병합된 뒤 시작한다.
 > 결정(2026-10-17, 사용자): 체결 수수료·세금의 기본값은 **키움증권 기준**으로 둔다. 증권사 이벤트 등으로 일시적으로 바뀔 수 있으니 사용자가 설정에서 기본값을 바꿀 수 있게 한다.
 > **착수 직전 갱신**: 코디네이터가 `frontend/src/lib/navigation.ts`(01b 소유)의 설정 그룹에 `{ href: "/settings/trading-costs", label: "매매 수수료·세금" }` 항목과 자리표시 페이지를 develop에 먼저 넣는다.
+> **갱신함(2026-10-17, develop 기준)**: 내비게이션 항목(`BadgePercent` 아이콘)과 자리표시 페이지 `frontend/src/app/(app)/settings/trading-costs/page.tsx`(`ComingSoon taskId="05b"`), 01b 테스트 기대값을 develop에 넣었다. 08b가 병합돼 `market.service.get_stock_detail(db, code)`가 `kind`를 준다. 12(종목 상세)의 "내 매매 기록 보기" 링크를 위해 8절 끝에 매매일지 `symbol` 쿼리 처리를 더했다.
 
 ## 1. 목표
 
@@ -74,7 +75,7 @@
 ```
 
 - 검증: 요율은 0 이상 5 이하, 소수 넷째 자리까지(어기면 `field_error`로 `422`). 추정의 `quantity`·`price`는 0보다 크다. `market`은 `KRX`·`US`, `side`는 `buy`·`sell`.
-- `isEtf`: `symbolCode`가 있고 `market=KRX`면 `market.service.get_stock_detail(db, code)`의 `kind == "etf"`로 정한다(08b). 종목 마스터에 없으면 주식으로 본다.
+- `isEtf`: `symbolCode`가 있고 `market=KRX`면 `market.service.search_stocks(db, symbolCode, limit=1)`의 첫 항목이 코드가 정확히 같고 `kind == "etf"`인지로 정한다(08b. 검색은 코드가 정확히 같은 종목을 맨 앞에 둔다). `get_stock_detail`은 시세 조회까지 해서 추정마다 증권사를 부르게 되므로 쓰지 않는다. 종목 마스터에 없으면 주식으로 본다.
 - 거래 응답(`Trade`)에 `"costEstimated": true | false`를 더한다(05 응답 필드는 그대로 둔다).
 
 ## 7. 다른 모듈용 서비스 함수
@@ -97,6 +98,7 @@ def estimate_trade_costs(db, user_id: UUID, *, market: Literal["KRX", "US"], sid
 - `/settings/trading-costs` "매매 수수료·세금": 세 요율 입력(%, 소수 넷째 자리까지), 각 칸 아래 기본값("키움증권 기준 기본값 0.015%" 등), 저장, "기본값으로 되돌리기"(확인 창). 안내 문구: "증권사 이벤트 등으로 실제 요율과 다를 수 있어요. 증권사가 알려 준 실제 수수료·세금이 있으면 그 값이 우선이에요." "국내 ETF는 팔 때 거래세가 붙지 않아요."
 - 매매 추가 다이얼로그(05): 시장·매수/매도·수량·단가가 채워지면 `cost-estimate`로 수수료·세금 초기값을 채운다(300ms 디바운스). 사용자가 수수료나 세금 칸을 직접 고친 뒤에는 덮어쓰지 않는다. 칸 아래에 "기본 요율로 계산한 추정치예요. 실제 금액으로 고칠 수 있어요."와 설정 페이지 링크. 기존 거래 수정에서는 자동으로 바꾸지 않는다(05의 변경 필드만 PATCH 규칙 유지).
 - 거래 목록의 "수수료+세금" 칸과 상세에 `costEstimated`면 "추정" 배지.
+- 매매일지 기록 탭은 URL 쿼리 `symbol`을 종목 검색 필터의 초기값으로 읽는다(`/journal?tab=records&symbol=005930`, 12의 종목 상세 링크). 필터를 바꾸면 쿼리도 맞춘다. 05의 다른 동작은 그대로 둔다.
 - 360px에서 가로 스크롤 없이 보인다.
 
 ## 9. 테스트
@@ -104,7 +106,7 @@ def estimate_trade_costs(db, user_id: UUID, *, market: Literal["KRX", "US"], sid
 - 계산: 국내 매수(수수료만), 국내 주식 매도(수수료+거래세), 국내 ETF 매도(거래세 0), 미국 매수·매도(수수료만, 0.01달러 버림), 원 미만 버림, 사용자 요율 적용.
 - API: 기본값 조회(`isDefault: true`), 저장 후 조회, 되돌리기, 요율 범위·자릿수 `422`, 다른 사용자 설정이 섞이지 않음(사용자별 행), 추정 API의 ETF 판별(08b `kind`), PATCH로 수수료를 바꾸면 `costEstimated=false`.
 - 마이그레이션 순환(`journal_0002`), 05 기존 테스트 전부 통과.
-- 화면: 설정 저장·되돌리기, 매매 추가 다이얼로그의 초기값 채움과 사용자가 고친 값 유지, "추정" 배지.
+- 화면: 설정 저장·되돌리기, 매매 추가 다이얼로그의 초기값 채움과 사용자가 고친 값 유지, "추정" 배지, `/journal?tab=records&symbol=005930`으로 열면 그 종목으로 걸러진 기록.
 
 ## 10. 완료 기준
 
@@ -120,3 +122,34 @@ def estimate_trade_costs(db, user_id: UUID, *, market: Literal["KRX", "US"], sid
 4. 요율을 바꾸면 이후 추정에 반영되고, 이미 저장된 거래는 바뀌지 않는다. 되돌리기 후 기본값이다.
 5. 수동 입력에서 사용자가 고친 수수료·세금을 덮어쓰지 않는다. PATCH로 바꾼 거래는 `costEstimated=false`다.
 6. 다른 사용자의 설정이 보이거나 바뀌지 않는다.
+
+## 구현 결과
+
+### 구현한 것
+
+- `journal_0002`에 사용자별 `trade_cost_settings`와 기존 거래의 기본값이 false인 `trades.cost_estimated`를 추가했다. 기본 요율은 `journal/costs.py`의 `DEFAULT_RATES`에서만 계산에 사용한다.
+- 인증이 필요한 요율 조회·저장·삭제와 비용 추정 API, 공개 서비스 `TradeCosts`·`estimate_trade_costs`를 구현했다. 요율 범위·자릿수 오류는 `field_error`로 반환한다.
+- 국내 수수료·거래세는 원 미만을, 미국 수수료는 센트 미만을 버린다. ETF는 `market.service.search_stocks(..., limit=1)`의 정확한 코드와 `kind`로만 판별하며 시세 API를 호출하지 않는다.
+- 설정 페이지에서 세 요율을 저장하고 확인 창을 거쳐 기본값으로 복원한다. 기본 요율 설명, ETF 거래세 안내와 세금 고지를 표시한다.
+- 매매 추가에서 300ms 디바운스로 비용을 채우고, 직접 고친 비용은 각각 보존한다. 늦게 도착한 이전 응답도 최신 입력을 덮어쓰지 않는다. 기존 거래 수정은 변경 필드만 PATCH하며 비용 변경 시 추정 표시를 해제한다.
+- 거래 목록(표·모바일 카드)과 상세에 추정 배지를 표시한다. 기록 탭은 URL의 `symbol`을 읽고 검색 필터 변경을 URL에 반영한다.
+
+### 스펙과 다른 점과 이유
+
+- 코디네이터 승인(`ask` 응답, 2026-10-17)에 따라 POST의 비용 생략 규칙을 구체화했다. KRX·US에서 `fee` 또는 `tax` 키를 생략하면 생략한 필드만 사용자 요율과 ETF 판별로 추정하고 `costEstimated=true`로 저장한다. 둘 다 명시하면 0도 그대로 저장하고 false다. OTHER는 생략 시 기존처럼 0·false다.
+- 추가 다이얼로그는 직접 수정하지 않은 비용을 POST에서 생략하고, 직접 수정한 비용만 명시한다. 이로써 별도의 입력 필드를 추가하지 않고 추정 여부를 저장한다. KRX·US에서 비용 생략 시 0이던 기존 POST 기본 동작은 추정으로 바뀐다.
+- 설정 화면의 기본 요율 문구는 설명용 텍스트이며, 프론트에서 기본 요율로 계산하거나 숫자 기본값을 따로 관리하지 않는다. 모든 계산과 되돌리기는 백엔드 기본 상수를 따른다.
+
+### 검증 결과
+
+- `scripts/worktree-setup.sh`: 성공(슬롯 05, 백엔드 8005·프론트 3005·DB finance_05).
+- 백엔드 `uv run ruff check .`, `uv run ruff format --check .`: 통과. `uv run pytest`: 1,086개 통과(기존 Starlette/httpx 사용 중단 경고 1건).
+- 프론트 `npm run lint`, `npx tsc --noEmit`, `npm run test`: 통과(36개 파일·359개 테스트). `npm run build`: 성공.
+- 별도 빈 DB `finance_05_costs_cycle`에서 `upgrade heads` → `downgrade base` → `upgrade heads`: 성공 후 DB 삭제.
+- 독립 Playwright 브라우저 컨텍스트에서 가입·인증 후 실제 API로 설정 저장·복원, 국내 매도 105원/1,400원, 미국 매수 3.75달러, 추정 거래 저장·PATCH 해제, URL 종목 초기 필터를 확인했다. 설정 360px·1280px와 매매 추가·목록·상세 360px에서 가로 넘침과 브라우저 오류가 없음을 확인했다.
+- 사용자별 설정 격리, 기존 거래 비용 보존, 명시한 0 보존, ETF 판별과 시세 조회 금지, 범위·자릿수 422, 부분 수정 규칙, 지연 응답 보존을 테스트했다. 실제 외부 API·LLM 호출 없이 통과했다.
+- 변경 경로는 이 스펙의 소유 파일 안에만 있다.
+
+### 남은 일
+
+- 구현 범위의 남은 일은 없다. 별도 검증 워커의 검증과 코디네이터의 병합이 남아 있다.

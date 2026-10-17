@@ -16,6 +16,7 @@ import { ALLOCATION_PATHS } from "../constants";
 import { useRecommendation } from "../hooks";
 import type { Direction, Recommendation } from "../types";
 import { AllocationDonut } from "./AllocationDonut";
+import { AllocationSampleDisclaimer } from "./AllocationSampleDisclaimer";
 import { LayerSummary } from "./LayerSummary";
 import { useIsOnboarding } from "./OnboardingProgress";
 import { StatusNotice } from "./StatusNotice";
@@ -82,6 +83,7 @@ export function RecommendationView() {
       ) : (
         <RecommendationBody recommendation={query.data} />
       )}
+      <AllocationSampleDisclaimer />
       <Disclaimer variant="investment" />
     </div>
   );

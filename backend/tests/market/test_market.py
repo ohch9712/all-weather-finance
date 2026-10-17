@@ -23,7 +23,7 @@ def seeded(db):
     broker = MockBroker()
     service.refresh_stocks(db, broker)
     result = service.refresh_snapshot(db, broker, date(2026, 10, 16))
-    assert result["success"] == 80
+    assert result["success"] == 90
     return broker
 
 
@@ -87,7 +87,7 @@ def test_stock_api_search_detail_and_validation(auth_client, db, seeded):
         == 422
     )
     status = auth_client.get("/api/market/snapshot/status").json()
-    assert status == {"asOf": "2026-10-16", "count": 80, "source": "mock"}
+    assert status == {"asOf": "2026-10-16", "count": 90, "source": "mock"}
 
 
 def test_search_ranking_and_snapshot_join(db, seeded):
@@ -109,7 +109,7 @@ def test_search_ranking_and_snapshot_join(db, seeded):
         and latest.rows[0].sector
         and latest.rows[0].market in {"KOSPI", "KOSDAQ"}
     )
-    assert len(service.list_snapshot_rows(db, date(2026, 10, 16)).rows) == 80
+    assert len(service.list_snapshot_rows(db, date(2026, 10, 16)).rows) == 90
 
 
 def test_quote_failure_dependency_override_and_cache(auth_client, app, db, seeded, monkeypatch):
@@ -263,7 +263,7 @@ def test_auth_required_and_nonexistent_ids(client, auth_client):
 
 def test_batch_resume_delisting_failure_rate_pruning(db, seeded):
     result = service.refresh_snapshot(db, seeded, date(2026, 10, 16), resume=True)
-    assert result == {"success": 0, "failed": 0, "skipped": 80, "exit_code": 0}
+    assert result == {"success": 0, "failed": 0, "skipped": 90, "exit_code": 0}
 
     class Removed(MockBroker):
         def list_stocks(self, market):
@@ -290,7 +290,7 @@ def test_batch_resume_delisting_failure_rate_pruning(db, seeded):
 
     result = service.refresh_snapshot(db, TenPercent(), date(2026, 10, 17), limit=10)
     assert result["success"] == 9 and result["exit_code"] == 0
-    assert service.prune_snapshots(db, date(2026, 10, 17)) == 80
+    assert service.prune_snapshots(db, date(2026, 10, 17)) == 90
 
 
 def test_seed_mock_cli(db, monkeypatch):
@@ -306,7 +306,7 @@ def test_seed_mock_cli(db, monkeypatch):
     db.execute(delete(Stock))
     db.commit()
     assert jobs.main(["seed-mock"]) == 0
-    assert db.scalar(select(func.count()).select_from(Stock)) == 80
-    assert db.scalar(select(func.count()).select_from(StockSnapshot)) == 80
+    assert db.scalar(select(func.count()).select_from(Stock)) == 90
+    assert db.scalar(select(func.count()).select_from(StockSnapshot)) == 90
     assert jobs.main(["refresh-snapshot", "--provider", "mock", "--resume"]) == 0
     assert jobs.main(["prune-snapshots", "--keep-days", "30"]) == 0

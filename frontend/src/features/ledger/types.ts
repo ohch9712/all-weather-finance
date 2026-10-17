@@ -38,6 +38,10 @@ export interface EntryInput {
 }
 
 export interface Entry extends EntryInput {
+  cardName: string | null;
+  approvalNo: string | null;
+  isCancellation: boolean;
+  importBatchId: string | null;
   id: string;
   categoryName: string;
   source: EntrySource;
@@ -55,6 +59,7 @@ export interface EntryFilters {
 }
 
 export interface EntryListParams extends EntryFilters {
+  importBatchId?: string;
   page: number;
   pageSize: number;
 }

@@ -1,7 +1,9 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
-from decimal import ROUND_HALF_UP, Decimal, localcontext
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal, localcontext
+from typing import Literal
+from uuid import UUID
 
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
@@ -9,9 +11,13 @@ from pydantic import ValidationError
 from app.core.errors import AppError, field_error
 from app.core.schemas import Page
 from app.core.time import KST
+from app.modules.imports.registry import ImportResult
 from app.modules.journal import repository as repo
-from app.modules.journal.models import Trade, TradeNote
+from app.modules.journal.costs import DEFAULT_RATES
+from app.modules.journal.models import Trade, TradeCostSettings, TradeNote
 from app.modules.journal.schemas import (
+    CostEstimate,
+    CostSettings,
     CurrencyStats,
     DailyPnl,
     MonthlyPnl,
@@ -92,7 +98,22 @@ def trade_values(data):
 
 
 def create_trade(db, user_id, data):
-    return trade_out(repo.save(db, Trade(user_id=user_id, **trade_values(data))))
+    values = trade_values(data)
+    missing = {"fee", "tax"} - data.model_fields_set
+    if data.market in {"KRX", "US"} and missing:
+        costs = estimate_trade_costs(
+            db,
+            user_id,
+            market=data.market,
+            side=data.side,
+            quantity=data.quantity,
+            price=data.price,
+            is_etf=is_domestic_etf(db, data.market, data.symbol_code),
+        )
+        for name in missing:
+            values[name] = getattr(costs, name)
+        values["cost_estimated"] = True
+    return trade_out(repo.save(db, Trade(user_id=user_id, **values)))
 
 
 def update_trade(db, user_id, trade_id, patch):
@@ -103,6 +124,8 @@ def update_trade(db, user_id, trade_id, patch):
     data = validated(TradeInput, {**existing, **patch})
     for name, value in trade_values(data).items():
         setattr(trade, name, value)
+    if "fee" in patch or "tax" in patch:
+        trade.cost_estimated = False
     return trade_out(repo.save(db, trade))
 
 
@@ -203,7 +226,9 @@ def calculate(trades):
     return holdings, results
 
 
-def get_positions(db, user_id, *, include_closed: bool = False) -> list[Position]:
+def get_positions(
+    db, user_id, *, include_closed: bool = False, with_quotes: bool = False
+) -> list[Position]:
     holdings, _ = calculate(repo.all_trades(db, user_id))
     items = []
     for key, holding in sorted(holdings.items()):
@@ -229,7 +254,37 @@ def get_positions(db, user_id, *, include_closed: bool = False) -> list[Position
                 has_oversold=holding.oversold,
             )
         )
+    if with_quotes:
+        attach_quotes(items, holdings)
     return items
+
+
+def attach_quotes(items, holdings):
+    from app.integrations.brokers.errors import BrokerError
+    from app.modules.market.service import get_quotes
+
+    codes = [p.symbol_code for p in items if p.market == "KRX"]
+    try:
+        quotes = {q.code: q for q in get_quotes(codes)} if codes else {}
+    except (AppError, BrokerError):
+        quotes = {}
+    for item in items:
+        quote = quotes.get(item.symbol_code) if item.market == "KRX" else None
+        if quote is None:
+            continue
+        holding = holdings[(item.market, item.symbol_code, item.currency)]
+        with localcontext() as context:
+            context.prec = 80
+            price = Decimal(quote.price)
+            amount = price * holding.quantity
+            pnl = amount - holding.basis
+            item.current_price = quantity(price)
+            item.eval_amount = money(amount, item.currency)
+            item.unrealized_pnl = money(pnl, item.currency)
+            item.unrealized_pnl_rate = (
+                float(round(pnl / holding.basis * 100, 2)) if holding.basis else None
+            )
+            item.quote_source = quote.source
 
 
 def get_detail(db, user_id, trade_id):
@@ -326,3 +381,337 @@ def _trade_stats(db, user_id, start, end):
             for key, items in sorted(symbols.items())
         ],
     )
+
+
+def get_cost_settings(db, user_id) -> CostSettings:
+    settings = repo.cost_settings(db, user_id)
+    rates = (
+        {name: format(getattr(settings, name), "f") for name in DEFAULT_RATES}
+        if settings
+        else {name: format(value, "f") for name, value in DEFAULT_RATES.items()}
+    )
+    return CostSettings(
+        **rates, is_default=settings is None, updated_at=settings.updated_at if settings else None
+    )
+
+
+def save_cost_settings(db, user_id, data) -> CostSettings:
+    settings = repo.cost_settings(db, user_id) or TradeCostSettings(user_id=user_id)
+    for name, value in data.model_dump().items():
+        setattr(settings, name, value)
+    repo.save(db, settings)
+    return get_cost_settings(db, user_id)
+
+
+def reset_cost_settings(db, user_id) -> CostSettings:
+    settings = repo.cost_settings(db, user_id)
+    if settings:
+        repo.delete(db, settings)
+    return get_cost_settings(db, user_id)
+
+
+@dataclass(frozen=True)
+class TradeCosts:
+    fee: Decimal
+    tax: Decimal
+
+
+def estimate_trade_costs(
+    db,
+    user_id: UUID,
+    *,
+    market: Literal["KRX", "US"],
+    side: Literal["buy", "sell"],
+    quantity: Decimal,
+    price: Decimal,
+    is_etf: bool = False,
+) -> TradeCosts:
+    rates = get_cost_settings(db, user_id)
+    with localcontext() as context:
+        context.prec = 80
+        amount = quantity * price
+        unit = Decimal("1" if market == "KRX" else "0.01")
+        rate = rates.krx_commission_rate if market == "KRX" else rates.us_commission_rate
+        fee = (amount * Decimal(rate) / 100).quantize(unit, rounding=ROUND_DOWN)
+        tax_rate = (
+            Decimal(rates.krx_sell_tax_rate)
+            if market == "KRX" and side == "sell" and not is_etf
+            else ZERO
+        )
+        tax = (amount * tax_rate / 100).quantize(unit, rounding=ROUND_DOWN)
+    return TradeCosts(fee=fee, tax=tax)
+
+
+def is_domestic_etf(db, market, symbol_code):
+    if market != "KRX" or not symbol_code:
+        return False
+    from app.modules.market.service import search_stocks
+
+    items = search_stocks(db, symbol_code, limit=1)
+    return bool(items and items[0].code == symbol_code and items[0].kind == "etf")
+
+
+def get_cost_estimate(db, user_id, data) -> CostEstimate:
+    is_etf = is_domestic_etf(db, data.market, data.symbol_code)
+    costs = estimate_trade_costs(
+        db,
+        user_id,
+        market=data.market,
+        side=data.side,
+        quantity=data.quantity,
+        price=data.price,
+        is_etf=is_etf,
+    )
+    return CostEstimate(
+        fee=format(costs.fee, "f"),
+        tax=format(costs.tax, "f"),
+        is_etf=is_etf,
+        rates=get_cost_settings(db, user_id),
+    )
+
+
+@dataclass(frozen=True)
+class TradeImportRow:
+    traded_at: datetime
+    time_known: bool
+    market: Literal["KRX", "US", "OTHER"]
+    symbol_code: str
+    symbol_name: str
+    side: Literal["buy", "sell"]
+    quantity: Decimal
+    price: Decimal
+    currency: Literal["KRW", "USD"]
+    fee: Decimal | None = None
+    tax: Decimal | None = None
+    broker: str | None = None
+
+
+def imported_values(db, user_id, row):
+    from dataclasses import asdict
+
+    values = asdict(row)
+    values.pop("market_explicit", None)
+    values.pop("currency_explicit", None)
+    values["cost_estimated"] = row.fee is None or row.tax is None
+    if values["cost_estimated"]:
+        costs = estimate_trade_costs(
+            db,
+            user_id,
+            market=row.market,
+            side=row.side,
+            quantity=row.quantity,
+            price=row.price,
+            is_etf=is_domestic_etf(db, row.market, row.symbol_code),
+        )
+        for name in ("fee", "tax"):
+            if values[name] is None:
+                values[name] = getattr(costs, name)
+    return values
+
+
+def import_trades(
+    db, user_id, rows: list[TradeImportRow], *, source: str, batch_id: UUID | None = None
+) -> ImportResult:
+    from dataclasses import replace
+    from hashlib import sha256
+
+    from app.modules.imports.registry import RowError
+    from app.modules.journal.import_kind import _PendingSymbolTradeImportRow
+    from app.modules.market.service import search_stocks
+
+    repo.lock_imports(db, user_id)
+    hashes = {t.dedup_hash for t in repo.all_trades(db, user_id) if t.dedup_hash}
+    occurrences = defaultdict(int)
+    result = ImportResult(inserted=0, skipped_duplicates=0, failed=0, errors=[])
+    for number, row in enumerate(rows, 1):
+        if not row.symbol_code:
+            matches = [
+                s
+                for s in search_stocks(db, row.symbol_name, limit=5)
+                if s.name == row.symbol_name and s.code.isdigit() and len(s.code) == 6
+            ]
+            if len(matches) != 1:
+                result.failed += 1
+                result.errors.append(
+                    RowError(
+                        number,
+                        "symbolCode",
+                        "종목코드를 찾지 못했습니다. 종목코드 열을 매핑해 주세요.",
+                    )
+                )
+                continue
+            mismatch = (
+                ("market", row.market)
+                if row.market != "KRX"
+                and (not isinstance(row, _PendingSymbolTradeImportRow) or row.market_explicit)
+                else ("currency", row.currency)
+                if row.currency != "KRW"
+                and (not isinstance(row, _PendingSymbolTradeImportRow) or row.currency_explicit)
+                else None
+            )
+            if mismatch:
+                result.failed += 1
+                result.errors.append(
+                    RowError(
+                        number,
+                        mismatch[0],
+                        "찾은 종목의 시장·통화와 맞지 않습니다. 종목코드 열을 매핑해 주세요.",
+                    )
+                )
+                continue
+            row = replace(row, symbol_code=matches[0].code, market="KRX", currency="KRW")
+        local = row.traded_at.astimezone(KST)
+        known_time = local.strftime("%H:%M") if row.time_known else ""
+        key = (
+            f"{user_id}|{local.date()}|{known_time}|{row.symbol_code}|{row.side}|"
+            f"{quantity(row.quantity)}|{quantity(row.price)}"
+        )
+        count = occurrences[key]
+        occurrences[key] += 1
+        digest = sha256((key + (f"|{count}" if count else "")).encode()).hexdigest()
+        if digest in hashes:
+            result.skipped_duplicates += 1
+            continue
+        repo.add_trade(
+            db,
+            dict(
+                user_id=user_id,
+                source=source,
+                dedup_hash=digest,
+                **imported_values(db, user_id, row),
+            ),
+        )
+        hashes.add(digest)
+        result.inserted += 1
+    return result
+
+
+def execution_match(trade):
+    return (
+        trade.traded_at.astimezone(KST).date(),
+        trade.symbol_code,
+        trade.side,
+        trade.quantity,
+        trade.price,
+    )
+
+
+def sync_trades(db, user_id, data):
+    from dataclasses import asdict
+
+    from app.core import time as clock
+    from app.integrations.brokers.errors import BrokerError
+    from app.modules.journal.schemas import SyncResult
+    from app.modules.market.service import get_user_broker_client, list_connections
+
+    if data.end > clock.today_kst():
+        raise field_error("to", "종료일은 오늘까지 선택해 주세요.")
+    if data.start > data.end or (data.end - data.start).days >= 90:
+        raise field_error("from", "조회 기간은 시작일부터 최대 90일로 선택해 주세요.")
+    try:
+        client = get_user_broker_client(db, user_id, data.connection_id)
+        connection = next(c for c in list_connections(db, user_id) if c.id == data.connection_id)
+        executions = client.get_executions(data.start, data.end)
+    except BrokerError as exc:
+        raise exc.as_app_error() from None
+    now = clock.now_utc()
+    result = SyncResult(start=data.start, end=data.end, synced_at=now)
+    try:
+        repo.lock_imports(db, user_id)
+        trades = repo.all_trades(db, user_id)
+        external = {(t.connection_id, t.external_id): t for t in trades if t.external_id}
+        unmatched = defaultdict(list)
+        for trade in trades:
+            if trade.connection_id is None and trade.source in {"manual", "import"}:
+                unmatched[execution_match(trade)].append(trade)
+        for execution in executions:
+            market = (
+                "KRX"
+                if execution.market in {"KOSPI", "KOSDAQ", "KONEX"}
+                or (execution.market == "OTHER" and execution.currency == "KRW")
+                else "US"
+            )
+            row = TradeImportRow(
+                execution.executed_at,
+                True,
+                market,
+                execution.code,
+                execution.name,
+                execution.side,
+                execution.quantity,
+                execution.price,
+                execution.currency,
+                execution.fee,
+                execution.tax,
+                connection.provider if connection.provider in {"kiwoom", "toss"} else None,
+            )
+            existing = external.get((connection.id, execution.external_id))
+            if existing:
+                values = asdict(row)
+                for name in ("fee", "tax"):
+                    if values[name] is None:
+                        values.pop(name)
+                if row.fee is not None and row.tax is not None:
+                    values["cost_estimated"] = False
+                values.update(source=connection.provider, account_label=connection.label)
+                changed = any(getattr(existing, key) != value for key, value in values.items())
+                if changed:
+                    for key, value in values.items():
+                        setattr(existing, key, value)
+                    result.updated += 1
+                else:
+                    result.unchanged += 1
+                existing.synced_at = now
+                continue
+            key = (
+                execution.executed_at.astimezone(KST).date(),
+                execution.code,
+                execution.side,
+                execution.quantity,
+                execution.price,
+            )
+            if unmatched[key]:
+                unmatched[key].pop()
+                result.skipped_duplicates += 1
+                continue
+            values = imported_values(db, user_id, row)
+            values.update(source=connection.provider, account_label=connection.label)
+            trade = repo.add_trade(
+                db,
+                dict(
+                    user_id=user_id,
+                    **values,
+                    connection_id=connection.id,
+                    external_id=execution.external_id,
+                    synced_at=now,
+                ),
+            )
+            external[(connection.id, execution.external_id)] = trade
+            result.inserted += 1
+            if values["cost_estimated"]:
+                result.cost_estimated += 1
+        db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
+
+
+def sync_status(db, user_id):
+    from app.modules.journal.schemas import SyncStatus, SyncStatusItem
+    from app.modules.market.service import list_connections
+
+    trades = repo.all_trades(db, user_id)
+    items = []
+    for connection in list_connections(db, user_id):
+        owned = [t for t in trades if t.connection_id == connection.id]
+        items.append(
+            SyncStatusItem(
+                connection_id=connection.id,
+                label=connection.label,
+                provider=connection.provider,
+                trade_count=len(owned),
+                last_synced_at=max((t.synced_at for t in owned if t.synced_at), default=None),
+            )
+        )
+    return SyncStatus(items=items)

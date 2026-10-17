@@ -40,7 +40,9 @@ BUCKETS = {
 
 class TossBroker(UnsupportedBroker):
     provider = "toss"
-    capabilities = frozenset({"STOCK_LIST", "FUNDAMENTALS", "QUOTES", "CANDLES", "HOLDINGS"})
+    capabilities = frozenset(
+        {"STOCK_LIST", "ETF_LIST", "FUNDAMENTALS", "QUOTES", "CANDLES", "HOLDINGS"}
+    )
     base_url = "https://openapi.tossinvest.com"
 
     def __init__(self, app_key, app_secret, account_no=None, *, client=None):
@@ -105,7 +107,21 @@ class TossBroker(UnsupportedBroker):
             raise BrokerError("BROKER_NOT_SUPPORTED")
         return [
             StockInfo(r["symbol"], r["name"], market, None)
-            for r in self._get("/api/v1/stocks/all", "STOCK_ALL", {"market": market})
+            for r in self._get(
+                "/api/v1/stocks/all", "STOCK_ALL", {"market": market, "securityType": "STOCK"}
+            )
+        ]
+
+    @parsed_response
+    def list_etfs(self):
+        # OpenAPI 1.2.24 listStocks: securityType=ETF, ListedStock.symbol/name을 읽는다.
+        # https://openapi.tossinvest.com/openapi-docs/latest/openapi.json
+        return [
+            StockInfo(r["symbol"], r["name"], market, None, "etf")
+            for market in ("KOSPI", "KOSDAQ")
+            for r in self._get(
+                "/api/v1/stocks/all", "STOCK_ALL", {"market": market, "securityType": "ETF"}
+            )
         ]
 
     @parsed_response

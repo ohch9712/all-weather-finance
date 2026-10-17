@@ -6,20 +6,31 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.api.deps import CurrentUser, DBSession, PageQuery, require_json
 from app.core.schemas import Page
+from app.modules.imports.registry import register_import_kind
 from app.modules.journal import service
+from app.modules.journal.import_kind import JOURNAL_TRADES
 from app.modules.journal.schemas import (
+    CostEstimate,
+    CostEstimateInput,
+    CostSettings,
+    CostSettingsInput,
     Kind,
     NoteInput,
     NoteOut,
     NotePatch,
     Positions,
     Side,
+    SyncInput,
+    SyncResult,
+    SyncStatus,
     TradeDetail,
     TradeInput,
     TradeOut,
     TradePatch,
     TradeStats,
 )
+
+register_import_kind(JOURNAL_TRADES)
 
 router = APIRouter(prefix="/journal", tags=["journal"])
 Start = Annotated[date | None, Query(alias="from")]
@@ -67,8 +78,13 @@ def positions(
     db: DBSession,
     user: CurrentUser,
     include_closed: Annotated[bool, Query(alias="includeClosed")] = False,
+    with_quotes: Annotated[bool, Query(alias="withQuotes")] = True,
 ):
-    return Positions(items=service.get_positions(db, user.id, include_closed=include_closed))
+    return Positions(
+        items=service.get_positions(
+            db, user.id, include_closed=include_closed, with_quotes=with_quotes
+        )
+    )
 
 
 @router.get("/stats", response_model=TradeStats)
@@ -108,3 +124,33 @@ def update_note(note_id: UUID, data: NotePatch, db: DBSession, user: CurrentUser
 def delete_note(note_id: UUID, db: DBSession, user: CurrentUser):
     service.delete_note(db, user.id, note_id)
     return Response(status_code=204)
+
+
+@router.get("/cost-settings", response_model=CostSettings)
+def cost_settings(db: DBSession, user: CurrentUser):
+    return service.get_cost_settings(db, user.id)
+
+
+@router.put("/cost-settings", response_model=CostSettings, dependencies=[Depends(require_json)])
+def save_cost_settings(data: CostSettingsInput, db: DBSession, user: CurrentUser):
+    return service.save_cost_settings(db, user.id, data)
+
+
+@router.delete("/cost-settings", response_model=CostSettings, dependencies=[Depends(require_json)])
+def reset_cost_settings(db: DBSession, user: CurrentUser):
+    return service.reset_cost_settings(db, user.id)
+
+
+@router.get("/cost-estimate", response_model=CostEstimate)
+def cost_estimate(data: Annotated[CostEstimateInput, Query()], db: DBSession, user: CurrentUser):
+    return service.get_cost_estimate(db, user.id, data)
+
+
+@router.post("/sync", response_model=SyncResult, dependencies=[Depends(require_json)])
+def sync(data: SyncInput, db: DBSession, user: CurrentUser):
+    return service.sync_trades(db, user.id, data)
+
+
+@router.get("/sync/status", response_model=SyncStatus)
+def sync_status(db: DBSession, user: CurrentUser):
+    return service.sync_status(db, user.id)

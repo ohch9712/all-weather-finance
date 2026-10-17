@@ -24,3 +24,11 @@ export interface SnapshotStatus {
   count: number;
   source: Provider | null;
 }
+
+export interface StockSummary {
+  code: string;
+  name: string;
+  market: "KOSPI" | "KOSDAQ" | "KONEX" | "NASDAQ" | "NYSE" | "AMEX" | "OTHER";
+  sector: string | null;
+  kind: "stock" | "etf";
+}

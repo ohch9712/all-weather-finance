@@ -32,6 +32,7 @@ class UnsupportedBroker:
     def _unsupported(self, *args, **kwargs):
         raise BrokerError("BROKER_NOT_SUPPORTED")
 
+    list_etfs = _unsupported
     list_stocks = _unsupported
     get_fundamentals = _unsupported
     get_quotes = _unsupported

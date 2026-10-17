@@ -211,7 +211,7 @@ gh pr merge <PR 번호> --merge
 
 - 웨이브가 끝나면 병합된 작업 워크트리를 정리한다(`orca worktree rm --help`로 선택자를 확인). 열린 워커는 `worker-list --run <run_id> --terminal-state reclaimable --json`이 빈 목록이 될 때까지 `worker-release`.
 
-### 4.9 운영 메모 (웨이브 1에서 겪은 일)
+### 4.9 운영 메모 (웨이브 1~3에서 겪은 일)
 
 - **codex 업데이트 안내**: codex가 새 버전 안내를 띄우면 `worker-start`가 `agent_readiness` 단계에서 `Agent startup blocked: agent-update-prompt`로 실패한다. 실패한 시도는 영수증대로 `worker-release`하고, Orca가 띄우는 codex의 버전 파일(`~/Library/Application Support/orca/codex-accounts/<계정 id>/home/version.json`. `~/.codex/version.json`이 아니다)의 `dismissed_version`을 `latest_version`과 같게 적거나(그 버전 건너뛰기) codex를 올린 뒤 `--retry-of`로 다시 띄운다. 디스패치 전에 `npm view @openai/codex version`으로 확인한다.
 - **슬롯 포트 충돌**: 이 기기에서는 다른 프로젝트가 8000을 쓰고 있다. `scripts/start.sh`는 점유 프로세스를 죽이지 않고 멈춘다(정상). 슬롯 00 통합 검증은 백엔드 8090(`FRONTEND_ORIGIN=http://localhost:3090`)·프론트 3090(`NEXT_PUBLIC_API_BASE_URL=http://localhost:8090`)으로 직접 띄워 진행하고, 디스패치 전에 `lsof -nP -iTCP:<port> -sTCP:LISTEN`으로 확인한다.
@@ -219,6 +219,10 @@ gh pr merge <PR 번호> --merge
 - **공개 저장소와 비밀값**(2026-10-17): 저장소가 공개로 바뀌었다. PR 코멘트와 검증 보고서도 공개이므로 비밀값을 쓰지 않는다(AGENTS.md 보안 절). 실제 `GEMINI_API_KEY`는 기본 체크아웃 `backend/.env`에만 있다. 기본 체크아웃에서 도는 통합 검증은 서버를 `LLM_GENERAL_PROVIDER=disabled`·`LLM_PERSONAL_PROVIDER=disabled`로 띄우고 `.env` 내용을 출력하지 않는다고 spec에 적어 준다. GitHub secret scanning·push protection을 켰고, `.git/hooks/pre-commit`(추적하지 않음)이 `.env` 파일·Google 키 형태 문자열·`backend/.env`의 실제 비밀값 커밋을 막는다.
 - **디스크 부족**(웨이브 2): 워크트리마다 `node_modules`·`.venv`가 약 1GB이고 build 산출물도 쌓여, 4개 동시 진행 중 여유 공간이 117MB까지 떨어지고 Docker Desktop(공용 Postgres)이 멈췄다. 디스패치 전에 `df -h /`로 여유 15GB 이상을 확인한다. Docker가 `unable to start`로 멈추면 앱을 종료한 뒤 다시 열거나 재부팅한다.
 - **수정 브랜치**: 통합 검증에서 나온 결함은 그 모듈의 기존 워크트리에서 `git switch -c feature/NN-<slug>-fix-<번호> origin/develop`으로 브랜치를 만들고 `orca worktree show --worktree path:<경로>`로 Orca를 갱신한 뒤 디스패치한다(의존성·DB 슬롯을 다시 쓸 수 있다).
+- **메모리 부족과 Orca 런타임 정지**(웨이브 3): 수정 워커 4개가 동시에 의존성을 설치하고, 끝난 작업의 codex 세션 여러 개가 계속 떠 있고, Spotlight가 새 `node_modules`를 색인하는 동안 빈 메모리가 약 100MB, 스왑이 5.9GB까지 차서 Orca 런타임이 `starting`에서 1시간 넘게 멈췄다(`orca status`의 `runtime.reachable=false`, `orchestration check`가 `runtime_timeout`). 워커 프로세스와 워크트리 변경은 그대로 남았다. 디스패치 전에 `vm_stat`·`sysctl vm.swapusage`로 메모리도 확인하고, 반납한 워커의 터미널이 남아 있으면 사용자에게 정리를 부탁한다. 의존성 설치가 몰리지 않게 동시 디스패치는 3개 안팎으로 둔다.
+- **codex 사용 한도와 계정**(웨이브 3): Orca가 쓰는 codex 계정은 `orca account list`의 `codex.activeAccountId`(None이면 시스템 기본 계정)다. 5시간 한도에 걸리면 워커 화면에 "You've hit your usage limit"가 뜨고 멈춘다. 이때는 `worker-stop` → 사용자가 Orca 설정에서 다른 codex 계정으로 전환 → 같은 Task를 `--retry-of`로 같은 워크트리에 다시 띄우고, 앞 시도가 남긴 변경을 이어받으라고 `send`한다. 검증은 codex `gpt-6.1-sol` 전용이라 한도를 남겨 둔다. 프롬프트가 입력창에 들어가지 않아 `outcome_unknown`·`turn_start_unobserved`로 남은 시도는 터미널을 확인한 뒤 `worker-abandon`하고 `--retry-of`로 다시 넣는다.
+- **삭제 명령**: 워크트리의 `node_modules`·`.next`·`.venv`를 지울 때 경로를 셸 변수로 쓰면 Claude Code 안전 검사가 명령 전체를 막는다. `"${WS:?}/${d:?}/frontend/node_modules"`처럼 비면 멈추는 형태나 절대 경로를 쓴다.
+- **스펙 충돌 대조**(웨이브 3): 착수 직전 갱신에서 실제 코드와 대조해 막은 문제가 많았다(02·05 테이블의 `source` CHECK가 Mock 연결 `mock`을 막음, 수동 거래의 `dedup_hash`가 비어 동기화 중복 판정이 안 됨, Mock 고정 데이터로는 결과가 없는 예시 문구, 시세까지 부르는 `get_stock_detail`을 목록·추정에 쓰는 설계). 웨이브 4도 착수 전에 쓰는 공개 함수·CHECK 제약·Mock 데이터 범위를 직접 조회해 확인한다.
 
 ## 5. 웨이브별 통합 확인 항목 (6.4 블록이 참조)
 

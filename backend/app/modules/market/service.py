@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 import httpx
@@ -55,6 +55,7 @@ class SnapshotRow:
     name: str
     market: str
     sector: str | None
+    kind: Literal["stock", "etf"]
 
 
 @dataclass(frozen=True)
@@ -124,14 +125,16 @@ def get_user_broker_client(db, user_id, connection_id: UUID) -> BrokerClient:
         raise exc.as_app_error() from None
 
 
-def search_stocks(db, query: str, *, limit: int = 20) -> list[StockSummary]:
-    return search_stocks_in_market(db, query, limit=limit)
+def search_stocks(
+    db, query: str, *, limit: int = 20, kind: Literal["stock", "etf"] | None = None
+) -> list[StockSummary]:
+    return search_stocks_in_market(db, query, limit=limit, kind=kind)
 
 
-def search_stocks_in_market(db, query, *, limit=20, market=None):
+def search_stocks_in_market(db, query, *, limit=20, market=None, kind=None):
     return [
         StockSummary.model_validate(row)
-        for row in repository.search_stocks(db, query, limit, market)
+        for row in repository.search_stocks(db, query, limit, market, kind)
     ]
 
 
@@ -188,6 +191,7 @@ def stock_detail_with_client(db, code, client):
         name=stock.name,
         market=stock.market,
         sector=stock.sector,
+        kind=stock.kind,
         source=stock.source,
         snapshot=Snapshot(**{name: getattr(snapshot, name) for name in Snapshot.model_fields})
         if snapshot
@@ -208,11 +212,12 @@ def list_snapshot_rows(db, as_of: date | None = None) -> SnapshotSet:
             **{
                 name: getattr(snap, name)
                 for name in SnapshotRow.__dataclass_fields__
-                if name not in {"name", "market", "sector"}
+                if name not in {"name", "market", "sector", "kind"}
             },
             name=stock.name,
             market=stock.market,
             sector=stock.sector,
+            kind=stock.kind,
         )
         for snap, stock in pairs
     ]
@@ -299,7 +304,11 @@ def refresh_stocks(db, client):
     stocks = []
     for market in ("KOSPI", "KOSDAQ"):
         stocks.extend(client.list_stocks(market))
-    repository.refresh_stocks(db, stocks, client.provider)
+    kinds = {"stock"}
+    if "ETF_LIST" in client.capabilities:
+        stocks.extend(client.list_etfs())
+        kinds.add("etf")
+    repository.refresh_stocks(db, stocks, client.provider, kinds=kinds)
     return len(stocks)
 
 

@@ -81,12 +81,13 @@ class TradeOut(CamelModel):
     account_label: str | None
     quantity: str
     price: str
+    cost_estimated: bool
     fee: str
     tax: str
     id: UUID
     traded_at: datetime
     time_known: bool
-    source: Literal["manual", "import", "kiwoom", "toss"]
+    source: Literal["manual", "import", "kiwoom", "toss", "mock"]
     created_at: datetime
     updated_at: datetime
 
@@ -150,6 +151,11 @@ class Position(CamelModel):
     last_traded_on: date
     trade_count: int
     has_oversold: bool
+    current_price: str | None = None
+    eval_amount: str | None = None
+    unrealized_pnl: str | None = None
+    unrealized_pnl_rate: float | None = None
+    quote_source: str | None = None
 
 
 class Positions(CamelModel):
@@ -201,3 +207,81 @@ class TradeStats(CamelModel):
     monthly: list[MonthlyPnl]
     daily: list[DailyPnl]
     by_symbol: list[SymbolPnl]
+
+
+class CostSettingsInput(CamelModel):
+    krx_commission_rate: Decimal
+    krx_sell_tax_rate: Decimal
+    us_commission_rate: Decimal
+
+    @field_validator(
+        "krx_commission_rate", "krx_sell_tax_rate", "us_commission_rate", mode="before"
+    )
+    @classmethod
+    def valid_rate(cls, value, info: ValidationInfo):
+        from decimal import InvalidOperation
+
+        from app.core.errors import field_error
+        from app.core.schemas import to_camel
+
+        try:
+            rate = Decimal(str(value))
+            if rate.is_finite() and 0 <= rate <= 5 and rate.as_tuple().exponent >= -4:
+                return rate
+        except (InvalidOperation, ValueError):
+            pass
+        raise field_error(
+            to_camel(info.field_name), "요율은 0~5%, 소수 넷째 자리까지 입력해 주세요."
+        )
+
+
+class CostSettings(CamelModel):
+    krx_commission_rate: str
+    krx_sell_tax_rate: str
+    us_commission_rate: str
+    is_default: bool
+    updated_at: datetime | None
+
+
+class CostEstimateInput(CamelModel):
+    market: Literal["KRX", "US"]
+    side: Side
+    quantity: PositiveDecimal
+    price: PositiveDecimal
+    symbol_code: Symbol | None = None
+
+
+class CostEstimate(CamelModel):
+    fee: str
+    tax: str
+    is_etf: bool
+    rates: CostSettings
+
+
+class SyncInput(CamelModel):
+    connection_id: UUID
+    start: date = Field(alias="from")
+    end: date = Field(alias="to")
+
+
+class SyncResult(CamelModel):
+    inserted: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    skipped_duplicates: int = 0
+    cost_estimated: int = 0
+    start: date = Field(alias="from")
+    end: date = Field(alias="to")
+    synced_at: datetime
+
+
+class SyncStatusItem(CamelModel):
+    connection_id: UUID
+    label: str
+    provider: str
+    last_synced_at: datetime | None
+    trade_count: int
+
+
+class SyncStatus(CamelModel):
+    items: list[SyncStatusItem]

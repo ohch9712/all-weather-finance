@@ -3,6 +3,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -10,6 +11,7 @@ from sqlalchemy import (
     Index,
     SmallInteger,
     String,
+    UniqueConstraint,
     func,
     text,
 )
@@ -57,6 +59,7 @@ class LedgerEntry(Base):
     __table_args__ = (
         CheckConstraint("kind in ('income','expense')", name="kind"),
         CheckConstraint("amount > 0", name="amount"),
+        Index("ix_ledger_entries_user_id_import_batch_id", "user_id", "import_batch_id"),
         CheckConstraint(
             "payment_method in ('card','cash','transfer','other')", name="payment_method"
         ),
@@ -82,6 +85,10 @@ class LedgerEntry(Base):
     payment_method: Mapped[str] = mapped_column(String(10), server_default="other")
     memo: Mapped[str | None] = mapped_column(String(200))
     source: Mapped[str] = mapped_column(String(8), server_default="manual")
+    card_name: Mapped[str | None] = mapped_column(String(50))
+    approval_no: Mapped[str | None] = mapped_column(String(30))
+    is_cancellation: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    import_batch_id: Mapped[UUID | None]
     # 10(카드 명세서)·17(CODEF)이 채우는 중복 방지 키
     dedup_hash: Mapped[str | None] = mapped_column(String(64))
     # 한 트랜잭션 안에서도 입력 순서가 남도록 애플리케이션 시각을 기본값으로 쓴다.
@@ -97,3 +104,24 @@ class LedgerEntry(Base):
     @property
     def category_name(self) -> str:
         return self.category.name
+
+
+class LedgerMerchantRule(Base):
+    __tablename__ = "ledger_merchant_rules"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "merchant_key", name="uq_ledger_merchant_rules_user_id_merchant_key"
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("gen_random_uuid()"))
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    merchant_key: Mapped[str] = mapped_column(String(100))
+    category_id: Mapped[UUID] = mapped_column(
+        ForeignKey("ledger_categories.id", ondelete="CASCADE")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, server_default=func.now(), onupdate=now_utc
+    )
