@@ -28,7 +28,7 @@ from app.db.base import Base
 
 RISK_PROFILE_CHECK = "risk_profile in ('stable','stable_seeking','neutral','active','aggressive')"
 ASSET_CLASS_CHECK = "asset_class in ('stock','bond','gold','cash','other')"
-SOURCE_CHECK = "source in ('manual','kiwoom','toss','codef')"
+SOURCE_CHECK = "source in ('manual','kiwoom','toss','codef','mock')"
 GRADE_CHECK = "grade in ('S','A','B','C','D')"
 GOAL_TYPE_CHECK = (
     "goal_type in ('retirement','home','education','marriage','car','lump_sum','other')"
@@ -72,6 +72,14 @@ class Holding(Base):
         CheckConstraint(ASSET_CLASS_CHECK, name="asset_class"),
         CheckConstraint("amount >= 0", name="amount"),
         CheckConstraint(SOURCE_CHECK, name="source"),
+        Index(
+            "uq_holdings_user_connection_external_ref",
+            "user_id",
+            "connection_id",
+            "external_ref",
+            unique=True,
+            postgresql_where=text("external_ref IS NOT NULL"),
+        ),
     )
     id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("gen_random_uuid()"))
     user_id: Mapped[UUID] = mapped_column(_user_fk(), index=True)
@@ -82,6 +90,12 @@ class Holding(Base):
         Boolean, default=True, server_default=text("true")
     )
     source: Mapped[str] = mapped_column(String(16), default="manual", server_default="manual")
+    external_ref: Mapped[str | None] = mapped_column(String(64))
+    connection_id: Mapped[UUID | None] = mapped_column()
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    class_override: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     memo: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()

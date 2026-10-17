@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -14,8 +14,10 @@ from app.core.domain import AgeBand, AssetClass, RiskProfile
 from app.core.errors import AppError, field_error
 from app.core.schemas import ErrorDetail
 from app.core.time import now_utc, today_kst
+from app.integrations.brokers.errors import BrokerError
 from app.modules.allocation import recommendation as calc
 from app.modules.allocation import repository, rules
+from app.modules.allocation.classify import classify_holding
 from app.modules.allocation.models import (
     AllocationSituation,
     FinancialGoal,
@@ -32,6 +34,8 @@ from app.modules.allocation.schemas import (
     HoldingCreate,
     HoldingList,
     HoldingOut,
+    HoldingSyncResult,
+    HoldingSyncSkipped,
     HoldingUpdate,
     LatestAssessmentOut,
     Recommendation,
@@ -52,6 +56,7 @@ from app.modules.allocation.schemas import (
     TargetTableRow,
 )
 from app.modules.auth import service as auth_service
+from app.modules.market import service as market_service
 
 ORDER = rules.ASSET_CLASS_ORDER
 
@@ -465,6 +470,15 @@ def update_holding(db: Session, user_id: UUID, holding_id: UUID, data: HoldingUp
     holding = repository.find_holding(db, user_id, holding_id)
     if holding is None:
         raise AppError(404, "NOT_FOUND", NOT_FOUND_HOLDING)
+    if holding.connection_id is not None:
+        if {"name", "amount"} & data.model_fields_set:
+            raise AppError(
+                409,
+                "CONFLICT",
+                "증권사에서 불러온 자산은 금액을 직접 바꿀 수 없어요. 다시 동기화해 주세요.",
+            )
+        if "asset_class" in data.model_fields_set and data.asset_class != holding.asset_class:
+            holding.class_override = True
     for name in data.model_fields_set:
         value = getattr(data, name)
         setattr(holding, name, value.value if isinstance(value, AssetClass) else value)
@@ -600,3 +614,118 @@ def list_scores(db: Session, user_id: UUID, days: int) -> ScoreList:
             for row in repository.list_scores(db, user_id, since)
         ]
     )
+
+
+@dataclass(frozen=True)
+class SyncedHolding:
+    external_ref: str
+    name: str
+    amount: int
+    asset_class: AssetClass | None = None
+
+
+def upsert_synced_holdings(
+    db: Session,
+    user_id: UUID,
+    *,
+    source: Literal["kiwoom", "toss", "codef", "mock"],
+    connection_id: UUID,
+    items: list[SyncedHolding],
+) -> HoldingSyncResult:
+    """연결 단위 잔고와 점수를 갱신한다. commit은 호출자가 한다."""
+    if source not in {"kiwoom", "toss", "codef", "mock"}:
+        raise field_error("source", "지원하지 않는 자산 원천입니다.")
+    seen: set[str] = set()
+    for index, item in enumerate(items):
+        if type(item.amount) is not int or item.amount < 0:
+            raise field_error(f"items.{index}.amount", "금액은 0 이상 정수로 입력해 주세요.")
+        if not item.external_ref or len(item.external_ref) > 64 or item.external_ref in seen:
+            raise field_error(
+                f"items.{index}.externalRef", "중복되지 않는 1~64자 식별값이 필요합니다."
+            )
+        if not item.name.strip() or len(item.name) > 50:
+            raise field_error(f"items.{index}.name", "이름은 1~50자로 입력해 주세요.")
+        seen.add(item.external_ref)
+    synced_at = now_utc()
+    existing = {
+        row.external_ref: row for row in repository.list_synced_holdings(db, user_id, connection_id)
+    }
+    created = updated = 0
+    for item in items:
+        asset_class = item.asset_class or classify_holding(item.name)[0]
+        row = existing.pop(item.external_ref, None)
+        if row is None:
+            row = Holding(
+                user_id=user_id,
+                connection_id=connection_id,
+                external_ref=item.external_ref,
+                source=source,
+                name=item.name,
+                amount=item.amount,
+                asset_class=asset_class,
+                include_in_allocation=True,
+                class_override=False,
+                created_at=synced_at,
+                updated_at=synced_at,
+                synced_at=synced_at,
+            )
+            db.add(row)
+            created += 1
+        else:
+            row.name = item.name
+            row.amount = item.amount
+            row.synced_at = synced_at
+            if not row.class_override:
+                row.asset_class = asset_class
+            updated += 1
+    for row in existing.values():
+        db.delete(row)
+    db.flush()
+    _refresh_snapshot(db, user_id)
+    db.flush()
+    return HoldingSyncResult(
+        created=created,
+        updated=updated,
+        removed=len(existing),
+        synced_at=synced_at,
+    )
+
+
+def sync_holdings(db: Session, user_id: UUID, connection_id: UUID) -> HoldingSyncResult:
+    broker = market_service.get_user_broker_client(db, user_id, connection_id)
+    connection = next(
+        (row for row in market_service.list_connections(db, user_id) if row.id == connection_id),
+        None,
+    )
+    if connection is None:
+        raise AppError(404, "NOT_FOUND", "증권사 연결을 찾을 수 없습니다.")
+    try:
+        snapshot = broker.get_holdings()
+    except BrokerError as exc:
+        raise exc.as_app_error() from None
+    items: list[SyncedHolding] = []
+    skipped: list[HoldingSyncSkipped] = []
+    for row in snapshot.holdings:
+        if row.eval_amount is None:
+            skipped.append(
+                HoldingSyncSkipped(name=row.name, reason="원화 평가금액이 없어 건너뛰었습니다.")
+            )
+        else:
+            items.append(
+                SyncedHolding(external_ref=row.code, name=row.name[:50], amount=row.eval_amount)
+            )
+    if snapshot.cash_krw is not None:
+        items.append(
+            SyncedHolding(
+                external_ref="__cash__",
+                name=f"예수금({connection.label})",
+                amount=snapshot.cash_krw,
+                asset_class=AssetClass.CASH,
+            )
+        )
+    result = upsert_synced_holdings(
+        db, user_id, source=connection.provider, connection_id=connection_id, items=items
+    )
+    result.skipped = skipped
+    db.commit()
+    return result

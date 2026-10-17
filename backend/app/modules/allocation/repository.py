@@ -131,3 +131,13 @@ def upsert_score(db: Session, *, user_id: UUID, scored_on: date, values: dict) -
             set_={**{key: statement.excluded[key] for key in values}, "updated_at": now},
         )
     )
+
+
+def list_synced_holdings(db: Session, user_id: UUID, connection_id: UUID) -> list[Holding]:
+    return list(
+        db.scalars(
+            select(Holding).where(
+                Holding.user_id == user_id, Holding.connection_id == connection_id
+            )
+        )
+    )
