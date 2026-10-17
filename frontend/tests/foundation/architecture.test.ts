@@ -19,9 +19,11 @@ const files = sourceFiles(srcDir).map((path) => ({
 
 describe("구조 규칙", () => {
   it("fetch는 lib/api-client.ts에서만 직접 호출한다(화면 컴포넌트는 features/*/api.ts를 거친다)", () => {
+    // 예외: 스펙 09 9.3. SSE 스트림은 JSON을 읽는 apiFetch로 받을 수 없어 sse.ts가 직접 fetch한다.
+    const allowed = new Set(["lib/api-client.ts", "features/chat/sse.ts"]);
     const offenders = files
-      .filter((file) => file.path !== "lib/api-client.ts")
-      .filter((file) => /(^|[^.\w])fetch\s*\(/.test(file.source))
+      .filter((file) => !allowed.has(file.path))
+      .filter((file) => /(^|[^.\w])fetch\s*\(|\b(globalThis|window|self)\.fetch\s*\(/.test(file.source))
       .map((file) => file.path);
     expect(offenders).toEqual([]);
   });

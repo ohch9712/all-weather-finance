@@ -188,6 +188,7 @@ features/<module>/
 
 - 경로는 모두 `/api`로 시작하고 모듈 접두어를 붙인다: `/api/<module>/...`. 예외는 `/api/health`, `/api/auth/*`, `/api/profile`(01a).
 - 요청·응답 JSON 필드는 camelCase다. 백엔드는 `app.core.schemas.CamelModel`(`alias_generator=to_camel`, `populate_by_name=True`)을 상속하고 FastAPI 기본값 `response_model_by_alias=True`를 쓴다.
+  - `to_camel`은 숫자 뒤 글자를 대문자로 바꾼다(`used_within_10y` → `usedWithin10Y`). 스펙의 필드 이름에 숫자 뒤 소문자가 있으면(`usedWithin10y`, `high52w` 등) `Field(alias="usedWithin10y")`로 직접 지정하고, 실제 JSON 키를 테스트로 고정한다. `populate_by_name=True`라서 계약과 다른 키는 오류 없이 무시되니 주의한다.
 - 상태를 바꾸는 요청은 `Content-Type: application/json`만 받는다(`require_json`). 파일 업로드 엔드포인트만 `multipart/form-data`다.
 - 인증은 쿠키 `finance_session`으로만 한다. `HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`, `Secure`는 `COOKIE_SECURE`.
 - ID는 UUID 문자열이다.
