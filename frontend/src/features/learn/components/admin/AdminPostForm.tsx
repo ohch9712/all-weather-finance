@@ -231,24 +231,30 @@ function AdminPostForm({ post }: { post?: AdminPost }) {
             )}
           />
 
+          {/* 긴 URL처럼 끊을 곳이 없는 줄이 폼을 넓히지 않도록 칸 너비를 부모에 맞추고 줄 안 어디서든 줄바꿈한다. */}
           <FormField
             control={form.control}
             name="bodyMd"
             render={({ field }) => (
-              <FormItem>
+              <FormItem className="min-w-0">
                 <FormLabel>본문(Markdown)</FormLabel>
-                <Tabs defaultValue="write">
+                <Tabs defaultValue="write" className="w-full min-w-0">
                   <TabsList>
                     <TabsTrigger value="write">작성</TabsTrigger>
                     <TabsTrigger value="preview">미리보기</TabsTrigger>
                   </TabsList>
-                  <TabsContent value="write">
+                  <TabsContent value="write" className="w-full min-w-0">
                     <FormControl>
-                      <Textarea rows={16} maxLength={LIMITS.body} className="font-mono text-sm" {...field} />
+                      <Textarea
+                        rows={16}
+                        maxLength={LIMITS.body}
+                        className="max-w-full min-w-0 font-mono text-sm wrap-anywhere"
+                        {...field}
+                      />
                     </FormControl>
                   </TabsContent>
-                  <TabsContent value="preview">
-                    <div className="min-h-40 rounded-lg border p-4">
+                  <TabsContent value="preview" className="w-full min-w-0">
+                    <div className="min-h-40 max-w-full min-w-0 rounded-lg border p-4">
                       {bodyMd.trim() ? (
                         <MarkdownBody>{bodyMd}</MarkdownBody>
                       ) : (

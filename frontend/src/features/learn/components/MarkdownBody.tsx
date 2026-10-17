@@ -52,8 +52,9 @@ const components: Components = {
 };
 
 export function MarkdownBody({ children, className }: { children: string; className?: string }) {
+  // wrap-anywhere: 긴 URL처럼 끊을 곳이 없는 글자열도 칸 안에서 줄바꿈해 360px 화면을 넓히지 않는다.
   return (
-    <div data-testid="markdown-body" className={cn("min-w-0 text-[15px] break-words break-keep", className)}>
+    <div data-testid="markdown-body" className={cn("max-w-full min-w-0 text-[15px] break-keep wrap-anywhere", className)}>
       <Markdown remarkPlugins={[remarkGfm]} skipHtml components={components}>
         {children}
       </Markdown>
