@@ -9,6 +9,7 @@ function useSaveJob() {
   const client = useQueryClient();
   return (job: ImportJob) => {
     client.setQueryData(["imports", "job", job.id], job);
+    if (job.status === "committed") return;
     void client.invalidateQueries({ queryKey: ["imports", "preview", job.id] });
   };
 }
