@@ -31,7 +31,15 @@ class Trade(Base):
         CheckConstraint("fee >= 0", name="fee"),
         CheckConstraint("tax >= 0", name="tax"),
         CheckConstraint("broker in ('kiwoom','toss','other')", name="broker"),
-        CheckConstraint("source in ('manual','import','kiwoom','toss')", name="source"),
+        CheckConstraint("source in ('manual','import','kiwoom','toss','mock')", name="source"),
+        Index(
+            "uq_trades_user_connection_external",
+            "user_id",
+            "connection_id",
+            "external_id",
+            unique=True,
+            postgresql_where=text("external_id IS NOT NULL"),
+        ),
         Index("ix_trades_user_traded", "user_id", "traded_at"),
         Index("ix_trades_user_symbol", "user_id", "symbol_code"),
         Index(
@@ -59,6 +67,9 @@ class Trade(Base):
     broker: Mapped[str | None] = mapped_column(String(10))
     account_label: Mapped[str | None] = mapped_column(String(30))
     source: Mapped[str] = mapped_column(String(8), server_default="manual")
+    connection_id: Mapped[UUID | None] = mapped_column()
+    external_id: Mapped[str | None] = mapped_column(String(64))
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dedup_hash: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(

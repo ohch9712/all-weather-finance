@@ -87,7 +87,7 @@ class TradeOut(CamelModel):
     id: UUID
     traded_at: datetime
     time_known: bool
-    source: Literal["manual", "import", "kiwoom", "toss"]
+    source: Literal["manual", "import", "kiwoom", "toss", "mock"]
     created_at: datetime
     updated_at: datetime
 
@@ -151,6 +151,11 @@ class Position(CamelModel):
     last_traded_on: date
     trade_count: int
     has_oversold: bool
+    current_price: str | None = None
+    eval_amount: str | None = None
+    unrealized_pnl: str | None = None
+    unrealized_pnl_rate: float | None = None
+    quote_source: str | None = None
 
 
 class Positions(CamelModel):
@@ -251,3 +256,31 @@ class CostEstimate(CamelModel):
     tax: str
     is_etf: bool
     rates: CostSettings
+
+
+class SyncInput(CamelModel):
+    connection_id: UUID
+    start: date = Field(alias="from")
+    end: date = Field(alias="to")
+
+
+class SyncResult(CamelModel):
+    inserted: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    skipped_duplicates: int = 0
+    start: date = Field(alias="from")
+    end: date = Field(alias="to")
+    synced_at: datetime
+
+
+class SyncStatusItem(CamelModel):
+    connection_id: UUID
+    label: str
+    provider: str
+    last_synced_at: datetime | None
+    trade_count: int
+
+
+class SyncStatus(CamelModel):
+    items: list[SyncStatusItem]
