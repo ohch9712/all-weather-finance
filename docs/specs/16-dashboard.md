@@ -109,3 +109,45 @@ develop `5d82533`의 실제 반환 모델과 대조해 정한 값의 출처다. 
 2. 섹션 실패 격리(한 섹션 예외가 전체 200을 깨지 않음).
 3. 3절 응답 필드가 같다.
 4. 360px에서 카드가 한 열로 깨짐 없이 보인다.
+
+## 구현 결과
+
+### 구현한 것
+
+- 백엔드 `GET /api/dashboard/summary`(`backend/app/modules/dashboard/`). 테이블·revision은 없다.
+  - `service.get_summary(db, user_id, email)`가 인사 → 자산배분 → 가계부 → 매매 → 관심종목 → 증여 → 학습 → 챗봇 → 체크리스트 순서로 조회하고 끝에 `db.commit()`을 한 번 한다. 섹션마다 `db.begin_nested()`(savepoint) 안에서 실행해 실패한 섹션만 되돌린다. 그래서 `get_allocation_report`의 오늘 점수 스냅샷이 남고, 한 섹션의 DB 오류가 다음 섹션을 깨지 않는다.
+  - 실패한 섹션은 `null`, `errors`에 `{section, code}`(AppError면 그 코드, 아니면 `INTERNAL_ERROR`)를 넣고 경고 로그(섹션·코드·예외 클래스 이름만)를 남긴다. 응답은 항상 200이다.
+  - 다른 모듈은 architecture 8절 공개 함수만 부른다: `auth.get_profile`, `allocation.get_allocation_report`·`get_recommendation`·`get_latest_risk_profile`·`get_situation`·`list_goals`·`get_asset_breakdown`, `ledger.get_monthly_summary`·`get_trend`, `journal.get_trade_stats`·`get_positions`, `watchlist.list_items`, `estate.list_members`·`get_deduction_status`, `learn.get_term_of_the_day`·`get_progress`, `app.integrations.llm.status.get_ai_status`. 응답 모델은 그 함수들이 쓰는 타입(`DirectionKind`, `Grade`, `ReportStatus`, `Currency`, `PostSummary`, `Provider`)만 가져온다.
+  - 3.1 대조 결과대로 값을 고른다: `topDirection`은 `directions`를 `priority`로 정렬한 첫 항목, `topCategories`는 지출 카테고리 금액 큰 순 3개, `winRate`는 통화 합산 승패로 계산(분모 0이면 null), 관심종목은 앞 5개와 첫 항목의 `source`, 증여는 자녀·손자녀 앞 3명의 `lineal_ascendant` 공제, 체크리스트 판정은 3.1 목록과 같다.
+- 화면 `/`(`frontend/src/app/(app)/page.tsx`, `frontend/src/features/dashboard/`)
+  - 인사(닉네임 또는 이메일 앞부분)와 오늘 날짜(KST), 시작 체크리스트(진행률 막대, 모두 끝내면 숨김), 카드 격자(`grid-cols-1 md:grid-cols-2 xl:grid-cols-3`), 하단 `Disclaimer variant="investment"`.
+  - 카드: 자산배분(점수·등급·변화, 실제 비중 작은 도넛, "먼저 할 일" 링크, `ready`가 아니면 다음 단계 버튼), 이번 달 가계부(수입·지출·전월 대비, 상위 카테고리 3개 막대), 매매 성과(통화별 실현손익·승률·보유 종목 수), 관심종목(5개 미니 목록, 등락 색, `source=mock`이면 `SampleDataBadge`, "더 보기"), 증여 공제(남은 공제·다음 회복일, 가족이 없으면 "가족 등록하기"), 오늘의 용어(용어·한 줄 정의·"자세히", 학습 진도 막대), AI 상담(예시 질문 3개 → `openChatWidget({ draft })`, `AiProviderBadge scope="personal" compact`, 꺼져 있으면 안내하고 버튼을 막는다).
+  - 섹션이 `null`이면 그 카드만 "불러오지 못했어요" + "다시 시도"(요약을 다시 불러온다). 요청 전체가 실패하면 `ErrorState`.
+  - 다른 모듈 데이터는 `features/dashboard/api.ts`의 `GET /api/dashboard/summary` 하나로 받는다. 채팅 모듈 파일은 고치지 않았다.
+- 테스트
+  - 백엔드 `backend/tests/dashboard/test_dashboard.py` 14개: 로그인 필요(401), 새 사용자(모든 섹션 비어 있음·체크리스트 5개 미완료·`topDirection: null`), 닉네임 인사, 진단 뒤 `topDirection`과 상황 입력 뒤 `situation` 완료, 목표만으로 `situation` 완료, 배분 제외 자산·11개월 전 가계부로 체크리스트 완료, Mock 시드 데이터가 있는 사용자의 섹션별 값(각 모듈 API 응답과 대조), 증여 공제 값, 점수 스냅샷 커밋과 `scoreDelta`(세션을 되돌려도 남는지), 섹션 예외(AppError·일반 예외) 격리, DB 오류가 그 섹션만 되돌림, 체크리스트 판정 실패, 챗봇 상태·실패, 다른 사용자 데이터가 섞이지 않음. 커밋 제거·savepoint 제거 변형으로 해당 테스트가 실패하는 것도 확인했다.
+  - 프론트 `frontend/tests/dashboard/dashboard.test.tsx` 11개: 인사·KST 날짜·투자 고지, 카드별 렌더링, 신규 사용자 빈 카드, 배분 상태별 다음 단계, 체크리스트 진행률·완료 시 숨김, null 섹션 재시도, 요청 전체 실패, 예시 질문 → `chat:open` 이벤트, AI 꺼짐 안내, 반응형 열 클래스.
+
+### 스펙과 다르게 하거나 정한 점
+
+- `ledger.expenseChangeRate`는 `number | null`이다. 실제 `MonthlySummary.expense_change_rate`가 전월 지출이 0이면 null이기 때문이다(3절 JSON에는 숫자 예시만 있다).
+- `chat`은 계약대로 null이 아니다. `get_ai_status`가 실패하면 `{enabled: false, location: null}`로 두고 `errors`에 `{section: "chat", code}`를 넣는다.
+- 프로필을 읽지 못하면 `greetingName`은 이메일 앞부분으로 두고 로그만 남긴다(`errors`에 넣지 않는다. 3절 섹션 이름에 없기 때문이다).
+- 관심종목 섹션이 실패하면 체크리스트 `watchlist` 판정이 `list_items`를 한 번 더 부르므로 `errors`에 `watchlist`와 `checklist`가 함께 들어갈 수 있다. 섹션이 성공하면 그 목록을 재사용한다.
+- `learn.today`는 공개 함수 `get_term_of_the_day`를 그대로 쓰므로 `read`·`bookmarked`는 항상 `false`다(`GET /api/learn/today`는 사용자별 값을 채운다). 카드는 두 값을 쓰지 않는다.
+- 관심종목 시세는 응답에 시장 정보가 없어 단위 없이 천 단위 쉼표로 보여 준다(예: `71,200`).
+- 증여 공제 카드에 공제 금액이 보이면 `Disclaimer variant="tax"`를 붙였다(AGENTS.md 고지 규칙). 4절은 하단 `investment`만 적었다.
+- AI 상담 카드의 `AiProviderBadge`(01b 공용 컴포넌트)는 스스로 `GET /api/ai/status`를 부른다. 대시보드 `api.ts`가 부르는 다른 모듈 API는 없다.
+- 홈 요약 쿼리는 `staleTime: 0`이라 다른 화면에서 입력하고 돌아오면 다시 불러온다.
+
+### 확인한 것
+
+- 백엔드: `uv run ruff check .`, `uv run ruff format --check .` 통과, `uv run pytest` 1209 passed.
+- 마이그레이션: 추가한 revision은 없다. 임시 빈 DB(`finance_16_cycle`)에서 `upgrade heads` → `downgrade base` → `upgrade heads` 성공 후 삭제.
+- 프론트: `npm run lint`, `npx tsc --noEmit` 통과, `npm run test` 45 files / 447 passed, `npm run build` 성공.
+- 서버(슬롯 16)에서 실제 요청: 미로그인 401, 신규 사용자 응답 필드가 3절과 같음(24ms), Mock 시드(`market.jobs seed-mock`, `learn.seed`)와 API로 채운 사용자 응답(45ms).
+- 화면: Orca isolated 프로필로 로그인해 360px에서 신규·데이터 있음 두 상태 모두 카드 1열(328px), 문서 가로 폭 360(가로 스크롤 없음), 800px 2열, 1280px 3열, 콘솔 오류 없음.
+
+### 남은 일
+
+- 없음. 위젯 배치 설정·알림은 2절대로 범위 밖이다.
