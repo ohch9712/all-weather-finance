@@ -118,11 +118,6 @@ def _decimal_text(value: Decimal) -> str:
 
 def encode_filter(screen_filter: ScreenFilter) -> str:
     data = screen_filter.model_dump(mode="json", by_alias=True)
-    for condition, raw in zip(screen_filter.conditions, data["conditions"], strict=True):
-        raw["value"] = _decimal_text(condition.value)
-        raw["valueTo"] = (
-            _decimal_text(condition.value_to) if condition.value_to is not None else None
-        )
     payload = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return base64.urlsafe_b64encode(payload.encode("utf-8")).decode().rstrip("=")
 

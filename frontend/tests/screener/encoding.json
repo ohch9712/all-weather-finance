@@ -1,0 +1,33 @@
+{
+  "filter": {
+    "markets": null,
+    "kinds": ["stock", "etf"],
+    "sectors": ["반도체"],
+    "conditions": [
+      {
+        "field": "per",
+        "op": "between",
+        "value": "1.00",
+        "valueTo": "10.50"
+      }
+    ],
+    "sort": null,
+    "limit": 30
+  },
+  "encoded": "eyJjb25kaXRpb25zIjpbeyJmaWVsZCI6InBlciIsIm9wIjoiYmV0d2VlbiIsInZhbHVlIjoiMS4wMCIsInZhbHVlVG8iOiIxMC41MCJ9XSwia2luZHMiOlsic3RvY2siLCJldGYiXSwibGltaXQiOjMwLCJtYXJrZXRzIjpudWxsLCJzZWN0b3JzIjpbIuuwmOuPhOyytCJdLCJzb3J0IjpudWxsfQ",
+  "canonical": {
+    "conditions": [
+      {
+        "field": "per",
+        "op": "between",
+        "value": "1.00",
+        "valueTo": "10.50"
+      }
+    ],
+    "kinds": ["stock", "etf"],
+    "limit": 30,
+    "markets": null,
+    "sectors": ["반도체"],
+    "sort": null
+  }
+}

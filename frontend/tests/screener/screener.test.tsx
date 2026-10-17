@@ -1,0 +1,333 @@
+import { screen, waitFor, within } from "@testing-library/react";
+import { HttpResponse, http } from "msw";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ScreenerPage } from "@/features/screener/components/ScreenerPage";
+import {
+  decodeFilter,
+  emptyFilter,
+  encodeFilter,
+} from "@/features/screener/utils";
+import type { ScreenFilter, ScreenResult } from "@/features/screener/types";
+import { apiUrl, errorResponse, renderWithProviders, server } from "../utils";
+import golden from "./encoding.json";
+
+const scope = {
+  enabled: true,
+  provider: "gemini",
+  location: "cloud",
+  model: "test",
+  reason: null,
+};
+const item = {
+  code: "005930",
+  name: "삼성전자",
+  market: "KOSPI",
+  sector: "반도체",
+  kind: "stock" as const,
+  price: "71200",
+  changeRate: -1.11,
+  marketCap: 425000000000000,
+  per: "12.40",
+  pbr: "1.30",
+  roe: "10.50",
+  tradingValue: 879000000000,
+};
+const results: ScreenResult = {
+  asOf: "2026-10-16",
+  source: "mock",
+  total: 2,
+  excludedForMissingData: 3,
+  items: [
+    item,
+    {
+      ...item,
+      code: "069500",
+      name: "KODEX 200",
+      kind: "etf",
+      per: null,
+      pbr: null,
+      roe: null,
+    },
+  ],
+};
+const parsedFilter: ScreenFilter = {
+  ...emptyFilter(),
+  markets: ["KOSPI"],
+  conditions: [{ field: "per", op: "lte", value: "10", valueTo: null }],
+};
+
+beforeEach(() => {
+  server.use(
+    http.get(apiUrl("/api/ai/status"), () =>
+      HttpResponse.json({ general: scope, personal: scope }),
+    ),
+    http.get(apiUrl("/api/screener/saved"), () =>
+      HttpResponse.json({ items: [] }),
+    ),
+    http.get(apiUrl("/api/market/connections"), () =>
+      HttpResponse.json({
+        items: [
+          {
+            id: "conn",
+            provider: "kiwoom",
+            label: "내 키움",
+            status: "active",
+          },
+        ],
+      }),
+    ),
+    http.get(apiUrl("/api/screener/broker-conditions"), () =>
+      HttpResponse.json({
+        items: [
+          { seq: "0", name: "샘플 저PER" },
+          { seq: "1", name: "샘플 대형주" },
+        ],
+        source: "mock",
+      }),
+    ),
+    http.post(apiUrl("/api/screener/run"), () => HttpResponse.json(results)),
+    http.post(apiUrl("/api/screener/parse"), () =>
+      HttpResponse.json({
+        filter: parsedFilter,
+        explanation: "코스피에서 PER 10 이하인 종목을 찾아요.",
+        unsupported: [{ text: "배당", reason: "지원하지 않는 지표예요." }],
+        chips: [{ label: "코스피" }, { label: "PER ≤ 10배" }],
+      }),
+    ),
+  );
+});
+
+describe("조건검색 화면", () => {
+  it("자연어를 칩으로 바꾸고 수정 후 실행하며 409를 안내한다", async () => {
+    let requested: ScreenFilter | undefined;
+    server.use(
+      http.post(apiUrl("/api/screener/run"), async ({ request }) => {
+        requested = ((await request.json()) as { filter: ScreenFilter }).filter;
+        return HttpResponse.json(results);
+      }),
+      http.post(apiUrl("/api/watchlist"), async ({ request }) => {
+        expect(await request.json()).toMatchObject({
+          code: "005930",
+          groupName: "기본",
+        });
+        return errorResponse(409, "CONFLICT", "이미 관심종목에 있습니다.");
+      }),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />);
+    await user.type(
+      await screen.findByLabelText("원하는 조건"),
+      "코스피 PER 10 이하 배당",
+    );
+    await user.click(screen.getByRole("button", { name: "조건 해석" }));
+    expect(
+      await screen.findByText("코스피에서 PER 10 이하인 종목을 찾아요."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("배당: 지원하지 않는 지표예요."),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "PER ≤ 10 수정" }));
+    await user.clear(screen.getByLabelText("값"));
+    await user.type(screen.getByLabelText("값"), "15");
+    await user.click(screen.getByRole("button", { name: "조건 적용" }));
+    expect(
+      screen.getByText("배당: 지원하지 않는 지표예요."),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    expect(requested?.conditions[0].value).toBe("15");
+    const table = within(screen.getByRole("table"));
+    expect(table.getByText("ETF")).toBeInTheDocument();
+    expect(table.getAllByText("—")).toHaveLength(3);
+    expect(
+      screen.getByText(/지표 누락으로 제외된 종목 3개/),
+    ).toBeInTheDocument();
+    expect(table.getByRole("link", { name: "삼성전자" })).toHaveAttribute(
+      "href",
+      "/stocks/005930",
+    );
+    await user.click(
+      table.getAllByRole("button", { name: "관심종목 담기" })[0],
+    );
+    expect((await screen.findAllByText("이미 있어요")).length).toBeGreaterThan(
+      0,
+    );
+    await user.click(table.getByRole("button", { name: /PER/ }));
+    await waitFor(() =>
+      expect(requested?.sort).toEqual({ field: "per", direction: "asc" }),
+    );
+  });
+  it("URL 필터로 바로 실행하고 ETF 종류를 표시한다", async () => {
+    const filter = { ...emptyFilter(), kinds: ["etf"] as ["etf"] };
+    const handler = vi.fn(() => HttpResponse.json(results));
+    server.use(http.post(apiUrl("/api/screener/run"), handler));
+    renderWithProviders(<ScreenerPage />, {
+      route: `/stocks/screener?f=${encodeFilter(filter)}`,
+    });
+    await screen.findByRole("table");
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("종류")).toHaveValue("etf");
+    expect(screen.getAllByLabelText(/샘플 데이터/).length).toBeGreaterThan(0);
+  });
+  it("잘못된 URL은 실행하지 않고 직접 조건을 허용한다", async () => {
+    const handler = vi.fn(() => HttpResponse.json(results));
+    server.use(http.post(apiUrl("/api/screener/run"), handler));
+    renderWithProviders(<ScreenerPage />, {
+      route: "/stocks/screener?f=invalid",
+    });
+    expect(
+      await screen.findByText(/검색 링크가 올바르지 않습니다/),
+    ).toBeInTheDocument();
+    expect(handler).not.toHaveBeenCalled();
+  });
+  it("AI 꺼짐에서 직접 between 조건을 검증하고 추가·삭제한다", async () => {
+    server.use(
+      http.get(apiUrl("/api/ai/status"), () =>
+        HttpResponse.json({
+          general: { ...scope, enabled: false },
+          personal: scope,
+        }),
+      ),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />);
+    await screen.findByText(/AI가 꺼져 있어요/);
+    expect(screen.queryByLabelText("원하는 조건")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "직접 조건 추가" }));
+    await user.selectOptions(screen.getByLabelText("연산자"), "between");
+    await user.type(screen.getByLabelText("끝값"), "5");
+    await user.click(screen.getByRole("button", { name: "조건 적용" }));
+    expect(await screen.findByText(/범위의 끝값을 확인/)).toBeInTheDocument();
+    await user.clear(screen.getByLabelText("끝값"));
+    await user.type(screen.getByLabelText("끝값"), "20");
+    await user.click(screen.getByRole("button", { name: "조건 적용" }));
+    expect(
+      screen.getByRole("button", { name: "PER 범위 10 ~ 20 수정" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "조건 1 삭제" }));
+    expect(
+      screen.queryByRole("button", { name: /PER 범위/ }),
+    ).not.toBeInTheDocument();
+  });
+  it("검색 저장·불러오기·삭제를 연결한다", async () => {
+    const saved = {
+      id: "saved",
+      name: "내 검색",
+      queryText: "저PER",
+      filter: parsedFilter,
+      createdAt: "2026-10-16T00:00:00Z",
+    };
+    let items = [saved];
+    server.use(
+      http.get(apiUrl("/api/screener/saved"), () =>
+        HttpResponse.json({ items }),
+      ),
+      http.post(apiUrl("/api/screener/saved"), async ({ request }) => {
+        expect(await request.json()).toMatchObject({
+          name: "새 검색",
+          filter: parsedFilter,
+        });
+        return HttpResponse.json(saved, { status: 201 });
+      }),
+      http.delete(apiUrl("/api/screener/saved/saved"), () => {
+        items = [];
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />);
+    await user.click(await screen.findByRole("button", { name: "불러오기" }));
+    expect(
+      screen.getByRole("button", { name: "PER ≤ 10 수정" }),
+    ).toBeInTheDocument();
+    await user.type(screen.getByLabelText("검색 이름"), "새 검색");
+    await user.click(screen.getByRole("button", { name: "이 조건 저장" }));
+    expect(await screen.findByText("검색을 저장했어요.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "내 검색 삭제" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "불러오기" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+  it("키움 탭에서 운영자 조건식을 실행하고 연결 변경 오류를 안내한다", async () => {
+    let selection: unknown;
+    server.use(
+      http.post(
+        apiUrl("/api/screener/broker-conditions/run"),
+        async ({ request }) => {
+          selection = await request.json();
+          return HttpResponse.json(results);
+        },
+      ),
+      http.get(apiUrl("/api/screener/broker-conditions"), ({ request }) =>
+        new URL(request.url).searchParams.has("connectionId")
+          ? errorResponse(
+              501,
+              "BROKER_NOT_SUPPORTED",
+              "지원하지 않는 기능입니다.",
+            )
+          : HttpResponse.json({
+              items: [{ seq: "0", name: "샘플 저PER" }],
+              source: "mock",
+            }),
+      ),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />);
+    await user.click(screen.getByRole("tab", { name: "내 키움 조건식" }));
+    await user.click(
+      await screen.findByRole("button", { name: "샘플 저PER 실행" }),
+    );
+    await screen.findByRole("table");
+    expect(selection).toEqual({ seq: "0", connectionId: null });
+    await user.selectOptions(screen.getByLabelText("연결 선택"), "conn");
+    expect(
+      await screen.findByText("지원하지 않는 기능입니다."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+  it("미수집 데이터와 LLM 오류를 안내한다", async () => {
+    server.use(
+      http.post(apiUrl("/api/screener/run"), () =>
+        HttpResponse.json({ ...results, asOf: null, total: 0, items: [] }),
+      ),
+      http.post(apiUrl("/api/screener/parse"), () =>
+        errorResponse(503, "LLM_UNAVAILABLE", "조건을 이해하지 못했어요."),
+      ),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />);
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    expect(
+      await screen.findByText("종목 데이터가 아직 없습니다"),
+    ).toBeInTheDocument();
+    await user.type(
+      await screen.findByLabelText("원하는 조건"),
+      "알 수 없는 조건",
+    );
+    await user.click(screen.getByRole("button", { name: "조건 해석" }));
+    expect(
+      await screen.findByText("조건을 이해하지 못했어요."),
+    ).toBeInTheDocument();
+  });
+});
+
+it("백엔드와 같은 UTF-8·소수·키 정렬 인코딩을 쓴다", () => {
+  const filter = golden.filter as ScreenFilter;
+  expect(encodeFilter(filter)).toBe(golden.encoded);
+  expect(decodeFilter(golden.encoded)).toEqual(golden.canonical);
+  for (const [value, expected] of [
+    ["1e2", "1E+2"],
+    ["001.2300", "1.2300"],
+    ["1e-7", "1E-7"],
+    ["-0.00", "-0.00"],
+    ["1e-6", "0.000001"],
+  ]) {
+    const encoded = encodeFilter({
+      ...emptyFilter(),
+      conditions: [{ field: "per", op: "lte", value, valueTo: null }],
+    });
+    expect(decodeFilter(encoded).conditions[0].value).toBe(expected);
+  }
+  expect(() =>
+    decodeFilter(
+      btoa('{"conditions":[{"field":"sql","op":"gt","value":"1"}]}'),
+    ),
+  ).toThrow();
+});

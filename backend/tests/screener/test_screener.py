@@ -89,6 +89,7 @@ def test_filtering_and_examples(snapshots):
                     "value": "1000000000000",
                     "valueTo": "10000000000000",
                 },
+                {"field": "per", "op": "gt", "value": "0"},
                 {"field": "per", "op": "lte", "value": "10"},
             ],
         },
@@ -345,8 +346,8 @@ def test_encoding():
     assert decoded["conditions"][0] == {
         "field": "per",
         "op": "between",
-        "value": "1",
-        "valueTo": "10.5",
+        "value": "1.00",
+        "valueTo": "10.50",
     }
     assert ScreenFilter.model_validate(decoded) == screen_filter
     assert service.make_chips(screen_filter)[0].label == "주식·ETF"
@@ -368,3 +369,27 @@ def test_authentication(client):
         ).status_code
         == 401
     )
+
+
+def test_broker_missing_snapshot_uses_master(auth_client, monkeypatch):
+    from types import SimpleNamespace
+
+    class Known(MockBroker):
+        def run_condition(self, seq):
+            return ["known"]
+
+    monkeypatch.setattr(service, "get_market_data_client", Known)
+    monkeypatch.setattr(service, "list_snapshot_rows", lambda db: SnapshotSet(None, None, []))
+    monkeypatch.setattr(
+        service,
+        "search_stocks",
+        lambda db, query, limit: [
+            SimpleNamespace(
+                code="known", name="종목 마스터 이름", market="KOSPI", sector=None, kind="etf"
+            )
+        ],
+    )
+    response = auth_client.post("/api/screener/broker-conditions/run", json={"seq": "0"})
+    item = response.json()["items"][0]
+    assert item["name"] == "종목 마스터 이름" and item["kind"] == "etf"
+    assert item["price"] is None

@@ -1,8 +1,10 @@
-import type { Metadata } from "next";
-import { ComingSoon } from "@/components/common/ComingSoon";
+import { Suspense } from "react";
+import { ScreenerPage } from "@/features/screener/components/ScreenerPage";
 
-export const metadata: Metadata = { title: "조건검색" };
-
-export default function ScreenerPage() {
-  return <ComingSoon title="조건검색" taskId="13" />;
+export default function Page() {
+  return (
+    <Suspense fallback={<p>조건검색을 불러오는 중이에요.</p>}>
+      <ScreenerPage />
+    </Suspense>
+  );
 }
