@@ -192,3 +192,19 @@ develop `5d82533`의 실제 코드와 대조해 정한 내용이다. 표와 어�
 
 - 실제 personal 공급자(로컬 Ollama `gemma4:12b` 또는 결제 Gemini)로 `run_eval.py`를 돌려 도구 일치율·금지 문구 0건·공급자·모델을 이 절에 남긴다.
 - 01a의 `format_krw_compact` 억 단위 쉼표를 프론트와 맞추면 `chat/tools/common.py`의 보정을 지울 수 있다.
+
+### 평가 세트 실행 결과 (코디네이터, 2026-10-18)
+
+- 환경: develop `e0d69ca`, personal 공급자 로컬 Ollama 0.40.5, 모델 `gemma4:12b`. `uv run python -m app.modules.chat.evals.run_eval`(시드 사용자는 실행 뒤 롤백). 문항당 약 1분.
+- 처음 부른 도구 일치율 13/17(76.5%), 기대 도구 호출률 15/17(88.2%), 금지 문구 0건, 오류 응답 0건. 주문 요청(17번)은 도구 없이 거절 안내했다.
+
+| # | 기대 도구 | 처음 부른 도구 | 기대 도구 호출 |
+| --- | --- | --- | --- |
+| 4 | `get_spending_summary` | `get_today` | O(두 번째) |
+| 5 | `get_trade_stats` | `get_today` | O(두 번째) |
+| 13 | `estimate_gift_tax` | `get_gift_deductions` | X |
+| 15 | `plan_gifts` | `get_gift_deductions` | X |
+
+- 나머지 13문항은 처음 부른 도구가 기대와 같았다.
+- 4·5번은 날짜를 먼저 확인한 뒤 맞는 도구를 불렀다. `month`·`from`·`to`를 비우면 이번 달·전체라는 점을 도구 설명에 더 분명히 적으면 줄일 수 있다.
+- 13·15번은 공제 현황만 보고 세금 계산·분산 증여 일정을 직접 설명했다. 금액이 주어진 세금 질문은 `estimate_gift_tax`, 시기·나눠 주기 질문은 `plan_gifts`를 쓰라는 구분을 두 도구 설명과 `get_gift_deductions` 설명("세금 계산·일정에는 쓰지 않는다")에 더하는 것이 후속 과제다.
