@@ -142,3 +142,22 @@ def upsert_synced_holdings(db, user_id, *, source: Literal["kiwoom", "toss", "co
 4. `upsert_synced_holdings` 시그니처가 6.2와 같다(17의 전제).
 5. 02의 기존 API·테스트가 깨지지 않았다.
 6. 사용자 격리 404.
+
+## 구현 결과
+
+- `allocation_0002`에 동기화 메타데이터 4개 컬럼, 사용자·연결·외부 식별값 부분 유일 인덱스와 `mock` 원천 CHECK를 추가했다. downgrade는 Mock 행을 지우고 기존 CHECK와 컬럼으로 복원한다.
+- `classify.py`는 5절의 키워드와 순서 그대로 자산군·일치 키워드를 반환한다. `POST /api/allocation/holdings/sync`는 market의 공개 서비스 두 개만 이용해 잔고·예수금을 반영하고, 원화 평가금액 없는 종목은 건너뜀 목록에 표시한다.
+- `service.SyncedHolding`·`upsert_synced_holdings`를 6.2의 시그니처로 제공한다. 동일 사용자·연결 안에서만 생성·갱신·삭제하며 분류 직접 지정, 배분 포함 여부와 메모를 보존한다. 점수 스냅샷과 flush까지만 실행하고 API가 commit한다. CODEF 호출과 호출자 롤백을 테스트했다.
+- 동기화 자산은 이름·금액 PATCH를 409로 차단하고, 자산군을 변경하면 `classOverride=true`로 저장한다. 기존 보유 자산 응답에는 `connectionId`, `syncedAt`, `classOverride`만 추가했다.
+- 보유 자산 화면에 활성 연결 선택·동기화 결과·연결별 재동기화, 공급자/샘플/직접 지정 배지, 마지막 동기화 시각과 분류 근거 툴팁을 추가했다. 이름·금액 입력은 비활성화하고 자산군·포함 여부·메모만 PATCH한다. Mock의 sample 및 자산배분의 investment 고지를 유지한다.
+- 스펙과 다르게 한 점: 없음. 세부 결정으로 `updated`는 이번 목록에서 갱신한 기존 행 수로 센다. 동일 입력의 재동기화는 행·금액·분류를 그대로 유지하면서 마지막 동기화 시각을 갱신한다. 호출자 입력의 금액·식별값·이름 오류는 쓰기 전에 `field_error`로 검증한다. 프론트의 근거 툴팁은 API 계약 필드를 늘리지 않고 같은 키워드 표를 이용한다.
+- 검증(2026-10-17):
+  - `scripts/worktree-setup.sh`, `uv run alembic upgrade heads`: 성공.
+  - `uv run ruff check .`, `uv run ruff format --check .`: 통과.
+  - `uv run pytest`: **1,055개 통과**(기존 자산배분 429개 및 새 동기화 25개 포함). 외부 HTTP는 공통 테스트 픽스처가 차단한다.
+  - 별도 빈 DB `finance_14_impl_verify`에서 `upgrade heads` → `downgrade base` → `upgrade heads`: 모두 성공, 검증 DB 삭제 완료.
+  - `npm run lint`, `npx tsc --noEmit`, `npm run test`, `npm run build`: 모두 통과, 프론트 테스트 **356개 통과**.
+  - 독립 Orca 프로필에서 실제 로컬 HTTP로 가입·프로필·성향·Mock 연결을 준비하고 화면에서 동기화: 첫 실행 6개 생성, 두 번째 6개 갱신. 점수 변경·사용자 격리·외화 건너뜀·금액 수정 차단은 백엔드 테스트로 검증했다.
+  - 360px에서 목록·다이얼로그의 `documentElement.scrollWidth === innerWidth === 360`, 1280px에서도 `scrollWidth === innerWidth === 1280`을 확인했다. 모바일 캡처를 시각 검토했고 Mock 행 6개와 sample/investment 고지를 확인했다. 임시 브라우저 프로필은 삭제했다.
+  - 변경 경로는 전부 3절 소유 범위 안이며 `git diff --check` 통과. `scripts/stop.sh`로 서버 종료 완료.
+- 남은 일: 코디네이터의 별도 검증과 PR 병합. 실제 증권사 자격증명을 이용한 호출은 하지 않았다. 외화 환산·주기 동기화는 원래 제외 범위다.
