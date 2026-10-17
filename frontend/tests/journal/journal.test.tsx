@@ -13,7 +13,7 @@ import { apiUrl, renderWithProviders, server } from "../utils";
 const trade: Trade = {
   id: "a1e524ad-b1bf-47b3-9d2d-873f91af63fe", tradedOn: "2026-09-03", tradedTime: "10:32", market: "KRX", currency: "KRW",
   symbolCode: "005930", symbolName: "삼성전자", side: "sell", quantity: "5", price: "90000", fee: "100", tax: "810", broker: "kiwoom", accountLabel: null,
-  tradedAt: "2026-09-03T01:32:00Z", timeKnown: true, source: "manual", createdAt: "2026-09-03T01:32:00Z", updatedAt: "2026-09-03T01:32:00Z",
+  tradedAt: "2026-09-03T01:32:00Z", timeKnown: true, source: "manual", costEstimated: false, createdAt: "2026-09-03T01:32:00Z", updatedAt: "2026-09-03T01:32:00Z",
 };
 const stats: TradeStats = {
   byCurrency: [{ currency: "KRW", realizedPnl: "74040", winCount: 1, lossCount: 0, winRate: 100, sellCount: 1, avgWin: "74040", avgLoss: null, bestTrade: { tradeId: trade.id, symbolName: "삼성전자", realizedPnl: "74040", tradedOn: trade.tradedOn }, worstTrade: null }],
