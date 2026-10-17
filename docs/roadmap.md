@@ -211,7 +211,7 @@ gh pr merge <PR 번호> --merge
 
 - 웨이브가 끝나면 병합된 작업 워크트리를 정리한다(`orca worktree rm --help`로 선택자를 확인). 열린 워커는 `worker-list --run <run_id> --terminal-state reclaimable --json`이 빈 목록이 될 때까지 `worker-release`.
 
-### 4.9 운영 메모 (웨이브 1~3에서 겪은 일)
+### 4.9 운영 메모 (웨이브 1~4에서 겪은 일)
 
 - **codex 업데이트 안내**: codex가 새 버전 안내를 띄우면 `worker-start`가 `agent_readiness` 단계에서 `Agent startup blocked: agent-update-prompt`로 실패한다. 실패한 시도는 영수증대로 `worker-release`하고, Orca가 띄우는 codex의 버전 파일(`~/Library/Application Support/orca/codex-accounts/<계정 id>/home/version.json`. `~/.codex/version.json`이 아니다)의 `dismissed_version`을 `latest_version`과 같게 적거나(그 버전 건너뛰기) codex를 올린 뒤 `--retry-of`로 다시 띄운다. 디스패치 전에 `npm view @openai/codex version`으로 확인한다.
 - **슬롯 포트 충돌**: 이 기기에서는 다른 프로젝트가 8000을 쓰고 있다. `scripts/start.sh`는 점유 프로세스를 죽이지 않고 멈춘다(정상). 슬롯 00 통합 검증은 백엔드 8090(`FRONTEND_ORIGIN=http://localhost:3090`)·프론트 3090(`NEXT_PUBLIC_API_BASE_URL=http://localhost:8090`)으로 직접 띄워 진행하고, 디스패치 전에 `lsof -nP -iTCP:<port> -sTCP:LISTEN`으로 확인한다.
@@ -223,6 +223,10 @@ gh pr merge <PR 번호> --merge
 - **codex 사용 한도와 계정**(웨이브 3): Orca가 쓰는 codex 계정은 `orca account list`의 `codex.activeAccountId`(None이면 시스템 기본 계정)다. 5시간 한도에 걸리면 워커 화면에 "You've hit your usage limit"가 뜨고 멈춘다. 이때는 `worker-stop` → 사용자가 Orca 설정에서 다른 codex 계정으로 전환 → 같은 Task를 `--retry-of`로 같은 워크트리에 다시 띄우고, 앞 시도가 남긴 변경을 이어받으라고 `send`한다. 검증은 codex `gpt-6.1-sol` 전용이라 한도를 남겨 둔다. 프롬프트가 입력창에 들어가지 않아 `outcome_unknown`·`turn_start_unobserved`로 남은 시도는 터미널을 확인한 뒤 `worker-abandon`하고 `--retry-of`로 다시 넣는다.
 - **삭제 명령**: 워크트리의 `node_modules`·`.next`·`.venv`를 지울 때 경로를 셸 변수로 쓰면 Claude Code 안전 검사가 명령 전체를 막는다. `"${WS:?}/${d:?}/frontend/node_modules"`처럼 비면 멈추는 형태나 절대 경로를 쓴다.
 - **스펙 충돌 대조**(웨이브 3): 착수 직전 갱신에서 실제 코드와 대조해 막은 문제가 많았다(02·05 테이블의 `source` CHECK가 Mock 연결 `mock`을 막음, 수동 거래의 `dedup_hash`가 비어 동기화 중복 판정이 안 됨, Mock 고정 데이터로는 결과가 없는 예시 문구, 시세까지 부르는 `get_stock_detail`을 목록·추정에 쓰는 설계). 웨이브 4도 착수 전에 쓰는 공개 함수·CHECK 제약·Mock 데이터 범위를 직접 조회해 확인한다.
+- **savepoint 안의 커밋**(웨이브 4): SQLAlchemy 2.0.54에서 `with db.begin_nested():` 블록 안에서 `commit`한 뒤 쿼리하면 `InvalidRequestError`(closed transaction inside context manager)가 난다. 커밋 직후 블록을 나오는 경우만 시험하면 놓친다. 함수 안에서 커밋하는 서비스(예: `watchlist.add_item`)를 savepoint 안에서 부르는 쪽은 명시적 `savepoint = db.begin_nested()`와 `is_active` 확인을 쓴다. 착수 전 대조에서 트랜잭션 가정을 적을 때는 실제 호출 순서(커밋 뒤 refresh·조회 포함)로 재현한다.
+- **대기 명령의 타입**(웨이브 4): `check --wait --types`의 질문 타입은 `question`이다(`ask`는 `invalid_argument`). `worker_done,escalation,question`으로 기다리고, heartbeat만 든 배치는 내용을 확인한 뒤 바로 ack한다.
+- **워커 터미널 정리**(웨이브 4): `worker-retain`한 터미널은 `user_owned`가 되어 `worker-release`가 닫지 않는다(`retained`로 보고). 릴리스 뒤에는 `orca terminal list`로 남은 워커 터미널을 확인해, 코디네이터 터미널(`ORCA_TERMINAL_HANDLE`)을 뺀 기본 체크아웃 워커는 `orca terminal close --terminal <handle> --tab`, 워크트리는 `orca terminal close --worktree path:<경로> --all` 후 `orca worktree rm`으로 지운다. 기본 체크아웃에 워커를 띄울 때 `--worktree branch:develop`은 `selector_ambiguous`라 `path:<기본 체크아웃>`을 쓴다.
+- **연결 화면의 외부 IP 조회**(웨이브 4): `/settings/connections`는 열릴 때 `GET /api/market/connections/egress-ip`를 자동 요청하고 서버가 외부 IP 서비스를 부른다(캐시 있음). 외부 호출을 금지하는 검증 spec에는 "이 화면을 열기 전에 브라우저에서 그 경로를 가로채 막는다"를 적어 준다.
 
 ## 5. 웨이브별 통합 확인 항목 (6.4 블록이 참조)
 
