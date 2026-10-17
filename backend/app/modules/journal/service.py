@@ -597,6 +597,8 @@ def execution_match(trade):
 
 
 def sync_trades(db, user_id, data):
+    from dataclasses import asdict
+
     from app.core import time as clock
     from app.integrations.brokers.errors import BrokerError
     from app.modules.journal.schemas import SyncResult
@@ -643,17 +645,20 @@ def sync_trades(db, user_id, data):
                 execution.tax,
                 connection.provider if connection.provider in {"kiwoom", "toss"} else None,
             )
-            values = imported_values(db, user_id, row)
-            values.update(source=connection.provider, account_label=connection.label)
             existing = external.get((connection.id, execution.external_id))
             if existing:
+                values = asdict(row)
+                for name in ("fee", "tax"):
+                    if values[name] is None:
+                        values.pop(name)
+                if row.fee is not None and row.tax is not None:
+                    values["cost_estimated"] = False
+                values.update(source=connection.provider, account_label=connection.label)
                 changed = any(getattr(existing, key) != value for key, value in values.items())
                 if changed:
                     for key, value in values.items():
                         setattr(existing, key, value)
                     result.updated += 1
-                    if values["cost_estimated"]:
-                        result.cost_estimated += 1
                 else:
                     result.unchanged += 1
                 existing.synced_at = now
@@ -669,6 +674,8 @@ def sync_trades(db, user_id, data):
                 unmatched[key].pop()
                 result.skipped_duplicates += 1
                 continue
+            values = imported_values(db, user_id, row)
+            values.update(source=connection.provider, account_label=connection.label)
             trade = repo.add_trade(
                 db,
                 dict(

@@ -3,6 +3,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import UUID
 
 import httpx
@@ -64,6 +65,100 @@ def test_mock_sync_idempotent_status_isolation(auth_client, other_auth_client):
     assert sync(other_auth_client, cid).status_code == 404
     assert other_auth_client.get("/api/journal/sync/status").json() == {"items": []}
     assert other_auth_client.get(f"/api/journal/trades/{trades[0]['id']}").status_code == 404
+
+
+@pytest.fixture
+def missing_cost_executions(monkeypatch):
+    execution = MockBroker().get_executions(date(2026, 9, 1), date(2026, 10, 16))[0]
+    rows = [
+        replace(
+            execution,
+            code="005930",
+            market="KOSPI",
+            side="sell",
+            quantity=Decimal(10),
+            price=Decimal(70000),
+            currency="KRW",
+            fee=None,
+            tax=None,
+        )
+    ]
+    monkeypatch.setattr(MockBroker, "get_executions", lambda *args: rows)
+    return rows
+
+
+@pytest.mark.parametrize("manual_costs", [False, True])
+def test_resync_preserves_costs_after_rate_change(
+    auth_client, missing_cost_executions, manual_costs, monkeypatch
+):
+    cid = connection(auth_client)
+    first = sync(auth_client, cid)
+    assert first.status_code == 200, first.text
+    assert first.json()["inserted"] == 1 and first.json()["costEstimated"] == 1
+    trade = auth_client.get("/api/journal/trades").json()["items"][0]
+    assert (trade["fee"], trade["tax"], trade["costEstimated"]) == ("105", "1400", True)
+    response = auth_client.put(
+        "/api/journal/cost-settings",
+        json={"krxCommissionRate": "0.1", "krxSellTaxRate": "0.3", "usCommissionRate": "0.5"},
+    )
+    assert response.status_code == 200, response.text
+    expected = ("105", "1400", True)
+    url = f"/api/journal/trades/{trade['id']}"
+    if manual_costs:
+        response = auth_client.patch(url, json={"fee": "123", "tax": "456"})
+        assert response.status_code == 200, response.text
+        expected = ("123", "456", False)
+    with monkeypatch.context() as patch:
+        estimate = Mock(wraps=service.estimate_trade_costs)
+        patch.setattr(service, "estimate_trade_costs", estimate)
+        result = sync(auth_client, cid).json()
+        assert (result["inserted"], result["updated"], result["unchanged"]) == (0, 0, 1)
+        assert result["costEstimated"] == 0
+        stored = auth_client.get(url).json()["trade"]
+        assert (stored["fee"], stored["tax"], stored["costEstimated"]) == expected
+        estimate.assert_not_called()
+        missing_cost_executions[0] = replace(missing_cost_executions[0], price=Decimal(71000))
+        result = sync(auth_client, cid).json()
+        assert result["updated"] == 1 and result["costEstimated"] == 0
+        stored = auth_client.get(url).json()["trade"]
+        assert stored["price"] == "71000"
+        assert (stored["fee"], stored["tax"], stored["costEstimated"]) == expected
+    missing_cost_executions.append(
+        replace(missing_cost_executions[0], external_id="new-fill", price=Decimal(70000))
+    )
+    result = sync(auth_client, cid).json()
+    assert (result["inserted"], result["unchanged"], result["costEstimated"]) == (1, 1, 1)
+    trades = auth_client.get("/api/journal/trades").json()["items"]
+    new = next(item for item in trades if item["id"] != trade["id"])
+    assert (new["fee"], new["tax"], new["costEstimated"]) == ("700", "2100", True)
+
+
+@pytest.mark.parametrize("manual_costs", [False, True])
+@pytest.mark.parametrize("provided", [{"fee": Decimal(0)}, {"tax": Decimal(0)}])
+def test_resync_updates_only_provided_costs(
+    auth_client, missing_cost_executions, provided, manual_costs
+):
+    cid = connection(auth_client)
+    assert sync(auth_client, cid).status_code == 200
+    trade = auth_client.get("/api/journal/trades").json()["items"][0]
+    url = f"/api/journal/trades/{trade['id']}"
+    expected = {"fee": "105", "tax": "1400", "costEstimated": True}
+    if manual_costs:
+        assert auth_client.patch(url, json={"fee": "123", "tax": "456"}).status_code == 200
+        expected = {"fee": "123", "tax": "456", "costEstimated": False}
+    missing_cost_executions[0] = replace(missing_cost_executions[0], **provided)
+    result = sync(auth_client, cid).json()
+    assert result["updated"] == 1 and result["costEstimated"] == 0
+    stored = auth_client.get(url).json()["trade"]
+    expected.update({key: str(value) for key, value in provided.items()})
+    assert {key: stored[key] for key in expected} == expected
+    missing_cost_executions[0] = replace(missing_cost_executions[0], fee=Decimal(0), tax=Decimal(0))
+    result = sync(auth_client, cid).json()
+    assert result["updated"] == 1 and result["costEstimated"] == 0
+    stored = auth_client.get(url).json()["trade"]
+    assert (stored["fee"], stored["tax"], stored["costEstimated"]) == ("0", "0", False)
+    result = sync(auth_client, cid).json()
+    assert result["unchanged"] == 1 and result["costEstimated"] == 0
 
 
 def test_no_time_manual_duplicate_one_to_one_and_updated(auth_client, monkeypatch):
@@ -174,11 +269,20 @@ def test_kiwoom_missing_costs_market_conversion_and_etf(auth_client, db, respx_m
     assert trade["tradedAt"].endswith("04:07:47Z")
     monkeypatch.setattr(service, "is_domestic_etf", lambda *args: True)
     result = sync(auth_client, cid, **{"from": "2026-10-16", "to": "2026-10-16"}).json()
-    assert result["updated"] == 1
-    assert result["costEstimated"] == 1
-    assert auth_client.get("/api/journal/trades").json()["items"][0]["tax"] == "0"
+    assert result["unchanged"] == 1
+    assert result["costEstimated"] == 0
+    assert auth_client.get("/api/journal/trades").json()["items"][0]["tax"] == "284"
     stored = db.scalar(select(Trade).where(Trade.connection_id == UUID(cid)))
     assert stored.external_id == "20261016:1:1" and stored.synced_at
+    assert (
+        auth_client.delete(
+            f"/api/journal/trades/{trade['id']}", headers={"Content-Type": "application/json"}
+        ).status_code
+        == 204
+    )
+    result = sync(auth_client, cid, **{"from": "2026-10-16", "to": "2026-10-16"}).json()
+    assert result["inserted"] == 1 and result["costEstimated"] == 1
+    assert auth_client.get("/api/journal/trades").json()["items"][0]["tax"] == "0"
 
 
 def test_transaction_rollback(auth_client, db, monkeypatch):
