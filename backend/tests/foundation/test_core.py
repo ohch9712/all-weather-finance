@@ -159,3 +159,41 @@ def test_app_error_details():
         {"field": "code", "message": "중복"}
     ]
     assert client.get("/plain").json()["error"]["details"] == []
+
+
+def test_validation_messages_are_korean():
+    from pydantic import BaseModel, EmailStr, field_validator
+
+    class Body(BaseModel):
+        email: EmailStr
+        nickname: str
+
+        @field_validator("nickname")
+        @classmethod
+        def check_nickname(cls, value):
+            if value == "bad":
+                raise ValueError("닉네임을 확인해 주세요.")
+            if value == "english":
+                raise ValueError("library default message")
+            return value
+
+    app = FastAPI()
+    register_error_handlers(app)
+
+    @app.post("/body")
+    def create(body: Body):
+        return {}
+
+    client = TestClient(app)
+    details = client.post("/body", json={"email": "user@example.test", "nickname": "ok"}).json()[
+        "error"
+    ]["details"]
+    assert details == [{"field": "email", "message": "올바른 이메일 주소를 입력해 주세요."}]
+    details = client.post("/body", json={"email": "a@b.com", "nickname": "bad"}).json()["error"][
+        "details"
+    ]
+    assert details == [{"field": "nickname", "message": "닉네임을 확인해 주세요."}]
+    details = client.post("/body", json={"email": "a@b.com", "nickname": "english"}).json()[
+        "error"
+    ]["details"]
+    assert details == [{"field": "nickname", "message": "형식이 올바르지 않습니다."}]
