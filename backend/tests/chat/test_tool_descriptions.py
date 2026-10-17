@@ -44,7 +44,14 @@ def test_calculation_tools_do_not_need_deductions_first(name, usage):
     assert usage in text
     assert "공제 한도와 10년 합산 증여 기록을 이 도구가 직접 반영" in text
     assert "get_gift_deductions를 먼저 부를 필요가 없다" in text
+    # 가족 별칭만으로 바로 부르고 생년월일을 되묻지 않는다(평가 13번에서 생년월일을 물었다).
+    assert "memberName에 그 별칭만 넣고 바로 부른다" in text
+    assert "도구가 가족 정보에서 채우므로 사용자에게 묻지 않는다" in text
     assert "참고용" in text  # 기존 규칙(참고용 추정) 유지
+
+
+def test_plan_gifts_uses_defaults_without_asking():
+    assert "말하지 않았으면 묻지 말고 null로 두면 기본값으로 계산한다" in description("plan_gifts")
 
 
 def test_spending_summary_skips_get_today_for_this_month():
@@ -56,7 +63,7 @@ def test_spending_summary_skips_get_today_for_this_month():
 def test_system_prompt_routes_gift_questions_to_calculation_tools():
     sentence = (
         "- 증여세 계산·증여 일정 질문은 공제 현황 도구(get_gift_deductions)가 아니라 계산"
-        " 도구(세금은 estimate_gift_tax, 나눠 주는 일정은 plan_gifts)를 쓴다."
+        " 도구(세금은 estimate_gift_tax, 나눠 주는 일정은 plan_gifts)를 바로 쓴다."
     )
     tax_rule = "- 세금 질문은 계산 결과와 함께 가정(신고기한 내 신고 등)을 짧게 밝힌다."
     lines = prompts.SYSTEM_PROMPT.split("\n")
