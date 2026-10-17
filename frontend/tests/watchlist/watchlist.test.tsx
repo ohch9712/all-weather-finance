@@ -143,6 +143,43 @@ describe("관심종목 화면", () => {
     expect(rows()).toHaveLength(2);
   });
 
+  it("__all__ 그룹도 전체 탭과 따로 선택·필터링하고 검색한 종목을 해당 그룹에 담는다", async () => {
+    const api = mockApi([
+      watchlistItem("005930", { groupName: "__all__" }),
+      watchlistItem("069500"),
+    ]);
+    const { user } = renderPage();
+    const allTab = await screen.findByRole("tab", { name: "전체 2" });
+    const groupTab = screen.getByRole("tab", { name: "__all__ 1" });
+    expect(allTab).toHaveAttribute("aria-selected", "true");
+    expect(groupTab).toHaveAttribute("aria-selected", "false");
+    expect(screen.getAllByRole("tab", { selected: true })).toEqual([allTab]);
+    expect(rows()).toHaveLength(2);
+
+    await user.click(groupTab);
+    expect(allTab).toHaveAttribute("aria-selected", "false");
+    expect(screen.getAllByRole("tab", { selected: true })).toEqual([groupTab]);
+    expect(rows().map((item) => item.getAttribute("aria-label"))).toEqual(["삼성전자(005930)"]);
+    expect(screen.queryByRole("region", { name: "기본 그룹" })).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole("combobox"), "NAVER");
+    await user.click(await screen.findByRole("option", { name: /NAVER/ }));
+    await waitFor(() => expect(api.posts).toEqual([{ code: "035420", groupName: "__all__", memo: null }]));
+    await screen.findByRole("listitem", { name: "NAVER(035420)" });
+    expect(rows()).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "__all__ 2" })).toHaveAttribute("aria-selected", "true");
+
+    await user.click(screen.getByRole("tab", { name: "전체 3" }));
+    expect(screen.getAllByRole("tab", { selected: true })).toEqual([screen.getByRole("tab", { name: "전체 3" })]);
+    expect(rows()).toHaveLength(3);
+
+    await user.type(screen.getByRole("combobox"), "000660");
+    await user.click(await screen.findByRole("option", { name: /SK하이닉스/ }));
+    await waitFor(() => expect(api.posts[1]).toEqual({ code: "000660", groupName: "기본", memo: null }));
+    await screen.findByRole("listitem", { name: "SK하이닉스(000660)" });
+    expect(rows()).toHaveLength(4);
+  });
+
   it("고른 그룹 탭에서 검색해 담으면 그 그룹에 담는다", async () => {
     const api = mockApi([watchlistItem("069500", { groupName: "배당주" })]);
     const { user } = renderPage();
