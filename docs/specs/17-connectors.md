@@ -184,3 +184,57 @@ UNIQUE `(user_id, provider, kind, organization)`.
 4. 10·14 서비스 함수만 호출하고 그 모듈 코드를 고치지 않았다.
 5. 7절 응답·에러 코드가 같다.
 6. 마이데이터 안내 문구가 화면과 API에 있다.
+
+## 구현 결과
+
+### 구현한 것
+
+- `integrations/codef`에 환경별 도메인, Basic 토큰 발급·메모리 캐시(만료 1시간 전/상품 401 갱신), URL 인코딩 요청·응답, RSA PKCS#1 v1.5 암호화와 지원 기관 목록을 구현했다. 상품·계정 API는 4절에서 확인한 경로·필드만 사용한다.
+- `DataConnector`, `CodefConnector`, `MyDataConnector`와 인증이 필요한 제공자·기관·계정·동기화·이력 API를 구현했다. 마이데이터는 항상 501, 키 부재·중복은 409, 동의·기관·카드 조회 기간 오류는 `field_error`의 422, 다른 사용자의 계정·이력 필터·삭제·동기화는 404다.
+- revision `connectors_0001`에 계정·동기화 이력, 사용자·계정 FK 및 CASCADE, 기관 중복 제약과 인덱스를 추가했다. 로그인 아이디·비밀번호는 저장하지 않고 connectedId만 `app.core.crypto`로 암호화한다. 외부 응답 메시지는 오류·로그·이력에 넣지 않고 형식이 검증된 CODEF 결과 코드만 남긴다.
+- 카드 승인내역은 `ledger.import_entries(..., source="codef", batch_id=sync_id)`, 원화 은행 예금은 `allocation.upsert_synced_holdings(..., source="codef", connection_id=account_id)`로 반영한다. 두 서비스는 flush까지만 호출하며 connectors가 commit한다. 실행 기록을 먼저 저장한 후 저장점 안에서 반영하여 실패하면 데이터 변경은 롤백하고 `failed` 이력은 보존한다. 은행 연결 삭제 때 해당 현금 자산도 같은 트랜잭션에서 제거한다.
+- `/settings/connections`에 기존 `BrokerConnectionsSection`을 유지하고 데이터 자동 수집 섹션, 마이데이터 안내, CODEF 환경·가용 상태, 일회 전송 동의 폼, 계정 목록·기간 선택·가져오기·최근 결과·삭제·가계부 검토 링크를 추가했다. 개인 AI 공급자 배지와 투자·샘플·AI 고지를 사용한다. 등록 성공·실패 뒤에는 폼의 로그인 값을 비우며 영속 브라우저 저장소를 사용하지 않는다.
+
+### 4절 확인 값과 출처
+
+코디네이터가 2026-10-17에 확인해 제공한 4절 값을 그대로 사용했다. 추가로 추측한 경로·필드나 easycodefpy 설치·공개 샌드박스 키 복사는 없다.
+
+| 항목 | 구현에 사용한 확인 값 | 출처 |
+| --- | --- | --- |
+| 키·환경 | 설정의 clientId/clientSecret/publicKey만 사용. sandbox/development/production 도메인은 각각 sandbox/development/api.codef.io | [CODEF REST 가이드](https://developer.codef.io/common-guide/rest-api), [공식 properties.py](https://github.com/codef-io/easycodefpy/blob/master/easycodefpy/properties.py) |
+| 토큰·인코딩 | oauth.codef.io/oauth/token, Basic·폼 grant_type/client_credentials·scope/read, JSON→quote 요청, unquote_plus→JSON 응답, CF-00000 성공 | [CODEF REST 가이드](https://developer.codef.io/common-guide/rest-api), [공식 connector.py](https://github.com/codef-io/easycodefpy/blob/master/easycodefpy/connector.py), [공식 util.py](https://github.com/codef-io/easycodefpy/blob/master/easycodefpy/util.py) |
+| RSA·등록·삭제 | DER 공개키·PKCS#1 v1.5·Base64, /v1/account/create·/v1/account/delete, KR·CD/BK·P·loginType 1, connectedId와 errorList 검사 | [계정 등록](https://developer.codef.io/common-guide/connected-id/register), [계정 삭제](https://developer.codef.io/common-guide/connected-id/delete) |
+| 카드 | KR_CD_P_002·/v1/kr/card/p/account/approval-list, orderBy 0·inquiryType 1·memberStoreInfoType 0, 4.1의 사용일·원화금액·취소 변환 | [상품 출력 파라미터](https://admin.codef.io/dev-guide-menu/api-output-param/KR_CD_P_002), [상품 입력 파라미터](https://admin.codef.io/dev-guide-menu/api-input-param/KR_CD_P_002) |
+| 은행 | KR_BK_1_P_001·/v1/kr/bank/p/account/account-list, resDepositTrust의 KRW·비마이너스·0 이상 잔액만, 계좌번호 해시와 끝 4자리 | [상품 출력 파라미터](https://admin.codef.io/dev-guide-menu/api-output-param/KR_BK_1_P_001), [상품 입력 파라미터](https://admin.codef.io/dev-guide-menu/api-input-param/KR_BK_1_P_001) |
+| 지원 기관 | 4절의 카드 9곳·은행 11곳만 노출. 제외 기관은 등록 422. 은행 아이디 로그인 제약은 화면에 안내 | [기관별 로그인 제공 현황](https://docs.google.com/spreadsheets/d/1VxZKdL_mNzQDh31DEdzwFDo94TvBfWVeemgRHY2P6Yk) |
+
+### 스펙의 미정 세부 사항에 대한 구현 선택
+
+- 카드 조회 최대 92일은 시작일·종료일을 모두 포함한다(날짜 차이 0~91일). 은행 동기화의 기간은 사용하지 않고 이력에도 null로 저장한다.
+- 공개 `list[LedgerImportRow]` 계약을 지키는 목록 하위 타입으로 변환 실패 수를 전달해 빈 가맹점·외화 원화금액 없음·날짜/금액 파싱 실패를 `summary.failed`에 합산한다. 거절 건은 실패로 세지 않고 제외한다. 카드 summary는 `ImportResult` 키를 유지하되 개인정보 비노출을 위해 `errors`는 빈 배열로 보관한다.
+- 은행 응답의 형식이 잘못된 경우 일부 계좌만 반영하여 기존 자산을 지우지 않도록 전체 동기화를 실패 처리한다. 외화·마이너스 통장·음수 잔액은 스펙대로 제외한다.
+- 공유 파일, 다른 모듈 파일과 의존성은 변경하지 않았다. 스펙의 API·DB·서비스 계약과 다른 점은 없다.
+
+### 실행한 검증
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 17·8017/3017·finance_17 준비, 기존 의존성과 마이그레이션 적용 성공 |
+| `cd backend && uv run ruff check .` | 통과 |
+| `cd backend && uv run ruff format --check .` | 275개 파일 통과 |
+| `cd backend && uv run pytest` | 1,214개 통과(커넥터 19개 포함). 기존 Starlette/httpx 사용 중단 경고 1개 |
+| 빈 `finance_17_verify`에서 `uv run alembic upgrade heads` → `downgrade base` → `upgrade heads` | 모두 통과, 검증 DB 삭제 |
+| `cd frontend && npm run lint` | 통과 |
+| `cd frontend && npx tsc --noEmit` | 통과 |
+| `cd frontend && npm run test` | 45개 파일·442개 테스트 통과(커넥터 6개 포함) |
+| `cd frontend && npm run build` | Next.js 16.4.2 빌드 통과, `/settings/connections` 생성 |
+| `scripts/start.sh` 후 독립 Orca isolated 프로필에서 로그인·화면 확인 | 360×800에서 innerWidth/scrollWidth 모두 360, 1280×800에서 모두 1280. 기존 증권사 섹션·새 수집 섹션·키 없음·마이데이터·고지 확인 |
+| `git diff --check develop...HEAD`, 변경 경로 대조 | 공백 오류 없음, 소유 경로 안에서만 변경 |
+
+- respx의 `assert_all_mocked=True`와 기존 외부 HTTP 차단 픽스처를 유지했다. URL 인코딩 요청·응답·result.code, RSA 복호화, 토큰 재사용·401/만료 갱신, 등록 부분 실패, 개인정보 비노출, 카드·은행 두 번 반영, 삭제 실패 후 로컬 삭제, 사용자 격리, 동기화 오류 이력·부분 반영 롤백을 검증했다.
+- 이 워크트리에는 CODEF 키가 없어 샌드박스 수동 호출은 하지 않았고, **respx 테스트로만 CODEF 연동을 검증했다**. 실제 CODEF·LLM·증권사를 호출하는 테스트는 없다.
+- 브라우저 검증 프로필·탭은 정리하고 띄운 서버는 `scripts/stop.sh`로 종료했다.
+
+### 남은 일
+
+- 코디네이터의 별도 검증과 PR 병합. 키가 제공된 환경에서의 CODEF 실제 샌드박스·데모 및 기관별 아이디 로그인 확인은 이 작업에서 실행하지 않았다.
