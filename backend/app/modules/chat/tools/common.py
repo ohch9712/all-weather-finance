@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -26,7 +25,6 @@ from app.modules.chat.tools.registry import ToolOutput
 KRX_MARKETS = frozenset({"KOSPI", "KOSDAQ", "KONEX"})
 MARKET_LABEL = {"KOSPI": "코스피", "KOSDAQ": "코스닥", "KONEX": "코넥스"}
 NO_ARGUMENTS = "인자 없이 빈 객체({})로 부른다."
-COMPACT_EOK = re.compile(r"(-?)(\d+)(\.\d)?억원")
 
 
 class ToolInput(BaseModel):
@@ -96,13 +94,7 @@ def krw_compact(value: int | None) -> str | None:
     """`5,670만원`, `1.2억원`, `12,756억원`(프론트 formatKRWCompact와 같은 모양)"""
     if value is None:
         return None
-    text = format_krw_compact(value)
-    # core의 억 단위 정수부에는 쉼표가 없어(`12756억원`) 프론트 규칙(`12,756억원`)에 맞춘다.
-    match = COMPACT_EOK.fullmatch(text)
-    if match is None:
-        return text
-    sign, whole, fraction = match.groups()
-    return f"{sign}{int(whole):,}{fraction or ''}억원"
+    return format_krw_compact(value)
 
 
 def money(value: Decimal | str | None, currency: str) -> str | None:

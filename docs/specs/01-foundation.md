@@ -696,3 +696,12 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 #### 남은 일
 
 - 코디네이터의 별도 검증과 PR 병합.
+
+### 웨이브 4 통합 검증 수정
+
+- 경미 F2: `format_krw_compact`의 억 단위 정수부에 천 단위 쉼표를 넣었다. 소수 첫째 자리 `ROUND_HALF_UP`, `.0` 생략, 음수 부호와 만·원 단위 규칙은 유지한다.
+- `tests/foundation/test_core.py`의 `test_format_compact`에 `1275600000000` → `12,756억원`, `123456789012` → `1,234.6억원`을 추가했다. 기존 음수 검사로 두 값의 음수도 확인한다. 수정 전에는 새 예시 2개가 실패했고 수정 후에는 통과한다.
+- 코디네이터가 허용한 범위에서 챗봇 `tools/common.py`의 억 단위 보정 정규식과 `re` import를 제거했다. `krw_compact`는 `None` 처리 후 공용 함수 결과를 그대로 반환하며 기존 챗봇 카드 기대값은 유지한다. 프론트는 수정하지 않았다.
+- 검사: `scripts/worktree-setup.sh` 성공(슬롯 01), 백엔드 `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 전체 **1,357개 통과**(기존 Starlette 경고 1건). 실제 외부 API·LLM 호출 없음.
+- 실제 서버: `scripts/start.sh backend`로 슬롯 01 서버를 띄우고 검증 전용 사용자로 가입·프로필·투자성향·자산을 입력했다. `GET /api/allocation/recommendation`이 200으로 `장기 투자 몫: 12,756억원`과 대출 안내의 `1,234.6억원`을 반환했다. 검증 데이터는 삭제하고 `scripts/stop.sh`로 서버를 종료했다.
+- 스펙과 다른 점·의존성 추가: 없음. 남은 일: 코디네이터의 별도 검증과 PR 병합.
