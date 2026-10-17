@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { ComingSoon } from "@/components/common/ComingSoon";
+import { WatchlistPage } from "@/features/watchlist/components/WatchlistPage";
 
 export const metadata: Metadata = { title: "관심종목" };
 
-export default function WatchlistPage() {
-  return <ComingSoon title="관심종목" taskId="12" />;
+export default function Page() {
+  return <WatchlistPage />;
 }
