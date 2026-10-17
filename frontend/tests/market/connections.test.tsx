@@ -39,8 +39,9 @@ describe("증권사 연결", () => {
       }),
     );
     const { user } = renderWithProviders(<BrokerConnectionsSection allowMock />, { auth: authPayload() });
-    expect(await screen.findByText("203.0.113.7")).toBeInTheDocument();
     expect(await screen.findByText("종목 80개")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "서버 공인 IP 확인" }));
+    expect(await screen.findByText("203.0.113.7")).toBeInTheDocument();
     expect(screen.getByLabelText(/샘플 데이터:/)).toBeInTheDocument();
     expect(screen.getByText("증권사 연동은 조회만 합니다. 주문은 할 수 없습니다.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "연결 추가" }));
@@ -87,6 +88,7 @@ describe("증권사 연결", () => {
       http.post(apiUrl("/api/market/connections"), () => errorResponse(409, "CONFLICT", "이미 사용 중인 연결 별칭입니다.")),
     );
     const { user } = renderWithProviders(<BrokerConnectionsSection allowMock />, { auth: authPayload() });
+    await user.click(screen.getByRole("button", { name: "서버 공인 IP 확인" }));
     expect(await screen.findByText("확인할 수 없음")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "연결 추가" }));
     await user.type(screen.getByLabelText("별칭"), "중복");
@@ -95,5 +97,50 @@ describe("증권사 연결", () => {
     await user.click(screen.getByRole("button", { name: "연결 저장" }));
     await waitFor(() => expect(screen.getByText("이미 사용 중인 연결 별칭입니다.")).toBeInTheDocument());
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("서버 공인 IP는 화면 진입 시 부르지 않고 버튼을 누를 때 한 번만 부른다", async () => {
+    let calls = 0;
+    let release!: () => void;
+    const responded = new Promise<void>((resolve) => { release = resolve; });
+    server.use(http.get(apiUrl("/api/market/connections/egress-ip"), async () => {
+      calls += 1;
+      await responded;
+      return HttpResponse.json({ ip: "203.0.113.7" });
+    }));
+    const { user } = renderWithProviders(<BrokerConnectionsSection allowMock />, { auth: authPayload() });
+    expect(await screen.findByText("종목 80개")).toBeInTheDocument();
+    expect(await screen.findByText("아직 연결한 증권사가 없어요")).toBeInTheDocument();
+    expect(screen.getByText("버튼을 누르면 확인합니다")).toBeInTheDocument();
+    expect(calls).toBe(0);
+
+    const button = screen.getByRole("button", { name: "서버 공인 IP 확인" });
+    await user.click(button);
+    expect(await screen.findByText("확인 중…")).toBeInTheDocument();
+    expect(button).toBeDisabled();
+    release();
+    expect(await screen.findByText("203.0.113.7")).toBeInTheDocument();
+    expect(calls).toBe(1);
+
+    // 받은 결과는 이 화면에 머무는 동안 다시 부르지 않는다.
+    expect(button).toBeDisabled();
+    await user.click(button);
+    expect(calls).toBe(1);
+  });
+
+  it("IP 조회 요청이 실패하면 확인할 수 없음을 보여 주고 다시 시도할 수 있다", async () => {
+    let calls = 0;
+    server.use(http.get(apiUrl("/api/market/connections/egress-ip"), () => {
+      calls += 1;
+      return calls === 1 ? errorResponse(500, "INTERNAL_ERROR", "서버 오류가 발생했습니다.") : HttpResponse.json({ ip: "203.0.113.7" });
+    }));
+    const { user } = renderWithProviders(<BrokerConnectionsSection allowMock />, { auth: authPayload() });
+    const button = screen.getByRole("button", { name: "서버 공인 IP 확인" });
+    await user.click(button);
+    expect(await screen.findByText("확인할 수 없음")).toBeInTheDocument();
+    expect(button).toBeEnabled();
+    await user.click(button);
+    expect(await screen.findByText("203.0.113.7")).toBeInTheDocument();
+    expect(calls).toBe(2);
   });
 });

@@ -5,7 +5,9 @@ import { marketApi } from "./api";
 const connectionsKey = ["market", "connections"];
 export const useConnections = () => useQuery({ queryKey: connectionsKey, queryFn: marketApi.connections });
 export const useSnapshotStatus = () => useQuery({ queryKey: ["market", "snapshot"], queryFn: marketApi.snapshotStatus });
-export const useEgressIp = () => useQuery({ queryKey: ["market", "egress-ip"], queryFn: marketApi.egressIp, staleTime: Infinity, retry: false });
+// 외부 IP 조회 서비스를 부르므로 화면 진입 시 자동 조회하지 않고 버튼을 누를 때만 부른다(스펙 08 9절).
+// 상태는 컴포넌트에 머물러 화면을 떠나면 사라진다.
+export const useEgressIp = () => useMutation({ mutationFn: marketApi.egressIp });
 export function useConnectionActions() {
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: connectionsKey });
