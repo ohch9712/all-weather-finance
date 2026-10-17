@@ -94,7 +94,7 @@
 | `dedup_hash` | `varchar(64)` | NULL. 11이 채운다 |
 | `created_at`, `updated_at` | `timestamptz` | NOT NULL |
 
-인덱스 `(user_id, traded_at)`, `(user_id, symbol_code)`, 부분 유일 `(user_id, dedup_hash) WHERE dedup_hash IS NOT NULL`. 11이 `journal_0002`에서 `connection_id`, `external_id`, `synced_at`을 추가한다.
+인덱스 `(user_id, traded_at)`, `(user_id, symbol_code)`, 부분 유일 `(user_id, dedup_hash) WHERE dedup_hash IS NOT NULL`. 05b가 `journal_0002`에서 `cost_estimated`와 `trade_cost_settings`를, 11이 `journal_0003`에서 `connection_id`, `external_id`, `synced_at`을 추가한다.
 
 ### 6.2 `trade_notes`
 
@@ -229,7 +229,8 @@ def get_trade_stats(db, user_id, start: date | None = None, end: date | None = N
 
 ## 13. 다음 단계 연결점
 
-- 11: `journal_trades` 임포트 종류, 증권사 체결 동기화(`journal_0002`), 보유 탭의 현재가·평가손익(08의 `get_quotes`).
+- 05b: 수수료·세금 기본 요율 설정과 추정(`journal_0002`).
+- 11: `journal_trades` 임포트 종류, 증권사 체결 동기화(`journal_0003`), 보유 탭의 현재가·평가손익(08의 `get_quotes`).
 - 15·16: `get_positions`, `get_trade_stats`.
 
 ## 구현 결과

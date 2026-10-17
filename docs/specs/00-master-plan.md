@@ -87,7 +87,8 @@
 | 2 | 08 증권사 게이트웨이·종목 마스터·시세·스냅샷 배치 | `feature/08-market` | 01 | codex |
 | 2 | 09 AI 챗봇 코어(공급자 어댑터·에이전트 루프·SSE·채팅 UI) | `feature/09-chat-core` | 01 | claude |
 | 3 | 10 카드 명세서 업로드·자동 분류 | `feature/10-ledger-import` | 03, 04 | codex |
-| 3 | 11 매매내역 업로드 + 증권사 체결 동기화 | `feature/11-journal-sync` | 04, 05, 08 | codex |
+| 3 | 05b 매매 수수료·세금 기본 요율 설정과 추정 | `feature/05-journal-costs` | 05, 08b | codex |
+| 3 | 11 매매내역 업로드 + 증권사 체결 동기화 | `feature/11-journal-sync` | 04, 05, 05b, 08, 08b | codex |
 | 3 | 08b 종목 마스터에 국내 ETF 추가 | `feature/08-market-etf` | 08 | codex |
 | 3 | 12 관심종목·종목 상세 | `feature/12-watchlist` | 08, 08b | claude |
 | 3 | 13 AI 조건검색(필터 DSL·자연어 해석·결과 화면) | `feature/13-screener` | 08, 08b | codex |
@@ -171,10 +172,12 @@
 
 - 종목 검색·관심종목·조건검색의 대상은 **국내 주식 + 국내 ETF**다. 미국 주식·ETF는 별도 작업으로 미룬다(번호 미정). 키움 REST API 공식 명세(`Kiwoom-Securities/Kiwoom-REST-API` 커밋 `953e5db`)에 국내 ETF 목록(`ka10099` `mrkt_tp=8`)·ETF 전용 API(`ka40001`~`ka40010`)와 미국주식 API(`usa*`, 129개)가 있음을 확인했다.
 - 키움 REST API 키는 배포 서버(고정 IP)를 정한 뒤 발급한다. 그때까지 개발·검증은 Mock으로 한다.
+- 체결 수수료·세금 기본값은 키움증권 기준(국내주식 매매수수료 0.015%, 국내주식 매도 거래세 0.20%, 미국주식 매매수수료 0.25%)으로 두고, 증권사 이벤트 등으로 바뀔 수 있으니 사용자가 설정에서 바꿀 수 있게 한다. 국내 ETF 매도에는 거래세를 붙이지 않는다(증권거래세 비과세, 코디네이터 반영).
 
 반영
 
 1. 후속 작업 08b(`docs/specs/08b-market-etf.md`, 브랜치 `feature/08-market-etf`)를 만들고 12·13의 선행에 넣었다.
+1-2. 후속 작업 05b(`docs/specs/05b-journal-costs.md`, 브랜치 `feature/05-journal-costs`, revision `journal_0002`)를 만들고 11의 선행에 넣었다. 11의 revision은 `journal_0003`으로 미뤘다. 08b에서 `Execution.fee`·`tax`를 None 허용(증권사 미제공)으로 바꿔 11이 사용자 요율로 추정한다.
 2. 웨이브 2 진행 중 코디네이터가 고친 공통 계약: `AppError`의 `details`와 `field_error`(architecture 4.1), 숫자 뒤 소문자 필드 별칭 규칙(architecture 4), 08 `BrokerHolding.eval_amount: int | None`(원화 평가금액이 없는 외화 보유분), 백엔드 직접 의존성 `pyyaml`(07 시드 앞머리), 구조 테스트의 SSE 클라이언트 예외(09 `sse.ts`), 06 기타친족 범위를 2025-03-14 개정 상증세법(법률 제20777호)으로 갱신.
 
 ## 재사용할 기존 코드 (gamja-market, 사용자 본인 프로젝트)
