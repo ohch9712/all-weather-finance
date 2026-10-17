@@ -133,10 +133,10 @@ export function groupByDate(entries: Entry[]): DayGroup[] {
       group = { date: entry.occurredOn, income: 0, expense: 0, entries: [] };
       groups.push(group);
     }
-    group[entry.kind] += entry.amount;
+    group[entry.kind] += entry.kind === "expense" && entry.isCancellation ? -entry.amount : entry.amount;
     group.entries.push(entry);
   }
-  return groups;
+  return groups.map((group) => ({ ...group, expense: Math.max(0, group.expense) }));
 }
 
 export interface DonutSlice {

@@ -72,6 +72,7 @@ describe("금액 입력", () => {
 
 function entry(overrides: Partial<Entry>): Entry {
   return {
+    cardName: null, approvalNo: null, isCancellation: false, importBatchId: null,
     id: "e",
     kind: "expense",
     occurredOn: "2026-10-15",
@@ -100,6 +101,15 @@ describe("목록·차트 데이터", () => {
       ["2026-10-15", 50_000, 3000, 3],
       ["2026-10-14", 0, 500, 1],
     ]);
+  });
+
+  it("취소를 빼고 취소만 있는 날의 지출은 0으로 표시한다", () => {
+    const groups = groupByDate([
+      entry({ amount: 5000 }),
+      entry({ amount: 2000, isCancellation: true }),
+      entry({ occurredOn: "2026-10-14", amount: 9000, isCancellation: true }),
+    ]);
+    expect(groups.map((group) => group.expense)).toEqual([3000, 0]);
   });
 
   it("지출 카테고리를 상위 6개와 '그 외'로 나눈다", () => {

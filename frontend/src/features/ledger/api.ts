@@ -1,3 +1,4 @@
+import type { ImportJob } from "@/features/imports";
 import { apiFetch } from "@/lib/api-client";
 import type { Page } from "@/types/api";
 import type {
@@ -29,7 +30,9 @@ export async function deleteCategory(id: string): Promise<void> {
 
 /** 빈 필터는 보내지 않는다. */
 export function getEntries(params: EntryListParams): Promise<Page<Entry>> {
-  const search = new URLSearchParams({ month: params.month });
+  const search = new URLSearchParams();
+  if (params.importBatchId) search.set("importBatchId", params.importBatchId);
+  else search.set("month", params.month);
   if (params.kind) search.set("kind", params.kind);
   if (params.categoryId) search.set("categoryId", params.categoryId);
   if (params.q) search.set("q", params.q);
@@ -56,4 +59,36 @@ export function getSummary(month: string): Promise<MonthlySummary> {
 
 export function getTrend(months: number): Promise<Trend> {
   return apiFetch<Trend>(`/api/ledger/trend?months=${months}`);
+}
+
+
+export function extractStatement(file: File, consent: boolean): Promise<ImportJob> {
+  const body = new FormData();
+  body.set("file", file);
+  body.set("consent", String(consent));
+  return apiFetch<ImportJob>("/api/ledger/import/extract", { method: "POST", body });
+}
+
+export function getImportJob(id: string): Promise<ImportJob> {
+  return apiFetch<ImportJob>(`/api/imports/jobs/${id}`);
+}
+
+export function mapExtractedJob(id: string, mapping: ImportJob["mapping"]): Promise<ImportJob> {
+  return apiFetch<ImportJob>(`/api/imports/jobs/${id}/mapping`, { method: "PUT", body: JSON.stringify({ mapping }) });
+}
+
+export function previewExtractedJob(id: string, page: number, onlyInvalid: boolean): Promise<NonNullable<ImportJob["preview"]>> {
+  return apiFetch(`/api/imports/jobs/${id}/preview?page=${page}&pageSize=50&onlyInvalid=${onlyInvalid}`);
+}
+
+export function commitExtractedJob(id: string, skipInvalid: boolean): Promise<ImportJob> {
+  return apiFetch<ImportJob>(`/api/imports/jobs/${id}/commit`, { method: "POST", body: JSON.stringify({ skipInvalid }) });
+}
+
+export function deleteExtractedJob(id: string): Promise<void> {
+  return apiFetch<void>(`/api/imports/jobs/${id}`, { method: "DELETE" });
+}
+
+export function saveMerchantRule(input: { merchant: string; categoryId: string; applyToExisting: boolean }): Promise<{ updatedCount: number }> {
+  return apiFetch("/api/ledger/merchant-rules", { method: "POST", body: JSON.stringify(input) });
 }

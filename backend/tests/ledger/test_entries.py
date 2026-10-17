@@ -16,6 +16,10 @@ ENTRY_FIELDS = {
     "paymentMethod",
     "memo",
     "source",
+    "cardName",
+    "approvalNo",
+    "isCancellation",
+    "importBatchId",
     "createdAt",
     "updatedAt",
 }

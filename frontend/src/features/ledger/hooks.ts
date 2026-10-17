@@ -13,7 +13,9 @@ import {
   renameCategory,
   updateEntry,
 } from "./api";
-import type { EntryInput, EntryListParams } from "./types";
+import type { ImportJob } from "@/features/imports";
+import * as importApi from "./api";
+import type { Entry, EntryInput, EntryListParams } from "./types";
 
 export const ledgerKeys = {
   all: ["ledger"] as const,
@@ -26,13 +28,21 @@ export const ledgerKeys = {
   trend: (months: number) => ["ledger", "trend", months] as const,
 };
 
-/** 내역이 바뀌면 목록·요약·추이를 다시 불러온다. */
-function invalidateEntryData(queryClient: QueryClient) {
+/** 저장·분류 변경 후 목록·요약·추이·카테고리를 함께 갱신한다. */
+function invalidateLedgerData(queryClient: QueryClient) {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: ledgerKeys.entries() }),
     queryClient.invalidateQueries({ queryKey: ledgerKeys.summaries() }),
     queryClient.invalidateQueries({ queryKey: ledgerKeys.trends() }),
+    queryClient.invalidateQueries({ queryKey: ledgerKeys.categories() }),
   ]);
+}
+
+
+/** 두 업로드 탭이 같은 갱신을 마친 뒤 리뷰로 이동할 때 사용한다. */
+export function useInvalidateLedgerData() {
+  const queryClient = useQueryClient();
+  return () => invalidateLedgerData(queryClient);
 }
 
 export function useCategories() {
@@ -60,7 +70,7 @@ export function useSaveEntry() {
   return useMutation({
     mutationFn: ({ id, input }: { id?: string; input: EntryInput }) =>
       id ? updateEntry(id, input) : createEntry(input),
-    onSuccess: () => invalidateEntryData(queryClient),
+    onSuccess: () => invalidateLedgerData(queryClient),
   });
 }
 
@@ -68,7 +78,7 @@ export function useDeleteEntry() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: deleteEntry,
-    onSuccess: () => invalidateEntryData(queryClient),
+    onSuccess: () => invalidateLedgerData(queryClient),
   });
 }
 
@@ -91,4 +101,40 @@ export function useRenameCategory() {
 
 export function useDeleteCategory() {
   return useCategoryMutation(deleteCategory);
+}
+
+
+export function useExtractStatement() {
+  return useMutation({ mutationFn: ({ file, consent }: { file: File; consent: boolean }) => importApi.extractStatement(file, consent) });
+}
+
+export function useLedgerImportJob(id?: string) {
+  return useQuery({ queryKey: ["ledger", "import", id], queryFn: () => importApi.getImportJob(id!), enabled: !!id, retry: false });
+}
+
+export function useExtractedPreview(id: string | undefined, page: number, onlyInvalid: boolean) {
+  return useQuery({ queryKey: ["ledger", "import-preview", id, page, onlyInvalid], queryFn: () => importApi.previewExtractedJob(id!, page, onlyInvalid), enabled: !!id, retry: false });
+}
+
+export function useMapExtractedJob() {
+  return useMutation({ mutationFn: ({ id, mapping }: { id: string; mapping: ImportJob["mapping"] }) => importApi.mapExtractedJob(id, mapping) });
+}
+
+export function useCommitExtractedJob() {
+  return useMutation({ mutationFn: ({ id, skipInvalid }: { id: string; skipInvalid: boolean }) => importApi.commitExtractedJob(id, skipInvalid) });
+}
+
+export function useDeleteExtractedJob() {
+  return useMutation({ mutationFn: importApi.deleteExtractedJob });
+}
+
+export function useReviewCategory() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ entry, categoryId, all }: { entry: Entry; categoryId: string; all: boolean }) => {
+      if (all && entry.merchant) return importApi.saveMerchantRule({ merchant: entry.merchant, categoryId, applyToExisting: true });
+      return updateEntry(entry.id, { categoryId });
+    },
+    onSuccess: () => invalidateLedgerData(client),
+  });
 }

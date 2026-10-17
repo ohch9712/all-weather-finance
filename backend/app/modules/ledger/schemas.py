@@ -132,6 +132,10 @@ class EntryOut(CamelModel):
     merchant: str | None
     payment_method: PaymentMethod
     memo: str | None
+    card_name: str | None
+    approval_no: str | None
+    is_cancellation: bool
+    import_batch_id: UUID | None
     source: Literal["manual", "import", "codef"]
     created_at: datetime
     updated_at: datetime
@@ -184,3 +188,43 @@ class MonthlySummary(CamelModel):
 
 class TrendOut(CamelModel):
     items: list[MonthTotals]
+
+
+class MerchantRuleInput(CamelModel):
+    merchant: Annotated[str, Field(min_length=1, max_length=100)]
+    category_id: UUID
+    apply_to_existing: bool = False
+
+
+class MerchantRuleOut(CamelModel):
+    id: UUID
+    merchant_key: str
+    category_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    @field_serializer("created_at", "updated_at")
+    def serialize_timestamp(self, value: datetime) -> str:
+        return to_utc_text(value)
+
+
+class MerchantRuleList(CamelModel):
+    items: list[MerchantRuleOut]
+
+
+class MerchantRuleSaved(MerchantRuleOut):
+    updated_count: int
+
+
+class ExtractTransaction(CamelModel):
+    occurred_on: date
+    merchant: Annotated[str, Field(min_length=1, max_length=100)]
+    amount: Annotated[int, Field(strict=True, ge=-MAX_AMOUNT, le=MAX_AMOUNT)]
+    is_cancellation: bool
+    card_name: Annotated[str | None, Field(max_length=50)] = None
+    approval_no: Annotated[str | None, Field(max_length=30)] = None
+
+
+class ExtractOutput(CamelModel):
+    transactions: list[ExtractTransaction]
+    warnings: list[str]
