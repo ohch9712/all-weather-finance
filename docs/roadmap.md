@@ -24,6 +24,7 @@ flowchart LR
   subgraph W3[웨이브 3 연동]
     T10[10 카드 명세서]
     T11[11 매매 동기화]
+    T08b[08b 국내 ETF]
     T12[12 관심종목]
     T13[13 AI 조건검색]
     T14[14 잔고 반영]
@@ -40,8 +41,9 @@ flowchart LR
   T04 --> T11
   T05 --> T11
   T08 --> T11
-  T08 --> T12
-  T08 --> T13
+  T08 --> T08b
+  T08b --> T12
+  T08b --> T13
   T02 --> T14
   T08 --> T14
   T09 --> T15
@@ -69,11 +71,12 @@ flowchart LR
 | 06 | `feature/06-estate` | `06-estate.md` | codex | 01 |
 | 07 | `feature/07-learn` | `07-learn.md` | claude | 01 |
 | 08 | `feature/08-market` | `08-market.md` | codex | 01 |
+| 08b | `feature/08-market-etf`(08 워크트리·슬롯 08 재사용) | `08b-market-etf.md` | codex | 08 |
 | 09 | `feature/09-chat-core` | `09-chat-core.md` | claude | 01 |
 | 10 | `feature/10-ledger-import` | `10-ledger-import.md` | codex | 03, 04 |
 | 11 | `feature/11-journal-sync` | `11-journal-sync.md` | codex | 04, 05, 08 |
-| 12 | `feature/12-watchlist` | `12-watchlist.md` | claude | 08 |
-| 13 | `feature/13-screener` | `13-screener.md` | codex | 08 |
+| 12 | `feature/12-watchlist` | `12-watchlist.md` | claude | 08, 08b |
+| 13 | `feature/13-screener` | `13-screener.md` | codex | 08, 08b |
 | 14 | `feature/14-holdings-sync` | `14-holdings-sync.md` | codex | 02, 08 |
 | 15 | `feature/15-chat-tools` | `15-chat-tools.md` | claude | 09, 02, 03, 05, 06, 07, 12, 13 |
 | 16 | `feature/16-dashboard` | `16-dashboard.md` | claude | 02, 03, 05, 06, 07, 12 |

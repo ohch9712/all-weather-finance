@@ -3,6 +3,7 @@
 > 웨이브 3 · 브랜치 `feature/12-watchlist` · 구현 claude · 검증 codex `gpt-6.1-sol` / `xhigh`
 > 선행: 08(증권사 게이트웨이)이 develop에 병합된 상태. 07의 용어 slug를 링크로 쓴다.
 > **착수 직전 갱신**: 코디네이터는 08의 실제 응답 형식(`StockDetail`, `Quote`, 캔들)과 이 문서를 대조한다.
+> **ETF(08b)**: 종목에 `kind`(`stock`·`etf`)가 생긴다. 착수 전에 08b 결과에 맞춰 반영한다: 검색 결과·관심종목 행·상세 머리에 ETF 배지, ETF는 PER·PBR·ROE·EPS·BPS·외국인 비율이 null이므로 "—"로 보이고 지표 "?" 링크 대신 `/learn/etf`를 연결, 관심종목 담기는 ETF도 허용.
 
 ## 1. 목표
 

@@ -88,8 +88,9 @@
 | 2 | 09 AI 챗봇 코어(공급자 어댑터·에이전트 루프·SSE·채팅 UI) | `feature/09-chat-core` | 01 | claude |
 | 3 | 10 카드 명세서 업로드·자동 분류 | `feature/10-ledger-import` | 03, 04 | codex |
 | 3 | 11 매매내역 업로드 + 증권사 체결 동기화 | `feature/11-journal-sync` | 04, 05, 08 | codex |
-| 3 | 12 관심종목·종목 상세 | `feature/12-watchlist` | 08 | claude |
-| 3 | 13 AI 조건검색(필터 DSL·자연어 해석·결과 화면) | `feature/13-screener` | 08 | codex |
+| 3 | 08b 종목 마스터에 국내 ETF 추가 | `feature/08-market-etf` | 08 | codex |
+| 3 | 12 관심종목·종목 상세 | `feature/12-watchlist` | 08, 08b | claude |
+| 3 | 13 AI 조건검색(필터 DSL·자연어 해석·결과 화면) | `feature/13-screener` | 08, 08b | codex |
 | 3 | 14 증권사 잔고 → 자산 자동 반영 | `feature/14-holdings-sync` | 02, 08 | codex |
 | 4 | 15 챗봇 도구 통합(전 모듈) + 결과 카드 UI | `feature/15-chat-tools` | 09, 02, 03, 05, 06, 07, 12, 13 | claude |
 | 4 | 16 홈 대시보드 | `feature/16-dashboard` | 02, 03, 05, 12 | claude |
@@ -163,6 +164,18 @@
 4. LLM: 개인 금융 데이터가 들어가는 작업(챗봇, 카드·증권 파일 처리)은 Gemini 무료 등급 약관상 보내면 안 되므로 **로컬 Ollama가 기본**이다. 개인 데이터가 없는 작업(학습 글 초안, 조건 문장 해석)만 Gemini로 보낸다. 결제가 연결된 Gemini 키가 있으면 개인 작업도 Gemini로 바꿀 수 있다. Claude는 예약값으로 남기고, 이전 호출 형태는 커밋 `5560c39`에 있다. Anthropic 전용 기능(서버 측 거절 폴백, 캐시 표시, eager 도구 입력 스트리밍)은 함께 뺐다.
 5. Gemini 챗봇은 라운드 단위로 받는다. Interactions 스트리밍의 도구 인자 조각 형식이 공식 문서(`arguments`·`partial_arguments`)와 SDK 2.31 소스(`arguments_delta`·`arguments`)에서 달라 이번 범위에서는 쓰지 않는다.
 6. 01a에 `core/format.py`(서버 금액 문장), `GET /api/ai/status`, 의존성 `google-genai`·`ollama`·`pypdfium2`·`pillow`(`anthropic` 제외)를, 01b에 `AiProviderBadge`·`useAiStatus`를 넣었다. 1웨이브 브랜치는 커밋이 없어 이 변경이 든 `develop`으로 빨리 감기(fast-forward)했다.
+
+### 2026-10-17: 종목 범위에 국내 ETF 추가, 웨이브 2 진행 중 계약 보완
+
+사용자 결정
+
+- 종목 검색·관심종목·조건검색의 대상은 **국내 주식 + 국내 ETF**다. 미국 주식·ETF는 별도 작업으로 미룬다(번호 미정). 키움 REST API 공식 명세(`Kiwoom-Securities/Kiwoom-REST-API` 커밋 `953e5db`)에 국내 ETF 목록(`ka10099` `mrkt_tp=8`)·ETF 전용 API(`ka40001`~`ka40010`)와 미국주식 API(`usa*`, 129개)가 있음을 확인했다.
+- 키움 REST API 키는 배포 서버(고정 IP)를 정한 뒤 발급한다. 그때까지 개발·검증은 Mock으로 한다.
+
+반영
+
+1. 후속 작업 08b(`docs/specs/08b-market-etf.md`, 브랜치 `feature/08-market-etf`)를 만들고 12·13의 선행에 넣었다.
+2. 웨이브 2 진행 중 코디네이터가 고친 공통 계약: `AppError`의 `details`와 `field_error`(architecture 4.1), 숫자 뒤 소문자 필드 별칭 규칙(architecture 4), 08 `BrokerHolding.eval_amount: int | None`(원화 평가금액이 없는 외화 보유분), 백엔드 직접 의존성 `pyyaml`(07 시드 앞머리), 구조 테스트의 SSE 클라이언트 예외(09 `sse.ts`), 06 기타친족 범위를 2025-03-14 개정 상증세법(법률 제20777호)으로 갱신.
 
 ## 재사용할 기존 코드 (gamja-market, 사용자 본인 프로젝트)
 
