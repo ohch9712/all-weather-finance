@@ -1,0 +1,206 @@
+from dataclasses import dataclass
+from datetime import date
+from uuid import UUID
+
+from sqlalchemy import Select, desc, func, or_, select, update
+from sqlalchemy.orm import Session
+
+from app.core.time import now_utc
+from app.modules.ledger.models import LedgerCategory, LedgerEntry
+
+# ── 카테고리 ─────────────────────────────────────────────────────────
+
+
+def visible_to(user_id: UUID):
+    """기본 카테고리와 내 카테고리"""
+    return or_(LedgerCategory.user_id.is_(None), LedgerCategory.user_id == user_id)
+
+
+def list_categories(db: Session, user_id: UUID) -> list[LedgerCategory]:
+    return list(
+        db.scalars(
+            select(LedgerCategory)
+            .where(visible_to(user_id))
+            .order_by(
+                LedgerCategory.kind,
+                LedgerCategory.user_id.is_not(None),
+                LedgerCategory.sort_order,
+                LedgerCategory.name,
+            )
+        )
+    )
+
+
+def find_visible_category(db: Session, user_id: UUID, category_id: UUID) -> LedgerCategory | None:
+    return db.scalar(
+        select(LedgerCategory).where(LedgerCategory.id == category_id, visible_to(user_id))
+    )
+
+
+def find_default_category(db: Session, kind: str, name: str) -> LedgerCategory | None:
+    return db.scalar(
+        select(LedgerCategory).where(
+            LedgerCategory.user_id.is_(None),
+            LedgerCategory.kind == kind,
+            LedgerCategory.name == name,
+        )
+    )
+
+
+def category_name_taken(
+    db: Session, user_id: UUID, kind: str, name: str, exclude_id: UUID | None = None
+) -> bool:
+    query = select(LedgerCategory.id).where(
+        visible_to(user_id), LedgerCategory.kind == kind, LedgerCategory.name == name
+    )
+    if exclude_id is not None:
+        query = query.where(LedgerCategory.id != exclude_id)
+    return db.scalar(query.limit(1)) is not None
+
+
+def move_entries(db: Session, user_id: UUID, from_id: UUID, to_id: UUID) -> None:
+    db.execute(
+        update(LedgerEntry)
+        .where(LedgerEntry.user_id == user_id, LedgerEntry.category_id == from_id)
+        .values(category_id=to_id, updated_at=now_utc())
+        .execution_options(synchronize_session=False)
+    )
+
+
+# ── 내역 ────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class EntryFilter:
+    start: date
+    end: date
+    kind: str | None = None
+    category_id: UUID | None = None
+    q: str | None = None
+
+
+def escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _filtered(query: Select, user_id: UUID, flt: EntryFilter) -> Select:
+    query = query.where(
+        LedgerEntry.user_id == user_id,
+        LedgerEntry.occurred_on >= flt.start,
+        LedgerEntry.occurred_on <= flt.end,
+    )
+    if flt.kind is not None:
+        query = query.where(LedgerEntry.kind == flt.kind)
+    if flt.category_id is not None:
+        query = query.where(LedgerEntry.category_id == flt.category_id)
+    if flt.q:
+        pattern = f"%{escape_like(flt.q)}%"
+        query = query.where(
+            or_(
+                LedgerEntry.merchant.ilike(pattern, escape="\\"),
+                LedgerEntry.memo.ilike(pattern, escape="\\"),
+            )
+        )
+    return query
+
+
+def count_entries(db: Session, user_id: UUID, flt: EntryFilter) -> int:
+    return db.scalar(_filtered(select(func.count(LedgerEntry.id)), user_id, flt)) or 0
+
+
+def list_entries(
+    db: Session, user_id: UUID, flt: EntryFilter, *, offset: int, limit: int
+) -> list[LedgerEntry]:
+    return list(
+        db.scalars(
+            _filtered(select(LedgerEntry), user_id, flt)
+            .order_by(
+                desc(LedgerEntry.occurred_on), desc(LedgerEntry.created_at), desc(LedgerEntry.id)
+            )
+            .offset(offset)
+            .limit(limit)
+        )
+    )
+
+
+def find_entry(db: Session, user_id: UUID, entry_id: UUID) -> LedgerEntry | None:
+    return db.scalar(
+        select(LedgerEntry).where(LedgerEntry.id == entry_id, LedgerEntry.user_id == user_id)
+    )
+
+
+def add(db: Session, entity) -> None:
+    db.add(entity)
+    db.flush()
+
+
+def remove(db: Session, entity) -> None:
+    db.delete(entity)
+    db.flush()
+
+
+# ── 집계 ────────────────────────────────────────────────────────────
+
+
+def _in_range(user_id: UUID, start: date, end: date):
+    return (
+        LedgerEntry.user_id == user_id,
+        LedgerEntry.occurred_on >= start,
+        LedgerEntry.occurred_on <= end,
+    )
+
+
+def totals_by_month(db: Session, user_id: UUID, start: date, end: date) -> dict[str, dict]:
+    """{"YYYY-MM": {"income": 합계, "expense": 합계}}. 내역이 없는 달·종류는 빠진다."""
+    month = func.to_char(LedgerEntry.occurred_on, "YYYY-MM").label("month")
+    rows = db.execute(
+        select(month, LedgerEntry.kind, func.sum(LedgerEntry.amount))
+        .where(*_in_range(user_id, start, end))
+        .group_by(month, LedgerEntry.kind)
+    )
+    result: dict[str, dict] = {}
+    for label, kind, total in rows:
+        result.setdefault(label, {})[kind] = int(total)
+    return result
+
+
+def totals_by_category(db: Session, user_id: UUID, start: date, end: date) -> list[tuple]:
+    """(category_id, name, kind, 합계)"""
+    total = func.sum(LedgerEntry.amount)
+    rows = db.execute(
+        select(LedgerCategory.id, LedgerCategory.name, LedgerEntry.kind, total)
+        .join(LedgerCategory, LedgerCategory.id == LedgerEntry.category_id)
+        .where(*_in_range(user_id, start, end))
+        .group_by(LedgerCategory.id, LedgerCategory.name, LedgerEntry.kind)
+    )
+    return [(category_id, name, kind, int(amount)) for category_id, name, kind, amount in rows]
+
+
+def totals_by_day(db: Session, user_id: UUID, start: date, end: date) -> list[tuple]:
+    """(날짜, kind, 합계)"""
+    rows = db.execute(
+        select(LedgerEntry.occurred_on, LedgerEntry.kind, func.sum(LedgerEntry.amount))
+        .where(*_in_range(user_id, start, end))
+        .group_by(LedgerEntry.occurred_on, LedgerEntry.kind)
+    )
+    return [(day, kind, int(amount)) for day, kind, amount in rows]
+
+
+def top_expense_merchants(
+    db: Session, user_id: UUID, start: date, end: date, limit: int
+) -> list[tuple]:
+    """(사용처, 합계, 건수). 금액 → 건수 → 이름 순"""
+    total = func.sum(LedgerEntry.amount)
+    count = func.count(LedgerEntry.id)
+    rows = db.execute(
+        select(LedgerEntry.merchant, total, count)
+        .where(
+            *_in_range(user_id, start, end),
+            LedgerEntry.kind == "expense",
+            LedgerEntry.merchant.is_not(None),
+        )
+        .group_by(LedgerEntry.merchant)
+        .order_by(desc(total), desc(count), LedgerEntry.merchant)
+        .limit(limit)
+    )
+    return [(merchant, int(amount), int(n)) for merchant, amount, n in rows]

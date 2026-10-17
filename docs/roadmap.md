@@ -24,6 +24,8 @@ flowchart LR
   subgraph W3[웨이브 3 연동]
     T10[10 카드 명세서]
     T11[11 매매 동기화]
+    T05b[05b 수수료·세금 요율]
+    T08b[08b 국내 ETF]
     T12[12 관심종목]
     T13[13 AI 조건검색]
     T14[14 잔고 반영]
@@ -40,8 +42,12 @@ flowchart LR
   T04 --> T11
   T05 --> T11
   T08 --> T11
-  T08 --> T12
-  T08 --> T13
+  T08 --> T08b
+  T05 --> T05b
+  T08b --> T05b
+  T05b --> T11
+  T08b --> T12
+  T08b --> T13
   T02 --> T14
   T08 --> T14
   T09 --> T15
@@ -66,14 +72,16 @@ flowchart LR
 | 03 | `feature/03-ledger` | `03-ledger.md` | claude | 01 |
 | 04 | `feature/04-imports` | `04-imports.md` | codex | 01 |
 | 05 | `feature/05-journal` | `05-journal.md` | codex | 01 |
+| 05b | `feature/05-journal-costs`(05 워크트리·슬롯 05 재사용) | `05b-journal-costs.md` | codex | 05, 08b |
 | 06 | `feature/06-estate` | `06-estate.md` | codex | 01 |
 | 07 | `feature/07-learn` | `07-learn.md` | claude | 01 |
 | 08 | `feature/08-market` | `08-market.md` | codex | 01 |
+| 08b | `feature/08-market-etf`(08 워크트리·슬롯 08 재사용) | `08b-market-etf.md` | codex | 08 |
 | 09 | `feature/09-chat-core` | `09-chat-core.md` | claude | 01 |
 | 10 | `feature/10-ledger-import` | `10-ledger-import.md` | codex | 03, 04 |
-| 11 | `feature/11-journal-sync` | `11-journal-sync.md` | codex | 04, 05, 08 |
-| 12 | `feature/12-watchlist` | `12-watchlist.md` | claude | 08 |
-| 13 | `feature/13-screener` | `13-screener.md` | codex | 08 |
+| 11 | `feature/11-journal-sync` | `11-journal-sync.md` | codex | 04, 05, 05b, 08, 08b |
+| 12 | `feature/12-watchlist` | `12-watchlist.md` | claude | 08, 08b |
+| 13 | `feature/13-screener` | `13-screener.md` | codex | 08, 08b |
 | 14 | `feature/14-holdings-sync` | `14-holdings-sync.md` | codex | 02, 08 |
 | 15 | `feature/15-chat-tools` | `15-chat-tools.md` | claude | 09, 02, 03, 05, 06, 07, 12, 13 |
 | 16 | `feature/16-dashboard` | `16-dashboard.md` | claude | 02, 03, 05, 06, 07, 12 |
@@ -205,8 +213,11 @@ gh pr merge <PR 번호> --merge
 
 ### 4.9 운영 메모 (웨이브 1에서 겪은 일)
 
-- **codex 업데이트 안내**: codex가 새 버전 안내를 띄우면 `worker-start`가 `agent_readiness` 단계에서 `Agent startup blocked: agent-update-prompt`로 실패한다. 실패한 시도는 영수증대로 `worker-release`하고, `~/.codex/version.json`의 `dismissed_version`을 `latest_version`과 같게 적거나(그 버전 건너뛰기) codex를 올린 뒤 `--retry-of`로 다시 띄운다. 디스패치 전에 `npm view @openai/codex version`으로 확인한다.
+- **codex 업데이트 안내**: codex가 새 버전 안내를 띄우면 `worker-start`가 `agent_readiness` 단계에서 `Agent startup blocked: agent-update-prompt`로 실패한다. 실패한 시도는 영수증대로 `worker-release`하고, Orca가 띄우는 codex의 버전 파일(`~/Library/Application Support/orca/codex-accounts/<계정 id>/home/version.json`. `~/.codex/version.json`이 아니다)의 `dismissed_version`을 `latest_version`과 같게 적거나(그 버전 건너뛰기) codex를 올린 뒤 `--retry-of`로 다시 띄운다. 디스패치 전에 `npm view @openai/codex version`으로 확인한다.
 - **슬롯 포트 충돌**: 이 기기에서는 다른 프로젝트가 8000을 쓰고 있다. `scripts/start.sh`는 점유 프로세스를 죽이지 않고 멈춘다(정상). 슬롯 00 통합 검증은 백엔드 8090(`FRONTEND_ORIGIN=http://localhost:3090`)·프론트 3090(`NEXT_PUBLIC_API_BASE_URL=http://localhost:8090`)으로 직접 띄워 진행하고, 디스패치 전에 `lsof -nP -iTCP:<port> -sTCP:LISTEN`으로 확인한다.
+- **localhost 쿠키 충돌**(웨이브 2): 쿠키는 포트를 구분하지 않아서 여러 워크트리 서버가 공용 Orca 브라우저 프로필에서 `finance_session`을 서로 덮어쓴다. 동시에 도는 워커의 화면 확인은 독립 브라우저 컨텍스트(Orca isolated 프로필, Playwright 새 context)에서 로그인한다. 디스패치 spec이나 메시지에 적어 준다.
+- **공개 저장소와 비밀값**(2026-10-17): 저장소가 공개로 바뀌었다. PR 코멘트와 검증 보고서도 공개이므로 비밀값을 쓰지 않는다(AGENTS.md 보안 절). 실제 `GEMINI_API_KEY`는 기본 체크아웃 `backend/.env`에만 있다. 기본 체크아웃에서 도는 통합 검증은 서버를 `LLM_GENERAL_PROVIDER=disabled`·`LLM_PERSONAL_PROVIDER=disabled`로 띄우고 `.env` 내용을 출력하지 않는다고 spec에 적어 준다. GitHub secret scanning·push protection을 켰고, `.git/hooks/pre-commit`(추적하지 않음)이 `.env` 파일·Google 키 형태 문자열·`backend/.env`의 실제 비밀값 커밋을 막는다.
+- **디스크 부족**(웨이브 2): 워크트리마다 `node_modules`·`.venv`가 약 1GB이고 build 산출물도 쌓여, 4개 동시 진행 중 여유 공간이 117MB까지 떨어지고 Docker Desktop(공용 Postgres)이 멈췄다. 디스패치 전에 `df -h /`로 여유 15GB 이상을 확인한다. Docker가 `unable to start`로 멈추면 앱을 종료한 뒤 다시 열거나 재부팅한다.
 - **수정 브랜치**: 통합 검증에서 나온 결함은 그 모듈의 기존 워크트리에서 `git switch -c feature/NN-<slug>-fix-<번호> origin/develop`으로 브랜치를 만들고 `orca worktree show --worktree path:<경로>`로 Orca를 갱신한 뒤 디스패치한다(의존성·DB 슬롯을 다시 쓸 수 있다).
 
 ## 5. 웨이브별 통합 확인 항목 (6.4 블록이 참조)

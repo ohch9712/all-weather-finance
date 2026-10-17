@@ -1,4 +1,5 @@
 import logging
+import re
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -10,14 +11,32 @@ from app.core.config import get_settings
 from app.core.schemas import ErrorBody, ErrorDetail, ErrorResponse
 
 logger = logging.getLogger(__name__)
+_HANGUL = re.compile(r"[가-힣]")
 
 
 class AppError(Exception):
-    def __init__(self, status_code: int, code: str, message: str) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        details: list[ErrorDetail] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
+        self.details = details or []
+
+
+def field_error(field: str, message: str) -> AppError:
+    """필드 하나의 422 VALIDATION_ERROR. field는 camelCase 키나 위치(예: items.0.amount)다."""
+    return AppError(
+        422,
+        "VALIDATION_ERROR",
+        "입력값을 확인해 주세요.",
+        [ErrorDetail(field=field, message=message)],
+    )
 
 
 def error_response(
@@ -36,7 +55,7 @@ def error_response(
 
 
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
-    return error_response(exc.status_code, exc.code, exc.message)
+    return error_response(exc.status_code, exc.code, exc.message, exc.details)
 
 
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -57,6 +76,13 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
             message = "허용 범위를 벗어났습니다."
         elif kind in {"value_error", "password_confirmation"}:
             message = error["msg"].removeprefix("Value error, ")
+            # 라이브러리의 영어 기본 문구는 보내지 않는다. 모듈의 한국어 문구만 통과한다.
+            if not _HANGUL.search(message):
+                message = (
+                    "올바른 이메일 주소를 입력해 주세요."
+                    if "email address" in message
+                    else "형식이 올바르지 않습니다."
+                )
         else:
             message = "형식이 올바르지 않습니다."
         details.append(ErrorDetail(field=field, message=message))

@@ -3,6 +3,7 @@
 > 웨이브 3 · 브랜치 `feature/13-screener` · 구현 codex · 검증 codex `gpt-6.1-sol` / `xhigh`
 > 선행: 08(증권사 게이트웨이)이 develop에 병합된 상태. 결과의 "관심종목 담기"는 12의 `POST /api/watchlist`를 호출한다(병렬 개발이므로 테스트는 MSW로 흉내 낸다).
 > **착수 직전 갱신**: 코디네이터는 08의 `SnapshotRow` 실제 필드와 `## 구현 결과`의 지표 구현 여부(토스는 PER 등 없음)를 확인해 4.1 필드 표를 맞춘다.
+> **ETF(08b)**: `SnapshotRow`에 `kind`(`stock`·`etf`)가 생긴다. 착수 전에 `ScreenFilter`에 `kinds: list[Literal["stock", "etf"]] | None`(없으면 주식만)을 더하고, ETF는 PER·PBR·ROE·EPS·BPS·외국인 비율이 null이라 그 조건에서 자연히 빠진다는 점과 "ETF 중에서 …" 같은 자연어 해석 예를 4절에 반영한다.
 
 ## 1. 목표
 

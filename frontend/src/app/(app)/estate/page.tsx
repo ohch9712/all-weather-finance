@@ -1,8 +1,7 @@
-import type { Metadata } from "next";
-import { ComingSoon } from "@/components/common/ComingSoon";
+import { Suspense } from "react";
+import { LoadingState } from "@/components/common/LoadingState";
+import { EstatePage } from "@/features/estate/components/EstatePage";
 
-export const metadata: Metadata = { title: "상속·증여" };
-
-export default function EstatePage() {
-  return <ComingSoon title="상속·증여" taskId="06" />;
+export default function Page() {
+  return <Suspense fallback={<LoadingState />}><EstatePage /></Suspense>;
 }

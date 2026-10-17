@@ -116,7 +116,7 @@ flowchart LR
 │   │       ├── allocation/                   [02, 14]
 │   │       ├── ledger/                       [03, 10]
 │   │       ├── imports/                      [04]
-│   │       ├── journal/                      [05, 11]
+│   │       ├── journal/                      [05, 05b, 11]
 │   │       ├── estate/                       [06]
 │   │       ├── learn/                        [07]
 │   │       ├── market/                       [08]
@@ -138,10 +138,11 @@ flowchart LR
     │   ├── app/(app)/onboarding/, settings/profile/   [01b]
     │   ├── app/(app)/allocation/             [02, 14]
     │   ├── app/(app)/ledger/                 [03, 10]
-    │   ├── app/(app)/journal/                [05, 11]
+    │   ├── app/(app)/journal/                [05, 05b, 11]
     │   ├── app/(app)/estate/                 [06]
     │   ├── app/(app)/learn/, admin/learn/    [07]
     │   ├── app/(app)/settings/connections/   [08, 17]
+    │   ├── app/(app)/settings/trading-costs/ [05b]
     │   ├── app/(app)/chat/                   [09, 15]
     │   ├── app/(app)/stocks/watchlist/, stocks/[code]/   [12]
     │   ├── app/(app)/stocks/screener/        [13]
@@ -188,6 +189,7 @@ features/<module>/
 
 - 경로는 모두 `/api`로 시작하고 모듈 접두어를 붙인다: `/api/<module>/...`. 예외는 `/api/health`, `/api/auth/*`, `/api/profile`(01a).
 - 요청·응답 JSON 필드는 camelCase다. 백엔드는 `app.core.schemas.CamelModel`(`alias_generator=to_camel`, `populate_by_name=True`)을 상속하고 FastAPI 기본값 `response_model_by_alias=True`를 쓴다.
+  - `to_camel`은 숫자 뒤 글자를 대문자로 바꾼다(`used_within_10y` → `usedWithin10Y`). 스펙의 필드 이름에 숫자 뒤 소문자가 있으면(`usedWithin10y`, `high52w` 등) `Field(alias="usedWithin10y")`로 직접 지정하고, 실제 JSON 키를 테스트로 고정한다. `populate_by_name=True`라서 계약과 다른 키는 오류 없이 무시되니 주의한다.
 - 상태를 바꾸는 요청은 `Content-Type: application/json`만 받는다(`require_json`). 파일 업로드 엔드포인트만 `multipart/form-data`다.
 - 인증은 쿠키 `finance_session`으로만 한다. `HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`, `Secure`는 `COOKIE_SECURE`.
 - ID는 UUID 문자열이다.
@@ -203,6 +205,8 @@ features/<module>/
 ```json
 { "error": { "code": "VALIDATION_ERROR", "message": "입력값을 확인해 주세요.", "details": [{ "field": "birthYear", "message": "..." }] } }
 ```
+
+서비스에서 필드별 422를 내야 하면(스펙의 "422(field …)") `app.core.errors.field_error(field, message)`를 던진다. `field`는 camelCase 키나 위치(예: `items.0.amount`)다. 다른 코드에 `details`가 필요하면 `AppError(status, code, message, details=[ErrorDetail(...)])`를 쓴다. `details`를 주지 않으면 빈 배열이다.
 
 | code | HTTP | 쓰는 곳 |
 | --- | --- | --- |
@@ -252,14 +256,15 @@ features/<module>/
 | ledger | `ledger_entries` | id, user_id, kind, occurred_on, amount, category_id, merchant, payment_method, memo, source, dedup_hash, created_at, updated_at (+10: card_name, approval_no, is_cancellation, import_batch_id) | 03, 10 |
 | ledger | `ledger_merchant_rules` | id, user_id, merchant_pattern, category_id, created_at | 10 |
 | imports | `import_jobs` | id, user_id, kind, status, file_name, sheet_names, header_row, columns(JSONB), rows(JSONB), mapping(JSONB), mapping_source, expires_at, created_at | 04 |
-| journal | `trades` | id, user_id, traded_at, market, symbol_code, symbol_name, side, quantity, price, currency, fee, tax, broker, source, dedup_hash, created_at, updated_at (+11: connection_id, external_id, synced_at) | 05, 11 |
+| journal | `trades` | id, user_id, traded_at, market, symbol_code, symbol_name, side, quantity, price, currency, fee, tax, broker, source, dedup_hash, created_at, updated_at (+05b: cost_estimated, +11: connection_id, external_id, synced_at) | 05, 05b, 11 |
+| journal | `trade_cost_settings` | user_id(PK), krx_commission_rate, krx_sell_tax_rate, us_commission_rate, updated_at | 05b |
 | journal | `trade_notes` | id, user_id, trade_id(null 가능), symbol_code(null 가능), noted_on, kind(`plan`/`review`/`memo`), content, tags, emotion, created_at, updated_at | 05 |
 | estate | `family_members` | id, user_id, relation, display_name, birth_date, married_on, child_birth_dates, created_at, updated_at | 06 |
 | estate | `gift_records` | id, user_id, recipient_id, donor_group, deduction_category, gifted_on, asset_type, amount, appraisal_fee, tax_paid, filed, memo, created_at, updated_at | 06 |
 | learn | `posts` | id, kind(`article`/`video`/`glossary`), slug(unique), title, summary, body_md, video_url, term, level, tags, published, published_at, author_id, created_at, updated_at | 07 |
 | learn | `bookmarks` | user_id, post_id, created_at | 07 |
 | learn | `post_reads` | user_id, post_id, read_at | 07 |
-| market | `stocks` | code(PK), market, name, sector, listed, updated_at | 08 |
+| market | `stocks` | code(PK), market, name, sector, listed, updated_at (+08b: kind) | 08, 08b |
 | market | `stock_snapshots` | as_of, code, price, change_rate, volume, trading_value, market_cap, per, pbr, roe, eps, bps, foreign_ratio, high_52w, low_52w, source | 08 |
 | market | `broker_connections` | id, user_id, provider, environment, label, app_key_enc, app_secret_enc, account_no_enc, status, last_verified_at, created_at, updated_at | 08 |
 | chat | `chat_conversations` | id, user_id, title, provider(`gemini`/`ollama`), model, last_message_at, created_at, updated_at | 09 |
@@ -308,9 +313,11 @@ features/<module>/
 | `estate_0001` | estate | 06 | family_members, gift_records |
 | `learn_0001` | learn | 07 | posts, bookmarks, post_reads |
 | `market_0001` | market | 08 | stocks, stock_snapshots, broker_connections |
+| `market_0002` | market | 08b | stocks.kind |
 | `chat_0001` | chat | 09 | chat_conversations, chat_messages |
 | `ledger_0002` | ledger | 10 | ledger_merchant_rules, ledger_entries 컬럼 추가 |
-| `journal_0002` | journal | 11 | trades 컬럼 추가 |
+| `journal_0002` | journal | 05b | trade_cost_settings, trades.cost_estimated |
+| `journal_0003` | journal | 11 | trades 컬럼 추가 |
 | `watchlist_0001` | watchlist | 12 | watchlist_items |
 | `screener_0001` | screener | 13 | saved_screens |
 | `allocation_0002` | allocation | 14 | holdings 컬럼 추가 |
@@ -345,10 +352,11 @@ def list_import_kinds() -> list[ImportKind]
 # app/modules/imports/service.py  (04)
 def create_job_from_table(db, user_id, *, kind_key: str, file_name: str, header: list[str], rows: list[list[str]]) -> ImportJobView   # 10의 PDF 추출이 사용
 
-# app/modules/journal/service.py  (05, 11)
+# app/modules/journal/service.py  (05, 05b, 11)
 def get_positions(db, user_id, *, include_closed: bool = False, with_quotes: bool = False) -> list[Position]   # with_quotes는 11이 추가
 def get_trade_stats(db, user_id, start: date | None = None, end: date | None = None) -> TradeStats
 def import_trades(db, user_id, rows: list[TradeImportRow], *, source: str, batch_id: UUID | None = None) -> ImportResult   # 11이 추가
+def estimate_trade_costs(db, user_id, *, market, side, quantity: Decimal, price: Decimal, is_etf: bool = False) -> TradeCosts   # 05b가 추가. 사용자 요율로 수수료·세금 추정
 
 # app/modules/estate/service.py  (06)
 def calc_gift_tax(req: GiftTaxInput) -> GiftTaxResult                  # 순수 함수
@@ -409,7 +417,7 @@ def get_ai_status() -> AiStatus              # GET /api/ai/status와 같은 내�
 - `LLM_PERSONAL_PROVIDER=gemini`는 `GEMINI_BILLING_ENABLED=true`일 때만 켜진다. Gemini 무료 등급은 입력과 응답이 Google 제품 개선에 쓰이고 사람이 검토할 수 있으며, 약관이 무료 등급에 민감·개인정보를 보내지 말라고 한다. 조건이 맞지 않으면 개인 작업은 꺼진 상태(`reason: "billing_required"`)로 시작하고 오류 로그를 한 번 남긴다.
 - Gemini 호출은 항상 `store=False`를 명시한다. Interactions API는 기본으로 대화를 서버에 저장한다(유료 55일, 무료 1일).
 - 값이 `gemini`인데 `GEMINI_API_KEY`가 비어 있으면 그 등급은 꺼진다(`reason: "missing_api_key"`). 값이 `disabled`면 `reason: "not_configured"`.
-- `anthropic`은 예약값이다. 지금 설정하면 시작할 때 설정 오류다. Claude를 다시 쓰려면 같은 Protocol의 어댑터를 추가한다(이전 호출 형태는 커밋 `b97b4d0`의 이 절에 있다).
+- `anthropic`은 예약값이다. 지금 설정하면 시작할 때 설정 오류다. Claude를 다시 쓰려면 같은 Protocol의 어댑터를 추가한다(이전 호출 형태는 커밋 `5560c39`의 이 절에 있다).
 
 #### 9.1.2 작업 등록부 (`tasks.py`)
 

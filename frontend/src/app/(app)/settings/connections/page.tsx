@@ -1,8 +1,11 @@
-import type { Metadata } from "next";
-import { ComingSoon } from "@/components/common/ComingSoon";
-
-export const metadata: Metadata = { title: "증권사 연결" };
+import { PageHeader } from "@/components/common/PageHeader";
+import { BrokerConnectionsSection } from "@/features/market/components/BrokerConnectionsSection";
 
 export default function ConnectionsPage() {
-  return <ComingSoon title="증권사 연결" taskId="08" />;
+  return (
+    <div className="min-w-0 space-y-6">
+      <PageHeader title="연결 관리" description="증권사 조회 연결과 시장 데이터 상태를 관리하세요." />
+      <BrokerConnectionsSection allowMock={process.env.NODE_ENV === "development"} />
+    </div>
+  );
 }

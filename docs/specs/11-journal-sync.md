@@ -1,7 +1,8 @@
 # 11. 매매내역 업로드, 증권사 체결 동기화, 평가손익
 
 > 웨이브 3 · 브랜치 `feature/11-journal-sync` · 구현 codex · 검증 codex `gpt-6.1-sol` / `xhigh`
-> 선행: 04(임포트 엔진), 05(매매일지), 08(증권사 게이트웨이)가 develop에 병합된 상태.
+> 선행: 04(임포트 엔진), 05(매매일지), 05b(수수료·세금 요율), 08(증권사 게이트웨이), 08b(국내 ETF·체결 비용 미제공 표시)가 develop에 병합된 상태.
+> **수수료·세금(05b·08b)**: 증권사 체결의 `fee`·`tax`가 `None`(증권사 미제공, 예: 키움 kt00009)이거나 파일에 수수료·세금 열이 없거나 칸이 비면 `journal.service.estimate_trade_costs`(사용자 요율, 국내 ETF 매도 거래세 0)로 채우고 `cost_estimated=true`로 저장한다. 값이 있으면 그대로 쓴다. 착수 전에 코디네이터가 이 규칙을 6절·5절 본문에 맞춘다.
 > **착수 직전 갱신**: 코디네이터는 디스패치 전에 05·08의 실제 코드와 08 `## 구현 결과`의 "키움·토스 기능 구현 여부" 표를 확인한다. 체결 조회(`EXECUTIONS`)가 어느 어댑터에서도 구현되지 않았다면 6절을 Mock 전용으로 줄이고 그 사실을 이 문서에 적은 뒤 디스패치한다.
 
 ## 1. 목표
@@ -14,7 +15,7 @@
 
 ### 포함
 
-- `journal_0002` 마이그레이션, 임포트 종류 `journal_trades`
+- `journal_0003` 마이그레이션(`down_revision="journal_0002"`, 05b 다음), 임포트 종류 `journal_trades`
 - 체결 동기화 API와 상태
 - `get_positions` 평가손익 확장, 서비스 함수 `import_trades`
 - 화면 `/journal/import`, 보유 탭 평가손익 열
@@ -27,14 +28,14 @@
 ## 3. 소유 파일
 
 - `backend/app/modules/journal/**`(05 코드 수정 포함)
-- `backend/alembic/versions/journal_0002_*.py`
+- `backend/alembic/versions/journal_0003_*.py`
 - `backend/tests/journal/**`
 - `frontend/src/app/(app)/journal/import/**`(자리표시 교체), `frontend/src/app/(app)/journal/page.tsx`(보유 탭 수정)
 - `frontend/src/features/journal/**`
 - `frontend/tests/journal/**`
 - 이 문서의 `## 구현 결과`
 
-## 4. DB 변경 (revision `journal_0002`, `--head journal@head`)
+## 4. DB 변경 (revision `journal_0003`, `--head journal@head`)
 
 - `trades`에 컬럼 추가: `connection_id uuid NULL`(08 연결 id, FK 없음), `external_id varchar(64) NULL`, `synced_at timestamptz NULL`.
 - 부분 유일 인덱스 `(user_id, connection_id, external_id) WHERE external_id IS NOT NULL`.
@@ -95,8 +96,8 @@ class TradeImportRow:
     quantity: Decimal
     price: Decimal
     currency: Literal["KRW", "USD"]
-    fee: Decimal = Decimal(0)
-    tax: Decimal = Decimal(0)
+    fee: Decimal | None = None   # None이면 05b estimate_trade_costs로 추정하고 cost_estimated=true
+    tax: Decimal | None = None
     broker: str | None = None
 
 def import_trades(db, user_id, rows: list[TradeImportRow], *, source: str, batch_id: UUID | None = None) -> ImportResult

@@ -87,9 +87,11 @@
 | 2 | 08 증권사 게이트웨이·종목 마스터·시세·스냅샷 배치 | `feature/08-market` | 01 | codex |
 | 2 | 09 AI 챗봇 코어(공급자 어댑터·에이전트 루프·SSE·채팅 UI) | `feature/09-chat-core` | 01 | claude |
 | 3 | 10 카드 명세서 업로드·자동 분류 | `feature/10-ledger-import` | 03, 04 | codex |
-| 3 | 11 매매내역 업로드 + 증권사 체결 동기화 | `feature/11-journal-sync` | 04, 05, 08 | codex |
-| 3 | 12 관심종목·종목 상세 | `feature/12-watchlist` | 08 | claude |
-| 3 | 13 AI 조건검색(필터 DSL·자연어 해석·결과 화면) | `feature/13-screener` | 08 | codex |
+| 3 | 05b 매매 수수료·세금 기본 요율 설정과 추정 | `feature/05-journal-costs` | 05, 08b | codex |
+| 3 | 11 매매내역 업로드 + 증권사 체결 동기화 | `feature/11-journal-sync` | 04, 05, 05b, 08, 08b | codex |
+| 3 | 08b 종목 마스터에 국내 ETF 추가 | `feature/08-market-etf` | 08 | codex |
+| 3 | 12 관심종목·종목 상세 | `feature/12-watchlist` | 08, 08b | claude |
+| 3 | 13 AI 조건검색(필터 DSL·자연어 해석·결과 화면) | `feature/13-screener` | 08, 08b | codex |
 | 3 | 14 증권사 잔고 → 자산 자동 반영 | `feature/14-holdings-sync` | 02, 08 | codex |
 | 4 | 15 챗봇 도구 통합(전 모듈) + 결과 카드 UI | `feature/15-chat-tools` | 09, 02, 03, 05, 06, 07, 12, 13 | claude |
 | 4 | 16 홈 대시보드 | `feature/16-dashboard` | 02, 03, 05, 12 | claude |
@@ -160,9 +162,23 @@
 1. 추천 흐름(02): 목표·상황 입력, 목표 반영 권장 배분(층 쌓기), 관리 방향, 추천 이유와 답변별 점수, 온보딩 흐름(출생연도 → 투자성향 → 목표·상황 → 자산 간단 입력 → 추천 결과 → 상세 설명), 테이블 `allocation_situations`·`financial_goals`(revision `allocation_0001`에 포함). 사례 값은 스크립트로 검증했다.
 2. 방향 비교(06 8.1): 네 방향의 총 세금과 가족에게 남는 금액, 10년·5년 사전증여 가산과 금융재산공제 축소까지 반영. 사례 2개를 스크립트로 검증했다. 자산 사전 채움은 02의 `get_asset_breakdown`(지연 import)이다.
 3. 15(도구 `get_recommendation`·`compare_estate_plans`, 카드 `directions`·`comparison`), 16(먼저 할 일, 체크리스트 "목표·상황 입력하기")도 맞췄다.
-4. LLM: 개인 금융 데이터가 들어가는 작업(챗봇, 카드·증권 파일 처리)은 Gemini 무료 등급 약관상 보내면 안 되므로 **로컬 Ollama가 기본**이다. 개인 데이터가 없는 작업(학습 글 초안, 조건 문장 해석)만 Gemini로 보낸다. 결제가 연결된 Gemini 키가 있으면 개인 작업도 Gemini로 바꿀 수 있다. Claude는 예약값으로 남기고, 이전 호출 형태는 커밋 `b97b4d0`에 있다. Anthropic 전용 기능(서버 측 거절 폴백, 캐시 표시, eager 도구 입력 스트리밍)은 함께 뺐다.
+4. LLM: 개인 금융 데이터가 들어가는 작업(챗봇, 카드·증권 파일 처리)은 Gemini 무료 등급 약관상 보내면 안 되므로 **로컬 Ollama가 기본**이다. 개인 데이터가 없는 작업(학습 글 초안, 조건 문장 해석)만 Gemini로 보낸다. 결제가 연결된 Gemini 키가 있으면 개인 작업도 Gemini로 바꿀 수 있다. Claude는 예약값으로 남기고, 이전 호출 형태는 커밋 `5560c39`에 있다. Anthropic 전용 기능(서버 측 거절 폴백, 캐시 표시, eager 도구 입력 스트리밍)은 함께 뺐다.
 5. Gemini 챗봇은 라운드 단위로 받는다. Interactions 스트리밍의 도구 인자 조각 형식이 공식 문서(`arguments`·`partial_arguments`)와 SDK 2.31 소스(`arguments_delta`·`arguments`)에서 달라 이번 범위에서는 쓰지 않는다.
 6. 01a에 `core/format.py`(서버 금액 문장), `GET /api/ai/status`, 의존성 `google-genai`·`ollama`·`pypdfium2`·`pillow`(`anthropic` 제외)를, 01b에 `AiProviderBadge`·`useAiStatus`를 넣었다. 1웨이브 브랜치는 커밋이 없어 이 변경이 든 `develop`으로 빨리 감기(fast-forward)했다.
+
+### 2026-10-17: 종목 범위에 국내 ETF 추가, 웨이브 2 진행 중 계약 보완
+
+사용자 결정
+
+- 종목 검색·관심종목·조건검색의 대상은 **국내 주식 + 국내 ETF**다. 미국 주식·ETF는 별도 작업으로 미룬다(번호 미정). 키움 REST API 공식 명세(`Kiwoom-Securities/Kiwoom-REST-API` 커밋 `953e5db`)에 국내 ETF 목록(`ka10099` `mrkt_tp=8`)·ETF 전용 API(`ka40001`~`ka40010`)와 미국주식 API(`usa*`, 129개)가 있음을 확인했다.
+- 키움 REST API 키는 배포 서버(고정 IP)를 정한 뒤 발급한다. 그때까지 개발·검증은 Mock으로 한다.
+- 체결 수수료·세금 기본값은 키움증권 기준(국내주식 매매수수료 0.015%, 국내주식 매도 거래세 0.20%, 미국주식 매매수수료 0.25%)으로 두고, 증권사 이벤트 등으로 바뀔 수 있으니 사용자가 설정에서 바꿀 수 있게 한다. 국내 ETF 매도에는 거래세를 붙이지 않는다(증권거래세 비과세, 코디네이터 반영).
+
+반영
+
+1. 후속 작업 08b(`docs/specs/08b-market-etf.md`, 브랜치 `feature/08-market-etf`)를 만들고 12·13의 선행에 넣었다.
+1-2. 후속 작업 05b(`docs/specs/05b-journal-costs.md`, 브랜치 `feature/05-journal-costs`, revision `journal_0002`)를 만들고 11의 선행에 넣었다. 11의 revision은 `journal_0003`으로 미뤘다. 08b에서 `Execution.fee`·`tax`를 None 허용(증권사 미제공)으로 바꿔 11이 사용자 요율로 추정한다.
+2. 웨이브 2 진행 중 코디네이터가 고친 공통 계약: `AppError`의 `details`와 `field_error`(architecture 4.1), 숫자 뒤 소문자 필드 별칭 규칙(architecture 4), 08 `BrokerHolding.eval_amount: int | None`(원화 평가금액이 없는 외화 보유분), 백엔드 직접 의존성 `pyyaml`(07 시드 앞머리), 구조 테스트의 SSE 클라이언트 예외(09 `sse.ts`), 06 기타친족 범위를 2025-03-14 개정 상증세법(법률 제20777호)으로 갱신.
 
 ## 재사용할 기존 코드 (gamja-market, 사용자 본인 프로젝트)
 
