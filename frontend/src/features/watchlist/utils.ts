@@ -1,7 +1,8 @@
 import type { WatchlistItem } from "./types";
 
 export const DEFAULT_GROUP = "기본";
-export const ALL_GROUPS = "__all__";
+// 그룹 이름은 1~20자이므로 빈 문자열은 실제 그룹과 겹치지 않는다.
+export const ALL_GROUPS = "";
 export const GROUP_NAME_MAX = 20;
 export const MEMO_MAX = 200;
 export const WATCHLIST_REFETCH_MS = 30_000;

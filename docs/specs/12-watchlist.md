@@ -185,3 +185,11 @@ def add_item(db, user_id, code: str, *, group_name: str = "기본", memo: str | 
 - 회귀 테스트: `test_concurrent_adds_never_exceed_limit`(99개인 사용자, 별도 세션·스레드 8개 동시 `add_item` → 201 1건·409 `CONFLICT` 7건·최종 100개. 개수 확인 뒤 0.2초 지연을 넣어 잠금을 끄면 8건 모두 담겨 실패함을 확인), `test_empty_quotes_do_not_trigger_per_stock_calls`(빈 시세: `get_quotes` 1회·증권사 1회·상세 0회), `test_broker_error_returns_null_quote_without_detail_calls`(일괄 실패: `get_quotes` 1회·상세 0회), `test_get_quotes_raising_broker_error_returns_null_quote`, `test_stock_without_snapshot_uses_master_or_code`.
 - 실제 서버(슬롯 12, MockBroker 시세 호출을 기록하는 저장소 밖 실행 스크립트): 4종목 목록 한 번에 증권사 시세 호출이 빈 결과 1회(수정 전 5회), 장애 5회(1회 + 08 내부 개별 재조회 4회, 수정 전 13회), 정상 1회, 30초 안 재조회 0회. 99개인 사용자로 서로 다른 유효 종목 8개를 동시에 `POST /api/watchlist` → 201 1건·409 7건, API·DB 모두 100개(두 번 반복, 확인용 사용자는 삭제).
 - 검사: `uv run ruff check .` 통과, `uv run ruff format --check .` 통과, `uv run pytest` 1052 passed. 프론트는 바꾸지 않았다.
+
+### 웨이브 3 통합 검증 수정
+
+- 경미 K4: 전체 탭의 내부 값 `ALL_GROUPS`를 `"__all__"`에서 빈 문자열로 바꿨다. 그룹 이름은 기존 API 계약상 공백 제거 후 1~20자이므로 빈 문자열은 어떤 유효한 그룹 이름과도 겹치지 않는다. API와 그룹 이름 검증은 바꾸지 않았다.
+- 회귀 테스트: `__all__` 그룹과 전체 탭의 단독 선택, 그룹별 목록 필터링, 그룹 선택 후 검색한 종목을 해당 그룹에 담기, 전체로 돌아와 모든 종목 보기와 기본 그룹에 담기를 확인한다.
+- 검사: `scripts/worktree-setup.sh`, `npm run lint`, `npx tsc --noEmit`, `npm run build` 통과. `npm run test` 최초 실행은 가계부 테스트 2개가 5초 제한시간을 넘겼고(415 통과), 병렬 부하를 줄인 `npm run test -- --maxWorkers=2` 재실행은 43개 파일·417개 테스트 모두 통과했다. 백엔드와 의존성은 바꾸지 않았고 외부 API·LLM은 호출하지 않았다.
+- 실제 서버(슬롯 12, Mock, Playwright 독립 세션): 새 계정 가입·로그인 후 삼성전자를 담고 그룹 이름을 `__all__`로 저장, 전체 탭에서 KODEX 200을 기본 그룹에 담기, 각 탭의 단독 선택과 필터링, `__all__` 탭에서 NAVER를 담아 실제 API 저장 그룹 확인, 전체 탭으로 복귀해 두 그룹 표시를 확인했다. 전체·그룹 화면 모두 360px·1280px에서 가로 스크롤이 없고 샘플 배지와 투자 고지가 유지된다.
+- 스펙과 다른 점: 없음. 남은 일: 코디네이터의 별도 검증과 병합.
