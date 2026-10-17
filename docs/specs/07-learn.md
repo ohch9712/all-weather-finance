@@ -178,3 +178,52 @@ def get_progress(db, user_id) -> LearnProgress      # 6.1 `/progress` 응답과 
 
 - 15: `search_posts`로 용어 설명 도구를 만든다.
 - 16: 홈에 오늘의 용어와 학습 진도를 보여 준다(`get_term_of_the_day`, `get_progress`).
+
+## 구현 결과
+
+> 2026-10-17 · 브랜치 `feature/07-learn` · 구현 claude
+
+### 구현한 것
+
+- **DB**(`learn_0001`, `branch_labels=("learn",)`): `posts`·`bookmarks`·`post_reads`를 4절대로 만들었다. 인덱스 `ix_posts_kind_published_published_at`(kind, published, published_at desc), 용어끼리만 겹치지 않게 하는 부분 유니크 인덱스 `uq_posts_term`(`WHERE kind = 'glossary'`). 서비스 검증과 같은 내용의 CHECK 제약(kind·level 값, slug 형식, 본문 2만 자, 태그 10개, 용어면 term 필수, 영상이면 video_url 필수)도 걸었다. FK는 `users`(author SET NULL, 북마크·읽음 CASCADE)와 같은 모듈의 `posts`에만 건다.
+- **API**: 6.1(사용자 8개)과 6.2(관리자 6개)를 경로·필드·상태코드 그대로 구현했다. 관리자 경로는 `AdminUser`(아니면 `403 FORBIDDEN`), 필드별 422는 `field_error`를 쓴다. AI 초안은 `llm.generate(task="learn.ai_draft", system=AI_DRAFT_SYSTEM, content="종류: …\n난이도: …\n주제: …", output=DraftOutput)`(general 등급)이고 저장하지 않는다. 공급자가 꺼져 있으면 `503 LLM_UNAVAILABLE`.
+- **서비스 함수**(8절): `search_posts(db, query, *, kind=None, limit=5) -> list[PostSummary]`, `get_term_of_the_day(db, day) -> PostSummary | None`, `get_progress(db, user_id) -> LearnProgress`. 시그니처는 테스트(`test_public_signatures_match_architecture`)로 고정했다.
+- **규칙**(`rules.py`, 순수 함수): YouTube 주소 4형식 → 11자 `video_id`, nocookie 임베드 주소, 초성(쌍자음 → 기본 자음, 영문 A-Z, 그 밖 `#`), 오늘의 용어 위치(`day.toordinal() % 개수`, slug 순).
+- **시드**: `uv run python -m app.modules.learn.seed`. `seed_data/*.md` 35개(용어 30, 입문 글 5, slug는 7절 목록 그대로)를 slug 기준으로 만들거나 고치고 공개한다. 바뀐 것이 없으면 쓰지 않고, 공개 시각은 처음 값을 유지한다. 출력 예: 첫 실행 "새로 만듦 35개", 두 번째 "그대로 35개". 글은 모두 직접 썼고(외부 글을 옮기지 않음) 초등 고학년 눈높이, 비유 하나·숫자 예시 하나, 투자 권유 없음, 바뀌는 수치(ISA·연금저축 한도, 세율, 금리)는 쓰지 않았다. 예시용 금리·환율·지수 값은 "가정"이나 "지금의 실제 값이 아니에요"라고 밝혔다.
+- **화면**: `/learn`(제목 "주린이 학습", 진도 막대, 오늘의 용어, 종류 탭, 난이도 칩, 태그 선택, 검색, "북마크만", 카드 그리드, 쪽 이동, 필터는 URL 쿼리), `/learn/[slug]`(글 Markdown, 영상 16:9 youtube-nocookie 임베드, 용어 큰 용어명·한 줄 정의, 태그·북마크·관련 게시물·"AI 도움으로 작성" 배지, 진입 시 읽음 표시), `/learn/glossary`(초성 색인 바 ㄱ~ㅎ·A-Z·#, 초성별 묶음 목록, 검색, URL 쿼리 `?initial=&q=`), `/admin/learn`(게시물 표·공개 스위치·수정일·새로 만들기·수정·삭제 확인), `/admin/learn/new`·`/admin/learn/[id]/edit`(종류별 칸, Markdown 작성·미리보기 탭, AI 초안 패널과 `AiProviderBadge scope="general" compact`, 주제 도움말, AI 꺼짐 안내). 일반 사용자는 관리자 화면에서 "권한이 없습니다"를 보고 관리자 API를 부르지 않는다.
+- **고지**: 학습 목록·상세·용어 사전에 `investment`, AI 초안 패널과 `aiAssisted` 게시물 상세에 `ai`.
+
+### 스펙에 없어 정한 것
+
+| 항목 | 정한 내용 | 이유 |
+| --- | --- | --- |
+| 예약 슬러그 | `glossary`는 422(`field: "slug"`) | `/learn/glossary` 화면 경로와 겹쳐 상세로 갈 수 없다 |
+| 슬러그 비우기 | 생성·수정 모두 `slug`가 비거나 null이면 `p-<8자리 hex>`를 새로 만든다 | 6.2 "비면 자동"을 수정에도 같게 적용 |
+| 종류 밖 칸 | 용어가 아니면 `term`, 영상이 아니면 `videoUrl`·`videoId`를 null로 저장 | 부분 유니크 인덱스와 화면 표시를 단순하게 |
+| 공개 시각 | 처음 공개할 때만 채우고 비공개로 돌려도 지우지 않는다 | 4.1 "처음 공개할 때 채움" |
+| 검색 정렬 | 제목·용어가 검색어와 같음(0) → 제목·용어에 포함(1) → 요약·본문에만 포함(2), 같은 순위는 공개일 최신 → slug | 5절 "제목·용어 일치 → 공개일 최신 순" |
+| 관련 게시물 | 최근 공개 200개 후보에서 겹치는 태그 수가 많은 순 → 공개일 최신 순, 최대 3개 | 6.1 "태그가 겹치는 공개 게시물 최대 3개" |
+| 용어 사전 | `initial`은 ㄱ~ㅎ 14개·A-Z(소문자는 대문자로)·`#`만 받고 나머지는 422(`field: "initial"`). 정렬은 한글 → 영문(대소문자 무시) → 그 밖. `q`는 목록 검색과 같은 칸을 본다 | 색인 바 순서와 같게 |
+| 북마크·읽음 | 공개되지 않았거나 없는 게시물은 POST·DELETE 모두 404. 본문 없는 POST·DELETE도 `Content-Type: application/json`을 요구(`require_json`) | "공개 게시물만", architecture 4절 |
+| 목록 크기 | 사용자·관리자 목록 모두 `pageSize` 기본 12, 최대 100. 빈 필터(`kind=` 등)는 조건 없음 | 6.1 기본값, 다른 모듈과 같은 빈 값 처리 |
+| AI 초안 출력 | 구조화 출력 모델 `DraftOutput`(snake_case)을 받아 길이(제목 100·요약 200·용어 50·본문 2만)·태그(중복 제거, 20자, 10개)를 잘라 `Draft`로 돌려준다. 글·영상이면 `term`은 null | 스키마 변환이 길이 제한을 지우므로 받은 뒤 맞춘다 |
+| AI 초안 대기 | 프론트 `createAiDraft`만 `timeoutMs: 120000` | 기본 10초로는 Gemini 응답 전에 끊길 수 있다 |
+| 시드 앞머리 | `yaml.safe_load`(PyYAML)로 읽는다. PyYAML은 이미 의존성인 `uvicorn[standard]`가 설치하므로 새 의존성이 아니다. 각 파일은 `PostCreate`로 검증하고 영상 종류는 거부한다 | 7절 "앞머리 YAML" |
+| 시드 단독 실행 | `seed.main()`이 `app.db.models`를 불러 `users` FK 메타데이터를 채운다 | 앱 없이 `python -m`으로 돌릴 때 FK 해석 실패를 막는다 |
+| 태그 선택 | 태그 목록 API가 없어 시드가 쓰는 태그 24개를 선택지로 둔다(`SUGGESTED_TAGS`). 다른 태그는 상세의 태그 링크(`/learn?tag=…`)로 거른다 | 6절에 태그 목록 API가 없다 |
+| 관리자 목록 필터 | 종류·공개 여부·검색은 화면 안 상태로 둔다(URL에 넣지 않음) | 9절은 `/learn`만 URL 반영을 요구 |
+| Markdown | `react-markdown` + `remark-gfm`, `skipHtml`(원시 HTML은 버림), 기본 `urlTransform`(javascript: 주소 제거), 바깥 링크는 새 탭 | 5절 |
+| 영상 임베드 | `<iframe src="https://www.youtube-nocookie.com/embed/<videoId>" loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen>`을 `aspect-video` 상자에 넣는다 | 5절·9절 |
+
+### 확인한 것
+
+- 백엔드: `uv run ruff check .` 통과, `uv run ruff format --check .` 통과(188 files), `uv run pytest` 846 passed(이 중 `tests/learn` 114). 테스트는 `FakeStructuredLLM`만 쓰고 외부 HTTP를 막는 01a 픽스처 아래에서 돈다.
+- 마이그레이션: 빈 DB(`finance_07_cycle`, 확인 후 삭제)에서 `upgrade heads`(6) → `downgrade base`(6) → `upgrade heads`(6) 성공, `alembic check` "No new upgrade operations detected."
+- 프론트: `npm run lint` 통과, `npx tsc --noEmit` 통과, `npm run test` 304 passed(이 중 `tests/learn` 19), `npm run build` 성공(`/learn`, `/learn/[slug]`, `/learn/glossary`, `/admin/learn`, `/admin/learn/new`, `/admin/learn/[id]/edit`).
+- 실제 서버(슬롯 07, Orca 독립 브라우저 프로필): 시드 후 `/api/learn/posts?pageSize=100`이 35개(용어 30·글 5)를 돌려주고 상세가 열린다. 일반 사용자의 관리자 API는 403, 관리자 화면은 "권한이 없습니다". 관리자 폼으로 영상 게시물을 만들자 Vimeo 주소는 "YouTube 링크만 등록할 수 있습니다."로 거부되고, YouTube 주소는 자동 슬러그·`videoId`와 함께 저장돼 상세에서 `https://www.youtube-nocookie.com/embed/<id>` 플레이어가 재생 버튼까지 로드됐다(16:9). 확인용 영상 게시물은 지웠다. `/learn`, 글·용어 상세, `/learn/glossary`, `/admin/learn`, `/admin/learn/new`를 360px에서 열어 `scrollWidth`가 360(가로 스크롤 없음)인 것을 확인했다.
+
+### 남은 일
+
+- 태그 목록 API가 생기면 `/learn` 태그 선택지를 그 값으로 바꾼다.
+- 실제 Gemini로 AI 초안을 받아 본 확인은 하지 않았다(테스트 환경은 공급자 꺼짐). 키를 넣은 환경에서 초안 품질과 응답 시간을 한 번 확인하면 좋다.
+- 15(챗봇 도구)는 `search_posts`, 16(대시보드)은 `get_term_of_the_day`·`get_progress`를 쓴다.
