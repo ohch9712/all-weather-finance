@@ -1,8 +1,3 @@
-import type { Metadata } from "next";
-import { ComingSoon } from "@/components/common/ComingSoon";
+import { JournalImportPage } from "@/features/journal/components/JournalImportPage";
 
-export const metadata: Metadata = { title: "매매내역 가져오기" };
-
-export default function JournalImportPage() {
-  return <ComingSoon title="매매내역 가져오기" taskId="11" />;
-}
+export default function Page() { return <JournalImportPage />; }

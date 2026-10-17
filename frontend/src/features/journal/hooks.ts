@@ -45,3 +45,10 @@ export function useCostEstimate(input: CostEstimateInput | null) {
   });
   return { ...query, data: ready ? query.data : undefined, error: ready ? query.error : null };
 }
+
+export const useConnections = () => useQuery({ queryKey: [...root, "connections"], queryFn: api.getConnections });
+export const useSyncStatus = () => useQuery({ queryKey: [...root, "sync-status"], queryFn: api.getSyncStatus });
+export function useSyncTrades() {
+  const client = useQueryClient();
+  return useMutation({ mutationFn: api.syncTrades, onSuccess: async () => { await client.invalidateQueries({ queryKey: root }); } });
+}
