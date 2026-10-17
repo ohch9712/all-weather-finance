@@ -7,7 +7,7 @@ import { ErrorState } from "@/components/common/ErrorState";
 import { formatKRW, formatKRWCompact } from "@/lib/format";
 import { useGiftPlan, useGiftTax, useInheritanceTax, usePrefill } from "../hooks";
 import type { Member, Recipient, Relation } from "../types";
-import { allowedGroups, donorLabels, relationLabels, todayKst } from "../utils";
+import { allowedGroups, donorLabels, relationLabels, relativeScopeHint, todayKst } from "../utils";
 import { Assumptions, DataForm, moneyField, options, Panel, TaxSteps, type Values } from "./shared";
 import { MemberSelect } from "./FamilyAndGifts";
 
@@ -36,13 +36,13 @@ export function GiftCalculator({ members }: { members: Member[] }) {
       const groups = allowedGroups[relation];
       return [
         ...(!member ? [
-          { name: "relation", label: "수증자 관계", options: options(relationLabels) },
+          { name: "relation", label: "수증자 관계", options: options(relationLabels), hint: relativeScopeHint },
           { name: "birthDate", label: "수증자 생년월일", type: "date" as const, required: ["child", "grandchild"].includes(relation) },
           { name: "marriedOn", label: "혼인신고일", type: "date" as const },
           { name: "childBirthDates", label: "자녀 출생·입양일", hint: "YYYY-MM-DD, 쉼표로 구분" },
           ...(relation === "grandchild" ? [{ name: "parentDeceased", label: "수증자의 부모가 사망했어요", type: "checkbox" as const }] : []),
         ] : [{ name: "useRecords", label: "등록한 증여 기록을 반영해요", type: "checkbox" as const }]),
-        { name: "donorGroup", label: "증여자 그룹", options: groups.map((value) => ({ value, label: donorLabels[value] })) },
+        { name: "donorGroup", label: "증여자 그룹", hint: relativeScopeHint, options: groups.map((value) => ({ value, label: donorLabels[value] })) },
         { name: "giftedOn", label: "증여일", type: "date" as const, required: true },
         moneyField("amount", "증여 금액 (원)", 1), moneyField("appraisalFee", "감정평가수수료 (원)"),
         { name: "claimMarriageBirth", label: "혼인·출산 공제를 신청해요", type: "checkbox" as const, disabled: !marriageEligible(member, v) || !["parents", "grandparents"].includes(String(v.donorGroup)), hint: "직계존속 증여이며 혼인 전후 2년 또는 출생·입양 후 2년 안일 때 선택할 수 있어요." },

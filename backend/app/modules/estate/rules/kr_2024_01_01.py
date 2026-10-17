@@ -1,5 +1,10 @@
 """상속세 및 증여세법 제13·18~26·47·53·53의2·55~57·69조, 시행령 제9조."""
 
+# 제53조 제4호: 기타친족은 4촌 이내 혈족·3촌 이내 인척이다(공제액은 1천만원).
+# 법률 제20777호(2025-03-14 시행) 부칙 제4조에 따라 시행 전 증여는
+# 종전 범위(6촌 이내 혈족·4촌 이내 인척)를 적용한다.
+# 출처: https://www.law.go.kr/LSW/lsRvsDocInfoR.do?lsiSeq=269799&chrClsCd=010202
+
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal

@@ -243,3 +243,67 @@ def test_pre_effective_calculation_and_null_patch_are_field_errors(auth_client):
     response = auth_client.patch(f"{BASE}/members/{member['id']}", json={"relation": None})
     assert response.status_code == 422
     assert response.json()["error"]["details"][0]["field"] == "relation"
+
+
+@pytest.mark.parametrize(
+    "non_heir_gifts, taxable_value, payable_tax",
+    [(0, 895_000_000, 50_585_500), (20_000_000, 915_000_000, 54_465_500)],
+)
+def test_inheritance_request_uses_lowercase_year_aliases(
+    auth_client, non_heir_gifts, taxable_value, payable_tax
+):
+    response = auth_client.post(
+        f"{BASE}/calc/inheritance-tax",
+        json={
+            "financialAssets": 300_000_000,
+            "realEstate": 500_000_000,
+            "spouseAlive": False,
+            "children": [{"age": 35}],
+            "priorGiftsToHeirs10y": 100_000_000,
+            "priorGiftsToNonHeirs5y": non_heir_gifts,
+            "priorGiftDeductions": 50_000_000,
+            "priorGiftTaxPaid": 4_850_000,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["taxableValue"] == taxable_value
+    assert response.json()["payableTax"] == payable_tax
+
+
+@freeze_time("2026-10-16T03:00:00Z")
+def test_deductions_and_prefill_json_keys_preserve_lowercase_years(auth_client):
+    child = create_member(auth_client)
+    grandchild = create_member(
+        auth_client, relation="grandchild", displayName="손주", birthDate="2020-05-05"
+    )
+    for member, group, amount, paid in [
+        (child, "parents", 100_000_000, 4_850_000),
+        (grandchild, "grandparents", 20_000_000, 0),
+    ]:
+        response = auth_client.post(
+            f"{BASE}/gifts",
+            json={
+                "recipientId": member["id"],
+                "giftedOn": "2026-09-01",
+                "donorGroup": group,
+                "amount": amount,
+                "taxPaid": paid,
+            },
+        )
+        assert response.status_code == 201, response.text
+    response = auth_client.get(f"{BASE}/members/{child['id']}/deductions?asOf=2026-10-16")
+    assert response.status_code == 200, response.text
+    pool = response.json()["pools"][0]
+    assert set(pool) == {"category", "limit", "usedWithin10y", "available", "nextResetOn"}
+    assert pool["usedWithin10y"] == 50_000_000
+    assert pool["available"] == 0
+
+    response = auth_client.get(f"{BASE}/inheritance/prefill")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert "priorGiftsToHeirs10Y" not in payload
+    assert "priorGiftsToNonHeirs5Y" not in payload
+    assert payload["priorGiftsToHeirs10y"] == 100_000_000
+    assert payload["priorGiftsToNonHeirs5y"] == 20_000_000
+    assert payload["priorGiftDeductions"] == 70_000_000
+    assert payload["priorGiftTaxPaid"] == 4_850_000

@@ -153,7 +153,7 @@ class GiftTaxResult(CalculationResult):
 class Pool(CamelModel):
     category: Category
     limit: int
-    used_within10y: int
+    used_within10y: int = Field(alias="usedWithin10y")
     available: int
     next_reset_on: date | None
 
@@ -204,8 +204,8 @@ class InheritanceTaxInput(CamelModel):
     spouse_actual_share: Money | None = None
     children: list[InheritanceChild] = Field(default_factory=list)
     elderly_dependents: int = Field(default=0, ge=0, le=100)
-    prior_gifts_to_heirs10y: Money = 0
-    prior_gifts_to_non_heirs5y: Money = 0
+    prior_gifts_to_heirs10y: Money = Field(default=0, alias="priorGiftsToHeirs10y")
+    prior_gifts_to_non_heirs5y: Money = Field(default=0, alias="priorGiftsToNonHeirs5y")
     prior_gift_deductions: Money = 0
     prior_gift_tax_paid: Money = 0
     cohabiting_house: CohabitingHouse = Field(default_factory=CohabitingHouse)
@@ -298,8 +298,8 @@ class InheritancePrefill(CamelModel):
     spouse: bool
     children: list[PrefillMember]
     grandchildren: list[PrefillMember]
-    prior_gifts_to_heirs10y: int
-    prior_gifts_to_non_heirs5y: int
+    prior_gifts_to_heirs10y: int = Field(alias="priorGiftsToHeirs10y")
+    prior_gifts_to_non_heirs5y: int = Field(alias="priorGiftsToNonHeirs5y")
     prior_gift_deductions: int
     prior_gift_tax_paid: int
 

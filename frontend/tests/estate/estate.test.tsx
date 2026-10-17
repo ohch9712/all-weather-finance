@@ -4,6 +4,7 @@ import { beforeEach, expect, it } from "vitest";
 import { EstatePage } from "@/features/estate/components/EstatePage";
 import { apiUrl, authPayload, renderWithProviders, server } from "../utils";
 import type { Member } from "@/features/estate/types";
+import { relativeScopeHint } from "@/features/estate/utils";
 
 const member: Member = { id: "child-id", relation: "child", displayName: "첫째", birthDate: "1994-07-15", marriedOn: null, childBirthDates: [], parentDeceased: false, age: 32, isMinor: false, createdAt: "2026-10-16T00:00:00Z", updatedAt: "2026-10-16T00:00:00Z" };
 const tax = { payableTax: 4850000, steps: [{ key: "calculatedTax", label: "산출세액", amount: 5000000, note: "10% 구간" }, { key: "payableTax", label: "납부세액", amount: 4850000, note: "신고 공제 반영" }], notes: ["참고용 계산"], assumptions: ["입력한 평가액을 사용합니다."], ruleVersion: "KR-2024.01.01" };
@@ -28,6 +29,7 @@ it("가족 추가·수정·삭제와 모든 탭의 세무 고지", async () => {
   expect(screen.getByText("2024.01.01 시행 세법 기준")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "가족 추가" }));
   let dialog = screen.getByRole("dialog");
+  expect(within(dialog).getByText(relativeScopeHint)).toBeVisible();
   await user.type(within(dialog).getByLabelText(/별칭/), "둘째");
   await user.type(within(dialog).getByLabelText(/생년월일/), "2000-01-01");
   await user.click(within(dialog).getByRole("button", { name: "저장" }));
@@ -55,6 +57,7 @@ it("증여 기록 CRUD와 적용 공제·추정 세금", async () => {
   await user.selectOptions(await screen.findByLabelText("수증자 선택"), "child-id");
   await user.click(screen.getByRole("button", { name: "증여 기록 추가" }));
   let dialog = screen.getByRole("dialog");
+  expect(within(dialog).getByText(relativeScopeHint)).toBeVisible();
   await user.clear(within(dialog).getByLabelText(/증여 금액/));
   await user.type(within(dialog).getByLabelText(/증여 금액/), "100000000");
   await user.click(within(dialog).getByRole("button", { name: "저장" }));
@@ -75,28 +78,54 @@ it("공제 현황 카드와 혼인·출산 기간", async () => {
   expect(await screen.findByText("첫째 · 자녀")).toBeVisible();
   expect(await screen.findByText("사용 20,000,000원 · 남음 30,000,000원")).toBeVisible();
   expect(screen.getByText(/다음 공제 회복일: 2030-01-02/)).toBeVisible();
+  expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
 });
 
 it("증여세 계산 단계표와 계산 가정", async () => {
   server.use(http.post(apiUrl("/api/estate/calc/gift-tax"), async ({ request }) => { const body = await request.json() as Record<string, unknown>; expect(body.amount).toBe(100000000); return HttpResponse.json(tax); }));
   const { user } = render("gift-tax");
-  await user.click(await screen.findByRole("button", { name: "계산하기" }));
+  await screen.findByRole("button", { name: "계산하기" });
+  expect(screen.getAllByText(relativeScopeHint)[0]).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "계산하기" }));
   expect(await screen.findByRole("table", { name: "세금 계산 단계" })).toBeVisible();
   expect(screen.getByText("10% 구간")).toBeVisible();
   await user.click(screen.getByText("계산 가정"));
   expect(screen.getByText("입력한 평가액을 사용합니다.")).toBeVisible();
 });
 
-it("상속세 사전 채움과 결과", async () => {
-  server.use(http.post(apiUrl("/api/estate/calc/inheritance-tax"), () => HttpResponse.json(tax)));
+it("사전증여가 있는 상속세 사전 채움과 계산 요청", async () => {
+  server.use(
+    http.get(apiUrl("/api/estate/inheritance/prefill"), () => HttpResponse.json({
+      ...prefill,
+      children: [{ memberId: "child-id", displayName: "첫째", age: 35 }],
+      priorGiftsToHeirs10y: 100000000,
+      priorGiftsToNonHeirs5y: 0,
+      priorGiftDeductions: 50000000,
+      priorGiftTaxPaid: 4850000,
+    })),
+    http.post(apiUrl("/api/estate/calc/inheritance-tax"), async ({ request }) => {
+      const body = await request.json() as Record<string, unknown>;
+      expect(body.priorGiftsToHeirs10y).toBe(100000000);
+      expect(body.priorGiftsToNonHeirs5y).toBe(0);
+      expect(body.priorGiftDeductions).toBe(50000000);
+      expect(body.priorGiftTaxPaid).toBe(4850000);
+      expect(body.spouseAlive).toBe(false);
+      expect(body.children).toEqual([{ age: 35, disabledLifeExpectancyYears: null }]);
+      return HttpResponse.json({ ...tax, payableTax: 50585500 });
+    }),
+  );
   const { user } = render("inheritance");
   const button = await screen.findByRole("button", { name: "내 정보로 채우기" });
   await waitFor(() => expect(button).toBeEnabled());
   await user.click(button);
   expect(screen.getByLabelText(/금융재산 \(원\)/)).toHaveValue(300000000);
+  expect(screen.getByLabelText(/상속인 사전증여 · 10년/)).toHaveValue(100000000);
+  expect(screen.getByLabelText(/상속인 외 사전증여 · 5년/)).toHaveValue(0);
   expect(screen.getByText(/점수 계산에서 뺀 자산은 부동산/)).toBeVisible();
+  expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "계산하기" }));
-  expect(await screen.findByText("예상 납부세액")).toBeVisible();
+  expect(await screen.findByText("50,585,500원")).toBeVisible();
+  expect(screen.queryByText("입력값과 허용 범위를 확인해 주세요.")).not.toBeInTheDocument();
 });
 
 it("분산 증여 타임라인과 비교 카드·차트", async () => {

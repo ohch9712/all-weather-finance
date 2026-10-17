@@ -1,5 +1,6 @@
 import type { DonorGroup, Relation } from "./types";
 
+export const relativeScopeHint = "기타친족은 4촌 이내 혈족·3촌 이내 인척입니다. 2025-03-14 전 증여는 종전 범위인 6촌 이내 혈족·4촌 이내 인척을 적용해요.";
 export const relationLabels: Record<Relation, string> = { spouse: "배우자", child: "자녀", grandchild: "손자녀", parent: "부모", other_relative: "기타친족" };
 export const donorLabels: Record<DonorGroup, string> = { parents: "부모", grandparents: "조부모", spouse: "배우자", children: "자녀", relative: "기타친족", non_relative: "친족 아님" };
 export const categoryLabels: Record<string, string> = { lineal_ascendant: "직계존속", lineal_descendant: "직계비속", spouse: "배우자", other_relative: "기타친족", none: "공제 없음" };
