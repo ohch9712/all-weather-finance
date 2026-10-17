@@ -37,17 +37,51 @@
 
 ## 4. CODEF 연동 (`integrations/codef/`)
 
-| 항목 | 값 | 상태 |
+코디네이터가 2026-10-17에 확인한 값이다. 출처는 CODEF 개발가이드(https://developer.codef.io/common-guide/rest-api, `/common-guide/connected-id/register`·`/delete`. 가이드 화면은 공개 조회 API `https://admin.codef.io/dev-guide-menu/menu-detail/<코드>?mode=real`과 상품 파라미터 `…/api-input-param/<코드>`·`…/api-output-param/<코드>`에서 본문을 읽는다), 가이드가 안내하는 공식 라이브러리 `codef-io/easycodefpy`(`easycodefpy/properties.py`·`connector.py`·`util.py`), 가이드의 "기관별 로그인 제공 현황" 시트(https://docs.google.com/spreadsheets/d/1VxZKdL_mNzQDh31DEdzwFDo94TvBfWVeemgRHY2P6Yk, 카드-개인 2021-10-27·은행-개인 2022-03-14 기준)다. 코드 주석에 해당 URL을 남긴다.
+
+| 항목 | 값 | 출처 |
 | --- | --- | --- |
-| 키 발급 | CODEF 홈페이지 가입 → 샌드박스 키 즉시, 데모(일 100회)는 신청 후 승인 | 확인됨 |
-| 토큰 | `clientId`·`clientSecret`으로 accessToken 발급, HTTP 헤더에 담아 요청 | 확인됨(도메인·경로는 가이드로 확인) |
-| 환경 도메인 | 샌드박스·데모·정식 도메인 | 확인 필요 |
-| 요청·응답 인코딩 | 요청·응답 본문 인코딩 규칙(URL 인코딩 여부) | 확인 필요 |
-| 비밀번호 암호화 | CODEF 공개키로 RSA 암호화해 전송 | 확인 필요(패딩 방식) |
-| 계정 등록 | connectedId 발급(기관코드, 업무 구분 카드·은행, 로그인 방식 ID/PW) | 확인 필요(경로·필드) |
-| 카드 승인내역 | 개인 카드 승인내역 상품 | 확인 필요(경로·필드) |
-| 은행 계좌 목록·잔액 | 개인 은행 보유계좌 상품 | 확인 필요(경로·필드) |
-| 기관코드 | 카드사·은행 코드표 | 가이드의 표를 `organizations.py`에 옮긴다 |
+| 키 발급 | CODEF 홈페이지 가입 → 샌드박스 키 즉시, 데모(일 100회)는 신청 후 승인. 키는 `clientId`·`clientSecret`·`publicKey` 세 가지 | 가이드 rest-api |
+| 환경 도메인 | 샌드박스 `https://sandbox.codef.io`, 데모 `https://development.codef.io`, 정식 `https://api.codef.io`. `CODEF_ENV`(`sandbox`·`development`·`production`)로 고른다 | easycodefpy `properties.py` |
+| 토큰 | `POST https://oauth.codef.io/oauth/token`, 헤더 `Authorization: Basic base64("{clientId}:{clientSecret}")`, `Content-Type: application/x-www-form-urlencoded`, 본문 `grant_type=client_credentials&scope=read`. 응답 JSON의 `access_token`. 유효기간 1주일이라 메모리에 두고 재사용하고, 만료 1시간 전이거나 상품 응답이 401이면 다시 받는다 | 가이드 rest-api, easycodefpy `connector.request_token`·`util.check_validity` |
+| 상품 요청 | `POST <도메인><경로>`, 헤더 `Authorization: Bearer <access_token>`, `Accept: application/json`. 본문은 `json.dumps(body, ensure_ascii=False)`를 `urllib.parse.quote`로 URL 인코딩한 문자열 | easycodefpy `connector.execute`·`request_product` |
+| 응답 | HTTP 200 본문을 `urllib.parse.unquote_plus`로 디코딩한 뒤 JSON. 형식 `{"result": {"code", "message", "extraMessage", "transactionId"}, "data": …}`. 성공은 `result.code == "CF-00000"`. 그 밖의 코드는 실패(`CF-03002`는 추가인증 요구라 이 작업에서는 실패로 처리). `data`는 상품에 따라 객체 또는 배열이고, 건이 하나면 배열 대신 객체로 올 수 있으므로 둘 다 받는다 | 가이드 rest-api·add-auth, easycodefpy |
+| 비밀번호 암호화 | `publicKey`(Base64 DER 공개키)로 RSA PKCS#1 v1.5 암호화 후 Base64. `cryptography`의 `serialization.load_der_public_key`와 `padding.PKCS1v15()`를 쓴다(01a가 설치함) | 가이드 cid-register, easycodefpy `util.encrypt_rsa` |
+| 계정 등록 | `POST /v1/account/create`, 본문 `{"accountList": [{"countryCode": "KR", "businessType": "CD"·"BK", "clientType": "P", "organization": "<기관코드>", "loginType": "1", "id": "<아이디>", "password": "<RSA 암호문>"}]}`. 응답 `data.connectedId`(실패 시 없음), `data.successList[]`, `data.errorList[]`(각 `code`·`message`·`organization`·`businessType`). `connectedId`가 없거나 `errorList`가 비어 있지 않으면 실패 | 가이드 cid-register |
+| 계정 삭제 | `POST /v1/account/delete`, 본문 `{"connectedId": "…", "accountList": [{"countryCode": "KR", "businessType", "clientType": "P", "organization", "loginType": "1"}]}`. 기관을 모두 지우면 connectedId도 없어진다. 이 작업은 계정 하나에 connectedId 하나를 발급한다(계정 추가 `/v1/account/add`는 쓰지 않는다) | 가이드 cid-delete |
+| 카드 승인내역 | 상품 `KR_CD_P_002`, `POST /v1/kr/card/p/account/approval-list`. 입력 `organization`, `connectedId`, `startDate`·`endDate`(`YYYYMMDD`), `orderBy: "0"`(최신순), `inquiryType: "1"`(전체 조회, 카드번호 불필요), `memberStoreInfoType: "0"`. 출력 항목: `resUsedDate`(사용일자 `YYYYMMDD`), `resUsedTime`, `resCardName`, `resMemberStoreName`, `resUsedAmount`(이용금액, 문자열), `resApprovalNo`, `resHomeForeignType`(`"1"` 국내·`"2"` 해외), `resCancelYN`(`"0"` 정상·`"1"` 취소·`"2"` 부분취소·`"3"` 거절), `resCancelAmount`(취소건만), `resKRWAmt`(원화금액), `resAccountCurrency`(ISO 4217), `resMemberStoreType`(가맹점 업종, 가맹점 포함 조회 때만) | 가이드 상품 KR_CD_P_002(입력·출력 파라미터) |
+| 은행 보유계좌·잔액 | 상품 `KR_BK_1_P_001`, `POST /v1/kr/bank/p/account/account-list`. 입력 `organization`, `connectedId`. 출력 `data.resDepositTrust[]`(예금·신탁: `resAccount`, `resAccountDisplay`, `resAccountName`, `resAccountBalance`(문자열), `resAccountCurrency`, `resAccountDeposit`(`11` 수시입출·`12` 정기/적금·`13` 신탁·`10`·`14` 미분류), `resOverdraftAcctYN`), `resForeignCurrency[]`, `resFund[]`, `resLoan[]`, `resInsurance[]` | 가이드 상품 KR_BK_1_P_001 |
+| 기관코드 | 아래 "지원 기관"만 `organizations.py`에 둔다 | 기관별 로그인 제공 현황 시트 |
+
+지원 기관(개인, 아이디 로그인으로 등록·해당 상품이 ●인 곳 중 추가 입력이 필요 없는 곳)
+
+- 카드(`businessType: "CD"`, 승인내역): `0301` KB국민카드, `0303` 삼성카드, `0304` NH농협카드, `0305` BC카드, `0306` 신한카드, `0307` 씨티카드, `0309` 우리카드, `0311` 롯데카드, `0315` 전북카드
+  - 뺀 곳: `0302` 현대카드·`0313` 하나카드(아이디 로그인에 카드번호·카드 비밀번호 추가 입력 필요), `0316` 광주·`0320` 수협·`0321` 제주·`0002` 산업은행카드(아이디 로그인 미제공)
+  - KB국민카드는 카드소지확인 화면으로 넘어가면 `CF-12108`을 돌려준다. 그대로 `CONNECTOR_FAILED`로 처리한다.
+- 은행(`businessType: "BK"`, 보유계좌): `0003` IBK기업, `0004` KB국민, `0011` NH농협, `0020` 우리, `0023` SC제일, `0037` 전북, `0039` 경남, `0045` 새마을금고, `0071` 우체국, `0081` 하나, `0088` 신한
+  - 뺀 곳: `0027` 씨티(아이디 로그인 때 SMS 추가인증), `0031` 대구(아이디 로그인에 출금계좌 정보 필요), `0089` K뱅크(개인뱅킹 웹 서비스 종료), 아이디 로그인 미제공 기관
+  - 상품 안내 문구는 "공동인증서 로그인을 지원"이라고만 적고 시트는 아이디 로그인을 ●로 표시한다. 아이디 로그인 실제 동작은 데모 키로만 확인할 수 있으므로 화면에 "은행은 기관에 따라 아이디 로그인이 막힐 수 있어요" 안내를 붙인다.
+
+### 4.1 응답 → 내부 타입 변환
+
+- 카드 승인 1건 → `LedgerImportRow`
+  - `occurred_on` = `resUsedDate`, `merchant` = `resMemberStoreName`(비어 있으면 그 행은 건너뛰고 `failed`에 센다), `card_name` = `resCardName`, `approval_no` = `resApprovalNo`(빈 값이면 None), `merchant_category` = `resMemberStoreType`(빈 값이면 None)
+  - 금액: 국내(`resHomeForeignType == "1"`)는 `resUsedAmount`, 해외는 `resKRWAmt`. 쉼표를 지운 정수의 절댓값. 해외인데 `resKRWAmt`가 없으면 건너뛴다(외화는 가계부에 넣지 않는다).
+  - `resCancelYN`이 `"1"`이면 `is_cancellation=True`(금액은 `resCancelAmount`가 있으면 그 값, 없으면 이용금액). `"2"`(부분취소)는 `resCancelAmount`가 있으면 그 금액으로 취소 행 하나를 만들고, 없으면 정상 승인으로 둔다. `"3"`(거절)은 건너뛴다. 이용금액이 음수(KB 취소전표매입)면 `is_cancellation=True`.
+- 은행 예금 1건(`resDepositTrust`만) → `SyncedHolding`
+  - `external_ref` = `"codef:" + sha256(f"{organization}|{resAccount}").hexdigest()[:24]`(계좌번호 원문을 저장하지 않는다)
+  - `name` = `"{은행 이름} {resAccountName} ({계좌번호 끝 4자리})"`를 50자로 자른다
+  - `amount` = `resAccountBalance` 정수, `asset_class="cash"`
+  - `resAccountCurrency != "KRW"`, 마이너스 통장(`resOverdraftAcctYN == "1"`), 잔액이 음수인 계좌는 넣지 않는다. 외화·펀드·대출·보험 목록은 쓰지 않는다.
+- 응답·로그·`summary`·예외 메시지에 계좌번호 원문, 카드번호, connectedId 원문을 남기지 않는다.
+
+### 4.2 구현 메모
+
+- `easycodefpy`는 설치하지 않는다(의존성 추가 금지). `httpx`와 `cryptography`로 위 형태를 직접 구현한다.
+- easycodefpy 소스에 공개 샌드박스 clientId·secret 상수가 있지만 코드·테스트·문서에 옮기지 않는다. 키는 `CODEF_CLIENT_ID`·`CODEF_CLIENT_SECRET`·`CODEF_PUBLIC_KEY` 설정값만 쓴다. 테스트는 가짜 키와 테스트에서 만든 RSA 키 쌍을 쓴다.
+- `ledger.import_entries`는 분류에 personal LLM(`ledger.categorize`)을 쓸 수 있다. 테스트는 `get_structured_llm`을 `FakeStructuredLLM`으로 바꾸거나 personal을 꺼 둔다.
+- 카드 동기화의 `batch_id`는 동기화 행 id다. 10의 `/ledger/import/review?batch=<syncId>`는 이 id로 내역을 보여 준다(임포트 작업이 아니라 저장·중복·실패 줄은 나오지 않는다. 그 수는 17 화면의 동기화 결과에 보여 준다).
+- 은행 계정을 삭제하면 `allocation.upsert_synced_holdings(..., connection_id=account_id, items=[])`로 그 계정에서 만든 현금 자산을 지운다(같은 트랜잭션에서 커밋).
 
 - "확인 필요" 항목은 공식 가이드에서 확인한 값만 쓰고 코드 주석에 가이드 URL을 남긴다. 확인하지 못한 상품은 `CONNECTOR_NOT_SUPPORTED`로 둔다.
 - 요청에 쓰는 사용자 로그인 비밀번호는 메모리에서 RSA로 암호화해 바로 보내고 **어디에도 저장하지 않는다**(DB, 로그, 예외 메시지, 테스트 스냅샷 모두). 아이디도 저장하지 않는다. 저장하는 것은 connectedId(Fernet 암호화)뿐이다.
@@ -67,7 +101,7 @@ class DataConnector(Protocol):
 ```
 
 - `MyDataConnector`: `is_available()`는 항상 False, 나머지는 `CONNECTOR_NOT_SUPPORTED`("마이데이터는 금융위원회 허가를 받은 본인신용정보관리업자만 쓸 수 있어 개인 프로젝트에서는 연동할 수 없습니다.").
-- `LedgerImportRow`는 10, `SyncedHolding`은 14의 타입이다. 은행 잔액은 계좌마다 `SyncedHolding(external_ref=<마스킹 계좌번호>, name="<은행> 예금", amount=잔액, asset_class="cash")`.
+- `LedgerImportRow`는 10, `SyncedHolding`은 14의 타입이다. 은행 잔액은 계좌마다 `SyncedHolding`이고 값은 4.1을 따른다.
 
 ## 6. DB 스키마 (revision `connectors_0001`, `branch_labels=("connectors",)`)
 
@@ -112,7 +146,7 @@ UNIQUE `(user_id, provider, kind, organization)`.
 | `POST /api/connectors/sync` | `200 Sync` |
 | `GET /api/connectors/syncs?accountId=&page=` | `200 Page<Sync>` |
 
-- `POST /accounts` 요청: `{"provider": "codef", "kind": "card", "organization": "…", "label": "신한카드", "loginId": "…", "password": "…", "consent": true}`. `consent`가 없으면 `422`("카드사 로그인 정보가 CODEF로 전송되는 데 동의해 주세요."). 제공자가 쓸 수 없으면 `409 CONFLICT`("CODEF 키가 설정되지 않았습니다.").
+- `POST /accounts` 요청: `{"provider": "codef", "kind": "card", "organization": "…", "label": "신한카드", "loginId": "…", "password": "…", "consent": true}`. `consent`가 없으면 `422`("카드사 로그인 정보가 CODEF로 전송되는 데 동의해 주세요."). 제공자가 쓸 수 없으면 `409 CONFLICT`("CODEF 키가 설정되지 않았습니다."). `organization`이 4절 지원 기관(그 `kind`의 목록)에 없으면 `422 VALIDATION_ERROR`("지원하지 않는 기관입니다."). 같은 기관을 다시 등록하면 `409 CONFLICT`.
 - `Account`: `{"id", "provider", "kind", "organization", "organizationName", "label", "createdAt"}`(connectedId 원문 없음)
 - `POST /sync` 요청: `{"accountId": "…", "from": "2026-09-01", "to": "2026-10-16"}`(카드만 기간 사용, 최대 92일)
   - 카드: `fetch_card_approvals` → `ledger.import_entries(db, user_id, rows, source="codef", batch_id=sync_id)`
