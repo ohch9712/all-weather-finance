@@ -156,3 +156,39 @@ develop `5d82533`의 실제 코드와 대조해 정한 내용이다. 표와 어�
 5. 도구 결과에 이메일·사용자 ID·계좌번호가 없다.
 6. 09의 append-only·고정 프롬프트 규칙이 유지된다(도구 목록 이름순, 시스템 프롬프트 고정).
 7. `get_recommendation`·`compare_estate_plans` 도구가 02·06의 공개 함수만 부르고, 결과 문장을 바꾸지 않고 전달한다.
+
+## 구현 결과
+
+### 구현한 것
+
+- 백엔드 도구 16개(`backend/app/modules/chat/tools/`): `allocation.py`(get_allocation_report·get_recommendation·get_risk_profile), `ledger.py`(get_spending_summary), `journal.py`(get_trade_stats·get_positions), `market.py`(search_stocks·get_stock_detail), `screener.py`(screen_stocks), `watchlist.py`(get_watchlist·add_to_watchlist), `estate.py`(get_gift_deductions·estimate_gift_tax·compare_estate_plans·plan_gifts), `learn.py`(search_learning), 공통 도우미 `common.py`. `tools/__init__.py`에서 등록해 `get_registered_tools()`가 이름순 18개다. 다른 모듈은 4절 표의 공개 서비스 함수와 그 함수가 쓰는 타입(`schemas`)만 import한다.
+- 결과 `content`는 숫자를 형식화하지 않은 JSON(원 정수, Decimal은 JSON 숫자, 날짜는 ISO)과 요약 문장 `summary`다. 카드 값은 서버에서 형식화한 문자열이고(`allocation`의 비중만 숫자) 5절 카드 8종과 09의 `table`·`link`·`key_value`를 쓴다.
+- 4.1의 상태 변환: 409 `PROFILE_INCOMPLETE`·`RISK_PROFILE_REQUIRED`, 관심종목 404·409, estate 공개 함수와 `plan_gifts` 자체 검증의 404·422(`details` 포함), 사전 채움 재산 없음(합계 0 포함) `assets_required`를 `{"status", "message"}` 결과로 돌려준다. 그 밖의 예외는 잡지 않는다.
+- 09 수정: `agent.execute_tool`의 savepoint를 명시적 방식(`begin_nested()` → 활성이면 commit/rollback, 도구가 이미 커밋했으면 `db.rollback()`)으로 바꿨고(4.1 정정 반영), `_safe_card`가 모든 카드의 `href`와 `link_list`의 링크를 앱 내부 경로로 제한한다. 시스템 프롬프트 끝에 6절의 도구 사용 안내를 고정 문자열로 더했다.
+- 평가 세트 `chat/evals/questions.yaml`(17개: 데이터 도구 16개 각 1개 + 주문 거절 1개)과 `run_eval.py`(`uv run python -m app.modules.chat.evals.run_eval`). 시드 사용자 데이터는 공개 API로 만들고 끝나면 트랜잭션을 롤백한다. 처음 부른 도구 일치율, 기대 도구 호출률, 금지 문구 건수, 공급자·모델을 Markdown 표로 출력한다.
+- 프론트 `features/chat/cards/`: `AllocationCards.tsx`(allocation: `DonutChart`+`--asset-*` 색, directions: investment 고지), `SpendingCard.tsx`, `StockCards.tsx`(stock·stock_list: mock이면 `SampleDataBadge`+sample 고지), `EstateCards.tsx`(gift_tax·comparison: tax 고지, 추천 방향 표시), `LinkListCard.tsx`, 공통 `CardParts.tsx`. `registry.tsx`에 등록했고 `types.ts`에 카드 타입을 더했다. `features/chat/index.ts`의 `openChatWidget({ draft })`는 바꾸지 않았다.
+
+### 스펙에 없어 정한 것
+
+- 도구 입력 모델은 camelCase 키만 받는다(`alias_generator=to_camel`, `populate_by_name=False`, `extra="forbid"`). `get_trade_stats`는 `from`·`to` 별칭, `from > to`면 입력 오류다. `get_spending_summary`의 `month`는 `YYYY-MM` 검증, null이면 `ToolContext.today`(KST)의 달이다. 금리·수익률 문자열(`annualGrowthRate` 0~10, `annualReturnRate` 0~20)은 숫자 문자열만 받는다.
+- 데이터 없음 상태 이름: `no_entries`(가계부 그 달 없음), `no_trades`, `no_positions`, `no_snapshot`(조건검색 스냅샷 없음), `empty`(관심종목), `no_results`(학습 글), `not_found`(종목), `no_members`(가족 없음), `member_not_found`·`member_ambiguous`(후보 `candidates`: 별칭·관계·나이, ID 없음). `search_stocks` 결과 없음은 빈 `items`와 카드 없음이다.
+- 카드를 내지 않는 경우: 상태 결과, 추천이 ready가 아닐 때, 검색 결과 없음, 분산 증여 일정이 비었을 때. `allocation` 카드는 데이터 없음 상태에도 상태 문구와 링크를 보여 준다.
+- `plan_gifts`의 증여자: 사용자가 증여자이므로 손자녀 가족이면 `grandparents`, 그 밖은 `parents`(06 라우터 기본값). 입력 순서는 06 라우터와 같다.
+- `compare_estate_plans`의 기본값(20년·"3"·1억)과 `plan_gifts`의 기본값(30세·"4")은 06 스키마 기본값과 같은지 테스트로 고정했다.
+- `screen_stocks`는 모델·카드에 상위 10개만 보내고 링크(`/stocks/screener?f=<encode_filter>`)로 전체를 보게 한다. `get_watchlist` 카드는 앞 20개, `extra`는 그룹 이름이다.
+- 360px 채팅 폭(카드 안 표 270px)에 맞추려고 표 카드 열을 줄였다: 보유 종목은 "종목(수량)" 한 열, 공제 현황은 `가족·공제 | 남은 공제/한도(짧은 금액) | 회복일`, 분산 증여는 `증여일(나이)`. 정확한 값은 모델용 `content`에 있다.
+- 카드 금액 표기: `app.core.format.format_krw_compact`는 억 단위 정수부에 쉼표가 없어(`12756억원`) 프론트 `formatKRWCompact`(`12,756억원`)와 다르다. 공용 파일(01a)은 고치지 않고 `chat/tools/common.py`의 `krw_compact`에서 쉼표를 넣어 화면 규칙과 맞췄다(코디네이터 참고). 비율은 사사오입(ROUND_HALF_UP)으로 `+1.11%`·`48.4%`처럼 쓴다.
+- 09의 기본 도구 테스트 중 "도구가 기본 2개뿐"을 전제한 단언 4곳을 18개 목록(`ALL_TOOL_NAMES`)으로 바꿨다.
+
+### 검사 결과
+
+- 백엔드(develop `87fbb76` 병합 후): `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 1355개 통과(챗봇 249개: 도구별 입력 검증·호출 인자·content·카드·데이터 없음 상태·다른 사용자 격리, memberName 일치·후보, 이름순 18개와 두 공급자 도구 선언, 설명 규칙, 공개 함수만 호출(AST 검사), 개인정보 없음, savepoint 회귀, "점수 알려줘" 시나리오 → 마지막 응답 행 `cards` → 상세 `DisplayMessage.cards`, 시스템 프롬프트 고정).
+- 마이그레이션: 15는 revision을 추가하지 않았다. 확인으로 빈 DB `finance_15_cycle`에서 `upgrade heads` → `downgrade base` → `upgrade heads` 성공(head 11개) 후 삭제했다.
+- 프론트: `npm run lint`·`npx tsc --noEmit` 통과, `npm run test` 466개 통과(카드 테스트 13개 추가), `npm run build` 성공.
+- 화면: `scripts/start.sh`(8015·3015)에 Mock 종목·학습 글을 시드하고, 화면 확인용 사용자를 공개 API로 만든 뒤 실제 도구 16개가 만든 카드를 담은 대화를 Orca 독립 프로필 브라우저로 열었다. 360px에서 `scrollWidth` 360, 넘치는 요소 0개, 표 카드 4개 모두 내부 폭 270/270, 카드 15종 표시(관심종목 담기는 두 번째 실행에서 `conflict` 상태라 카드 없음을 함께 확인), 고지 investment·sample·tax·ai 표시, 콘솔 오류 0건. 1280px도 넘침 0개. 확인 후 서버를 `scripts/stop.sh`로 멈췄다.
+- 평가 세트: 이 환경에서는 personal 공급자로 실행하지 않음(코디네이터 지시, 실제 Gemini·Ollama 호출 금지). 도구 일치율·금지 문구 결과는 없다. 테스트 환경(personal 꺼짐)에서 `run_eval.main()`이 공급자·DB를 부르지 않고 끝나는 것과 질문 세트 구조·집계 함수만 테스트로 확인했다.
+
+### 남은 일
+
+- 실제 personal 공급자(로컬 Ollama `gemma4:12b` 또는 결제 Gemini)로 `run_eval.py`를 돌려 도구 일치율·금지 문구 0건·공급자·모델을 이 절에 남긴다.
+- 01a의 `format_krw_compact` 억 단위 쉼표를 프론트와 맞추면 `chat/tools/common.py`의 보정을 지울 수 있다.
