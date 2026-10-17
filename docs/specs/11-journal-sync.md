@@ -71,6 +71,7 @@
   - `price`가 없으면 `amount ÷ quantity`. 둘 다 없으면 오류("단가 또는 거래금액이 필요합니다.").
   - `symbolCode`가 없으면 `market.service.search_stocks(db, symbolName, limit=5)`에서 이름이 정확히 같은 종목 하나를 찾아 채운다. 없거나 여럿이면 오류("종목코드를 찾지 못했습니다. 종목코드 열을 매핑해 주세요."). (`normalize_row`에 `db`가 필요하므로 커밋 직전 일괄 보정 단계에서 처리해도 된다. 미리보기에는 "커밋 때 종목코드를 찾습니다" 경고로 표시한다.)
   - `market`이 없으면 6자리 숫자 코드는 `KRX`, 그 외는 `US`. `currency`가 없으면 시장에서 정한다(05 규칙).
+  - 이 추론은 **비어 있는 칸에만** 쓰고, 종목코드가 없는 행은 종목코드 보정이 끝난 뒤에 한다. 사용자가 매핑한 `market`·`currency` 값은 덮어쓰지 않는다(갱신 2026-10-17, 11 검증 F1). 종목명 보정은 국내 종목 마스터(08)로만 하므로 찾은 종목은 `KRX`다. 명시한 `market`이 `KRX`가 아니거나 명시한 `currency`가 `KRW`가 아니면 그 행은 오류(`field: "market"` 또는 `"currency"`, "찾은 종목의 시장·통화와 맞지 않습니다. 종목코드 열을 매핑해 주세요.")다. 미리보기 단계에서는 코드 없는 행의 시장·통화 불일치를 판정하지 않는다.
   - 시각이 없으면 05 규칙(09:00 KST, `timeKnown=false`).
 - `dedup_hash` = `sha256("{user_id}|{traded_on}|{traded_time or ''}|{symbol_code}|{side}|{quantity}|{price}")`. `normalize_row`에는 `user_id`·`db`가 없으므로 `import_trades`가 계산한다. 같은 호출(한 파일) 안에 위 문자열이 같은 행이 여러 개면 두 번째부터 끝에 `|{n}`(n = 1, 2, …, 파일 안 순서)을 붙인다(10 5절과 같은 규칙: 같은 날 같은 값의 매수 두 건은 둘 다 저장하고, 같은 파일을 다시 올리면 중복으로 걸러진다).
 - 수동 입력(05 `create_trade`)에는 `dedup_hash`를 넣지 않는다(지금 동작 유지).
@@ -87,7 +88,7 @@
     1. 같은 `(connection_id, external_id)` 행이 있으면 바뀐 값만 갱신한다. 실제로 바뀐 칸이 있으면 `updated`, 없으면 `unchanged`로 센다(같은 기간을 두 번 불러도 데이터가 그대로다).
     2. 없으면, `connection_id`가 없는 내 거래(수동·파일) 중 체결일(KST)·종목코드·매매구분·수량·단가가 같고 아직 다른 체결과 짝지어지지 않은 거래가 있으면 건너뛴다(`skippedDuplicates`). 기존 거래 하나는 체결 하나만 가린다(같은 값 체결이 두 건이고 수동 거래가 한 건이면 한 건은 삽입). 수동 거래는 시각이 없을 수 있어 `dedup_hash`로 비교하지 않는다.
     3. 그 밖이면 삽입(`inserted`).
-  - 응답 `200 {"inserted": 12, "updated": 0, "unchanged": 0, "skippedDuplicates": 3, "from": "…", "to": "…", "syncedAt": "…"}`. 한 요청은 한 트랜잭션이다.
+  - 응답 `200 {"inserted": 12, "updated": 0, "unchanged": 0, "skippedDuplicates": 3, "costEstimated": 12, "from": "…", "to": "…", "syncedAt": "…"}`. `costEstimated`는 이번 요청에서 수수료·세금을 05b 요율로 추정해 넣은 거래(삽입·갱신) 수다. 한 요청은 한 트랜잭션이다.
   - 오류: 연결 없음 404, 연결이 `active`가 아님 `409 BROKER_NOT_CONNECTED`, 어댑터 미지원 `501 BROKER_NOT_SUPPORTED`, 그 밖은 08의 에러 변환.
 - `GET /api/journal/sync/status` → `200 {"items": [{"connectionId", "label", "provider", "lastSyncedAt": "…" | null, "tradeCount": 42}]}`(사용자 연결마다)
 
@@ -126,7 +127,7 @@ def import_trades(db, user_id, rows: list[TradeImportRow], *, source: str, batch
 
 - `/journal/import`: 두 영역
   - "파일로 가져오기": `ImportWizard kind="journal_trades"`. 증권사 앱·HTS의 거래내역 내보내기 안내.
-  - "증권사에서 불러오기": 연결 선택(활성 연결만, 없으면 `/settings/connections` 안내. 연결 목록은 08의 `GET /api/market/connections`를 `features/journal/api.ts`에서 부른다), 기간(기본 최근 30일, 최대 90일), "불러오기" → 결과 요약(삽입·갱신·변화 없음·건너뜀), 연결별 마지막 동기화 시각. 토스 연결은 `501`이면 "토스증권은 개별 체결 조회를 지원하지 않아요" 안내. 수수료·세금을 추정한 행이 있으면 "증권사가 수수료·세금을 주지 않아 기본 요율로 추정했어요"와 `/settings/trading-costs` 링크.
+  - "증권사에서 불러오기": 연결 선택(활성 연결만, 없으면 `/settings/connections` 안내. 연결 목록은 08의 `GET /api/market/connections`를 `features/journal/api.ts`에서 부른다), 기간(기본 최근 30일, 최대 90일), "불러오기" → 결과 요약(삽입·갱신·변화 없음·건너뜀), 연결별 마지막 동기화 시각. 토스 연결은 `501`이면 "토스증권은 개별 체결 조회를 지원하지 않아요" 안내. 수수료·세금을 추정한 행이 있으면(동기화 응답 `costEstimated > 0`) "증권사가 수수료·세금을 주지 않아 기본 요율로 추정했어요"와 `/settings/trading-costs` 링크. 0이면 안내하지 않는다.
   - 저장 후 매매일지 쿼리(목록·보유·통계)를 무효화한다(10의 캐시 미갱신 지적과 같은 문제를 피한다).
 - `/journal` 보유 탭: 현재가, 평가금액, 평가손익(색 규칙), 수익률 열 추가. `quoteSource=mock`이면 `SampleDataBadge`. 시세가 없으면 "-".
 - 기록 탭: `source=mock` 거래에 "샘플" 배지(Mock 연결 동기화 결과).

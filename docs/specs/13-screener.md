@@ -205,3 +205,24 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 4. URL 인코딩 규칙이 백엔드·프론트에서 같다(같은 필터 → 같은 문자열).
 5. 서비스 함수 시그니처가 8절과 같다(15의 전제).
 6. 사용자 격리 404.
+
+## 구현 결과
+
+- 화이트리스트 필터 모델(추가 필드 금지, 연산자·범위·조건 10개·limit·종류 중복 검증), 최신 스냅샷의 AND 평가, 52주 비율, 누락 지표 제외 수, null 마지막·동률 코드순 정렬을 구현했다. 기본 종류는 주식만이며 ETF와 주식·ETF 선택을 지원한다.
+- `screener.parse` general 작업을 공통 `StructuredLLM`으로 호출한다. 시스템 프롬프트는 `get_filter_guide()`의 필드·단위·계산식·기준표를 그대로 포함하며, 검증 실패 503·거절 422·꺼짐 503과 서버 생성 칩을 제공한다.
+- 인증이 필요한 5~7절 API, 저장 검색 CRUD·사용자당 20개·이름 중복·사용자 격리, `screener_0001` 마이그레이션을 구현했다. 동시 저장 요청도 상한을 지키도록 사용자별 트랜잭션 잠금을 사용한다.
+- 키움 조건식은 허용된 08 서비스 함수로 클라이언트를 얻고 `CONDITIONS` 능력을 확인한다. Mock 조건식 2개와 501 처리를 검증했다. 코디네이터 답변에 따라 스냅샷에 없는 코드의 이름은 공개 `search_stocks(db, code, limit=1)`로 정확히 일치하는 첫 항목만 보완하고, 마스터에도 없으면 코드로 표시한다. 지표는 null이다.
+- `/stocks/screener`에 AI 입력·수정/삭제 가능한 조건 칩·직접 조건 추가·종류/시장/업종/limit·결과 정렬·관심종목 담기(409 안내)·저장/불러오기/삭제·연결별 키움 탭을 구현했다. 작은 화면은 결과 카드, 큰 화면은 표로 표시하며 ETF 배지·null 표시·기준일·누락 지표 수·AI 공급자 배지와 필요한 고지를 붙였다. 숫자 열은 백엔드에서 다시 정렬하고, DSL 필드에 없는 종목명·시장은 현재 표시 결과를 정렬한다.
+- `encode_filter`와 `encodeFilter`는 기본값을 포함한 camelCase JSON의 키를 재귀 정렬하고, UTF-8 base64url에서 패딩을 제거한다. 소수 문자열의 끝자리 0과 Python Decimal의 지수 표기를 보존하며, 한국어 업종·소수 조건을 포함한 고정 사례로 두 구현의 결과 일치를 확인했다. `?f=` 진입은 필터 검증 후 자동 실행하며 잘못된 링크는 안내한다.
+- `seed-mock`으로 종목/스냅샷 90개(주식 80·ETF 10)를 준비한 뒤 실제 API와 독립 Playwright 컨텍스트에서 갱신된 예시의 결과를 확인했다: 코스피 중형주+`0 < PER ≤ 10` **4건**, 코스닥+거래대금 1,000억 이상 **27건**, ROE 15 이상+저PBR **5건**, 등락률 3 초과 **14건**. general AI가 꺼져 있어 실제 LLM 호출 없이 직접 조건/필터 링크로 확인했고, 자연어 흐름은 FakeStructuredLLM·MSW로 검증했다.
+- 검증: `scripts/worktree-setup.sh`, `uv run alembic upgrade heads`, `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`(전체 1,065개, screener 28개), `npm run lint`, `npx tsc --noEmit`, `npm run test`(전체 359개, screener 8개), `npm run build` 통과. 기존 Starlette TestClient deprecation 경고 1건이 있으며 실패는 없다.
+- 별도 빈 DB `finance_13_impl_verify`에서 `upgrade heads → downgrade base → upgrade heads`를 통과하고 DB를 삭제했다. 360px·1280px에서 문서 가로 넘침이 없고 브라우저 pageerror가 없음을 확인했으며, 조건 수정·실행과 Mock 키움 탭도 확인했다. `scripts/stop.sh`로 두 서버를 종료했다.
+- 스펙과 다른 점: 없음. 코디네이터가 갱신한 예시 문구(develop `1975b0c`)와 이름 보완 지침을 반영했다. 공유 파일·08 모듈·증권사 어댑터·의존성은 수정하지 않았고 테스트에서 실제 외부 API/LLM은 호출하지 않았다.
+- 남은 일: 별도 검증 워커의 PR 검증과 코디네이터 병합. 실제 Gemini·증권사 연결 확인은 이 작업에서 수행하지 않았다.
+
+### PR 검증 후 정렬 상태 수정
+
+- 중요 발견 1번을 수정했다. 숫자 열의 정렬 표시와 다음 방향 계산은 상위 `ScreenFilter.sort`를 사용하고, 명시적인 필터 변경/불러오기 외의 재조회에서는 마지막 성공 결과를 유지한다. 재조회 중 표를 유지하고 `aria-busy`·로딩 문구를 표시하며 정렬 조작을 잠시 비활성화한다. 종목명·시장 및 키움 결과의 화면 내 정렬만 별도 표시 상태로 처리한다.
+- 회귀 테스트 3개를 추가했다. 수정 전 3개 모두 실패한 것을 확인한 뒤, 숫자 열 두 번 클릭의 `asc → desc` 요청 순서·헤더 방향·지연 응답 중 동일한 표 유지, 모바일 선택 필드 유지·방향 전환, URL 및 저장 검색의 sort 복원을 모두 통과했다.
+- 수정 후 `npm run lint`, `npx tsc --noEmit`, `npm run test`(전체 **362개**, screener **11개**), `npm run build` 통과. 백엔드·의존성·공유 파일은 수정하지 않았다.
+- 실제 서버와 독립 Playwright Chrome 컨텍스트에서 1280px PER `asc → desc`, 360px PBR 선택 후 `asc → desc`, 응답 지연 중 표 유지, URL ROE `desc → asc`, 저장 검색 현재가 `desc → asc` 요청과 표시를 확인했다. 두 너비의 문서 가로 넘침과 pageerror는 없었고 실제 외부 API/LLM은 호출하지 않았다. `scripts/stop.sh`로 서버를 종료했다.
