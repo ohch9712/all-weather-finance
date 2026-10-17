@@ -70,7 +70,11 @@ export function makeSeriesTooltip(series: ChartSeries[], formatValue: ValueForma
   };
 }
 
-/** 차트와 같은 데이터의 표. 화면에는 보이지 않고 스크린리더가 읽는다. */
+/**
+ * 차트와 같은 데이터의 표. 화면에는 보이지 않고 스크린리더가 읽는다.
+ * 표 상자는 sr-only의 1px 높이·overflow를 따르지 않아 행이 많으면 문서 높이를 늘리므로,
+ * sr-only를 블록 컨테이너에 걸고 표는 그 안에 둔다.
+ */
 export function ChartDataTable({
   caption,
   columns,
@@ -81,32 +85,34 @@ export function ChartDataTable({
   rows: { key: string; cells: string[] }[];
 }) {
   return (
-    <table className="sr-only">
-      <caption>{caption}</caption>
-      <thead>
-        <tr>
-          {columns.map((column) => (
-            <th key={column} scope="col">
-              {column}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.key}>
-            {row.cells.map((cell, index) =>
-              index === 0 ? (
-                <th key={index} scope="row">
-                  {cell}
-                </th>
-              ) : (
-                <td key={index}>{cell}</td>
-              ),
-            )}
+    <div className="sr-only">
+      <table>
+        <caption>{caption}</caption>
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th key={column} scope="col">
+                {column}
+              </th>
+            ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key}>
+              {row.cells.map((cell, index) =>
+                index === 0 ? (
+                  <th key={index} scope="row">
+                    {cell}
+                  </th>
+                ) : (
+                  <td key={index}>{cell}</td>
+                ),
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
