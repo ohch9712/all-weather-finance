@@ -634,7 +634,7 @@ class BrokerClient(Protocol):
 | 상속·증여 | `/estate` | 06 |
 | 배우기 | `/learn` | 07 |
 | AI 상담 | `/chat` | 09 |
-| 설정 | `/settings/profile`, `/settings/connections` | 01b, 08 |
+| 설정 | `/settings/profile`, `/settings/connections`, `/settings/trading-costs` | 01b, 08, 05b |
 | 관리자(관리자만) | `/admin/learn` | 07 |
 
 ## 13. 고지 문구

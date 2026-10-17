@@ -1,4 +1,5 @@
 import {
+  BadgePercent,
   BookOpen,
   Bot,
   ChartPie,
@@ -38,6 +39,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/chat", label: "AI 상담", icon: Bot, group: "main" },
   { href: "/settings/profile", label: "프로필", icon: UserRound, group: "settings" },
   { href: "/settings/connections", label: "증권사 연결", icon: Plug, group: "settings" },
+  { href: "/settings/trading-costs", label: "매매 수수료·세금", icon: BadgePercent, group: "settings" },
   { href: "/admin/learn", label: "학습 콘텐츠 관리", icon: Shield, group: "admin", adminOnly: true },
 ];
 

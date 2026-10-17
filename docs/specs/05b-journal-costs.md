@@ -3,6 +3,7 @@
 > 선행: 05(매매일지)와 08b(국내 ETF 종류 구분)가 develop에 병합된 상태. 브랜치 `feature/05-journal-costs`(develop에서 새로 만든다. 05 워크트리와 슬롯 05를 다시 쓴다). 11은 이 작업이 병합된 뒤 시작한다.
 > 결정(2026-10-17, 사용자): 체결 수수료·세금의 기본값은 **키움증권 기준**으로 둔다. 증권사 이벤트 등으로 일시적으로 바뀔 수 있으니 사용자가 설정에서 기본값을 바꿀 수 있게 한다.
 > **착수 직전 갱신**: 코디네이터가 `frontend/src/lib/navigation.ts`(01b 소유)의 설정 그룹에 `{ href: "/settings/trading-costs", label: "매매 수수료·세금" }` 항목과 자리표시 페이지를 develop에 먼저 넣는다.
+> **갱신함(2026-10-17, develop 기준)**: 내비게이션 항목(`BadgePercent` 아이콘)과 자리표시 페이지 `frontend/src/app/(app)/settings/trading-costs/page.tsx`(`ComingSoon taskId="05b"`), 01b 테스트 기대값을 develop에 넣었다. 08b가 병합돼 `market.service.get_stock_detail(db, code)`가 `kind`를 준다. 12(종목 상세)의 "내 매매 기록 보기" 링크를 위해 8절 끝에 매매일지 `symbol` 쿼리 처리를 더했다.
 
 ## 1. 목표
 
@@ -74,7 +75,7 @@
 ```
 
 - 검증: 요율은 0 이상 5 이하, 소수 넷째 자리까지(어기면 `field_error`로 `422`). 추정의 `quantity`·`price`는 0보다 크다. `market`은 `KRX`·`US`, `side`는 `buy`·`sell`.
-- `isEtf`: `symbolCode`가 있고 `market=KRX`면 `market.service.get_stock_detail(db, code)`의 `kind == "etf"`로 정한다(08b). 종목 마스터에 없으면 주식으로 본다.
+- `isEtf`: `symbolCode`가 있고 `market=KRX`면 `market.service.search_stocks(db, symbolCode, limit=1)`의 첫 항목이 코드가 정확히 같고 `kind == "etf"`인지로 정한다(08b. 검색은 코드가 정확히 같은 종목을 맨 앞에 둔다). `get_stock_detail`은 시세 조회까지 해서 추정마다 증권사를 부르게 되므로 쓰지 않는다. 종목 마스터에 없으면 주식으로 본다.
 - 거래 응답(`Trade`)에 `"costEstimated": true | false`를 더한다(05 응답 필드는 그대로 둔다).
 
 ## 7. 다른 모듈용 서비스 함수
@@ -97,6 +98,7 @@ def estimate_trade_costs(db, user_id: UUID, *, market: Literal["KRX", "US"], sid
 - `/settings/trading-costs` "매매 수수료·세금": 세 요율 입력(%, 소수 넷째 자리까지), 각 칸 아래 기본값("키움증권 기준 기본값 0.015%" 등), 저장, "기본값으로 되돌리기"(확인 창). 안내 문구: "증권사 이벤트 등으로 실제 요율과 다를 수 있어요. 증권사가 알려 준 실제 수수료·세금이 있으면 그 값이 우선이에요." "국내 ETF는 팔 때 거래세가 붙지 않아요."
 - 매매 추가 다이얼로그(05): 시장·매수/매도·수량·단가가 채워지면 `cost-estimate`로 수수료·세금 초기값을 채운다(300ms 디바운스). 사용자가 수수료나 세금 칸을 직접 고친 뒤에는 덮어쓰지 않는다. 칸 아래에 "기본 요율로 계산한 추정치예요. 실제 금액으로 고칠 수 있어요."와 설정 페이지 링크. 기존 거래 수정에서는 자동으로 바꾸지 않는다(05의 변경 필드만 PATCH 규칙 유지).
 - 거래 목록의 "수수료+세금" 칸과 상세에 `costEstimated`면 "추정" 배지.
+- 매매일지 기록 탭은 URL 쿼리 `symbol`을 종목 검색 필터의 초기값으로 읽는다(`/journal?tab=records&symbol=005930`, 12의 종목 상세 링크). 필터를 바꾸면 쿼리도 맞춘다. 05의 다른 동작은 그대로 둔다.
 - 360px에서 가로 스크롤 없이 보인다.
 
 ## 9. 테스트
@@ -104,7 +106,7 @@ def estimate_trade_costs(db, user_id: UUID, *, market: Literal["KRX", "US"], sid
 - 계산: 국내 매수(수수료만), 국내 주식 매도(수수료+거래세), 국내 ETF 매도(거래세 0), 미국 매수·매도(수수료만, 0.01달러 버림), 원 미만 버림, 사용자 요율 적용.
 - API: 기본값 조회(`isDefault: true`), 저장 후 조회, 되돌리기, 요율 범위·자릿수 `422`, 다른 사용자 설정이 섞이지 않음(사용자별 행), 추정 API의 ETF 판별(08b `kind`), PATCH로 수수료를 바꾸면 `costEstimated=false`.
 - 마이그레이션 순환(`journal_0002`), 05 기존 테스트 전부 통과.
-- 화면: 설정 저장·되돌리기, 매매 추가 다이얼로그의 초기값 채움과 사용자가 고친 값 유지, "추정" 배지.
+- 화면: 설정 저장·되돌리기, 매매 추가 다이얼로그의 초기값 채움과 사용자가 고친 값 유지, "추정" 배지, `/journal?tab=records&symbol=005930`으로 열면 그 종목으로 걸러진 기록.
 
 ## 10. 완료 기준
 

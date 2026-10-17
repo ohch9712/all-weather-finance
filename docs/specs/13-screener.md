@@ -4,6 +4,7 @@
 > 선행: 08(증권사 게이트웨이)이 develop에 병합된 상태. 결과의 "관심종목 담기"는 12의 `POST /api/watchlist`를 호출한다(병렬 개발이므로 테스트는 MSW로 흉내 낸다).
 > **착수 직전 갱신**: 코디네이터는 08의 `SnapshotRow` 실제 필드와 `## 구현 결과`의 지표 구현 여부(토스는 PER 등 없음)를 확인해 4.1 필드 표를 맞춘다.
 > **ETF(08b)**: `SnapshotRow`에 `kind`(`stock`·`etf`)가 생긴다. 착수 전에 `ScreenFilter`에 `kinds: list[Literal["stock", "etf"]] | None`(없으면 주식만)을 더하고, ETF는 PER·PBR·ROE·EPS·BPS·외국인 비율이 null이라 그 조건에서 자연히 빠진다는 점과 "ETF 중에서 …" 같은 자연어 해석 예를 4절에 반영한다.
+> **갱신함(2026-10-17, develop `4766e99` 기준, 08·08b 병합 후)**: 08의 `SnapshotRow`(`market.service`)는 `as_of, code, price, change_rate, volume, trading_value, market_cap, per, pbr, roe, eps, bps, foreign_ratio, high_52w, low_52w, source, created_at, name, market, sector, kind`로 4.1 필드가 모두 있다. 공급자별로 비는 값이 다르다: 토스는 가격 외 지표가 모두 null, 키움 ETF(`ka40004`)는 거래대금·시가총액·재무지표·52주 고저가 null, Mock ETF는 재무지표 6개(`per, pbr, roe, eps, bps, foreignRatio`)가 null. 08b의 ETF `market`은 키움 시장 코드가 없으면 `KOSPI`다(Mock ETF 10개는 모두 KOSPI). 이에 맞춰 4·5·6·9절에 `kinds`, null 정렬, ETF 표현을 더했다.
 
 ## 1. 목표
 
@@ -55,6 +56,7 @@ class SortSpec(CamelModel):
 
 class ScreenFilter(CamelModel):
     markets: list[Literal["KOSPI", "KOSDAQ"]] | None = None
+    kinds: list[Literal["stock", "etf"]] | None = None   # None이면 주식만(08b). 중복 없이 1~2개
     sectors: list[str] | None = None          # 스냅샷 업종명과 정확히 일치
     conditions: list[Condition] = []          # 최대 10개
     sort: SortSpec | None = None
@@ -77,8 +79,8 @@ class ScreenFilter(CamelModel):
 | `high52wGapRate` | 52주 최고가 대비 | % | (현재가 − 52주 최고) ÷ 52주 최고 × 100(0 이하) |
 | `low52wGapRate` | 52주 최저가 대비 | % | (현재가 − 52주 최저) ÷ 52주 최저 × 100(0 이상) |
 
-- 값이 null인 종목은 그 필드 조건에서 제외하고 `excludedForMissingData`로 센다.
-- 평가는 `market.service.list_snapshot_rows()`가 주는 최신일 전 종목 목록(국내 약 2,500개 이하)을 파이썬에서 거른다. 정렬 기본값은 `marketCap desc`.
+- 값이 null인 종목은 그 필드 조건에서 제외하고 `excludedForMissingData`로 센다. ETF는 재무지표가 비어 있어 PER·PBR·ROE·EPS·BPS·외국인 비율 조건에서 자연히 빠진다(키움 데이터면 시가총액·거래대금·52주 조건에서도 빠진다).
+- 평가는 `market.service.list_snapshot_rows()`가 주는 최신일 전 종목 목록(국내 약 2,500개 이하)을 파이썬에서 거른다. 먼저 `kinds`(없으면 `["stock"]`)와 `markets`·`sectors`로 거른 뒤 조건을 적용한다. 정렬 기본값은 `marketCap desc`. 정렬 필드 값이 null인 종목은 방향과 상관없이 맨 뒤에 두고, 같은 값끼리는 `code` 오름차순이다.
 
 ### 4.2 용어 기준표 (`get_filter_guide()`가 돌려주는 고정 문자열의 내용)
 
@@ -96,9 +98,12 @@ class ScreenFilter(CamelModel):
 | 급등 / 급락 | `changeRate gte 5` / `changeRate lte -5` |
 | 외국인 많이 보유 | `foreignRatio gte 30` |
 | 코스피 / 코스닥 | `markets` |
+| ETF | `kinds: ["etf"]` |
+| 주식과 ETF 모두, ETF 포함 | `kinds: ["stock", "etf"]` |
 
 - 숫자 단위: 1만 = 10,000, 1억 = 100,000,000, 1조 = 1,000,000,000,000. 사용자가 숫자를 말하면 기준표보다 사용자 숫자를 따른다.
-- 지원하지 않는 표현(배당, 매출 성장, 영업이익률, 부채비율, 테마, 뉴스 등)은 `unsupported`로 돌려준다.
+- 종류를 말하지 않으면 `kinds`를 비운다(주식만). 예: "ETF 중에서 오늘 3% 넘게 오른 것" → `kinds: ["etf"]` + `changeRate gte 3`. "ETF 중 PER 10 이하"처럼 ETF에 없는 지표를 말하면 필터는 만들되 `explanation`에 ETF는 그 지표가 없어 결과가 비어 있을 수 있다고 적는다.
+- 지원하지 않는 표현(배당, 매출 성장, 영업이익률, 부채비율, 테마, 뉴스, ETF 구성종목·NAV·괴리율 등)은 `unsupported`로 돌려준다.
 
 ## 5. 자연어 해석 `POST /api/screener/parse`
 
@@ -119,7 +124,7 @@ class ScreenFilter(CamelModel):
   "chips": [ { "label": "코스피" }, { "label": "시가총액 ≥ 10조원" }, { "label": "0 < PER ≤ 10" } ] }
 ```
 
-- `chips`는 서버가 필터에서 만든 표시용 문자열이다(LLM이 만들지 않는다).
+- `chips`는 서버가 필터에서 만든 표시용 문자열이다(LLM이 만들지 않는다). `kinds`가 `["etf"]`면 "ETF", `["stock", "etf"]`면 "주식·ETF" 칩을 맨 앞에 둔다(주식만이면 칩 없음).
 - 출력이 `ScreenFilter` 검증을 통과하지 못하면 `503 LLM_UNAVAILABLE`("조건을 이해하지 못했어요. 조금 다르게 말해 주세요."). 거절은 `422 LLM_REFUSED`, LLM 꺼짐 `503`.
 
 ## 6. 실행 `POST /api/screener/run`
@@ -129,7 +134,7 @@ class ScreenFilter(CamelModel):
 
 ```json
 { "asOf": "2026-10-16", "source": "mock", "total": 7, "excludedForMissingData": 2,
-  "items": [ { "code": "005930", "name": "삼성전자", "market": "KOSPI", "sector": "반도체",
+  "items": [ { "code": "005930", "name": "삼성전자", "market": "KOSPI", "sector": "반도체", "kind": "stock",
                "price": "71200", "changeRate": -1.11, "marketCap": 425000000000000,
                "per": "12.40", "pbr": "1.30", "roe": "10.50", "tradingValue": 879000000000 } ] }
 ```
@@ -165,7 +170,7 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 
 - 상단 AI 입력창: "원하는 조건을 말해 보세요", 예시 버튼 4개("코스피 대형주 중 PER 10 이하", "52주 신고가 근처 코스닥 종목", "ROE 15% 이상 저PBR", "오늘 5% 넘게 오른 종목"). LLM 꺼짐이면 입력창 대신 "직접 조건 추가"만. 입력창 옆에 `AiProviderBadge scope="general" compact`, 아래에 "조건 문장은 AI 공급자로 전송돼요. 개인정보는 적지 마세요." 안내.
 - 해석 결과: 설명 한 문단, 조건 칩(눌러서 필드·연산자·값 수정, 삭제, "조건 추가"), `unsupported` 경고 상자.
-- "검색" → 결과 표(정렬 가능한 열: 종목명, 시장, 현재가, 등락률, 시가총액, PER, PBR, ROE), 행의 "관심종목 담기"(12 API, 409면 "이미 있어요"), 종목명은 `/stocks/[code]` 링크, 기준일·`SampleDataBadge`, 지표 없는 종목 제외 수.
+- "검색" → 결과 표(정렬 가능한 열: 종목명, 시장, 현재가, 등락률, 시가총액, PER, PBR, ROE), 행의 "관심종목 담기"(12 API, 409면 "이미 있어요"), 종목명은 `/stocks/[code]` 링크, `kind=etf` 행에는 "ETF" 배지, null 지표는 "—", 기준일·`SampleDataBadge`, 지표 없는 종목 제외 수.
 - 저장한 검색 목록(불러오기·삭제), "이 조건 저장".
 - "내 키움 조건식" 탭: 연결 선택(없으면 운영자 데이터), 조건식 목록, 실행 결과 표.
 - `?f=`가 있으면 그 필터를 칩으로 보여 주고 바로 실행.
