@@ -110,7 +110,7 @@ function toEntry(state: MockLedger, input: EntryInput, id: string, source: Entry
   const category = state.categories.find((item) => item.id === input.categoryId);
   sequence += 1;
   const stamp = new Date(Date.UTC(2026, 9, 1, 0, 0, sequence)).toISOString().replace(".000Z", "Z");
-  return { ...input, id, categoryName: category?.name ?? "?", source, createdAt: stamp, updatedAt: stamp };
+  return { ...input, cardName: null, approvalNo: null, isCancellation: false, importBatchId: null, id, categoryName: category?.name ?? "?", source, createdAt: stamp, updatedAt: stamp };
 }
 
 function sortEntries(entries: Entry[]) {

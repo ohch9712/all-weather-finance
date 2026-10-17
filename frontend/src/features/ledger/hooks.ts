@@ -13,7 +13,9 @@ import {
   renameCategory,
   updateEntry,
 } from "./api";
-import type { EntryInput, EntryListParams } from "./types";
+import type { ImportJob } from "@/features/imports";
+import * as importApi from "./api";
+import type { Entry, EntryInput, EntryListParams } from "./types";
 
 export const ledgerKeys = {
   all: ["ledger"] as const,
@@ -91,4 +93,41 @@ export function useRenameCategory() {
 
 export function useDeleteCategory() {
   return useCategoryMutation(deleteCategory);
+}
+
+
+export function useExtractStatement() {
+  return useMutation({ mutationFn: ({ file, consent }: { file: File; consent: boolean }) => importApi.extractStatement(file, consent) });
+}
+
+export function useLedgerImportJob(id?: string) {
+  return useQuery({ queryKey: ["ledger", "import", id], queryFn: () => importApi.getImportJob(id!), enabled: !!id, retry: false });
+}
+
+export function useExtractedPreview(id: string | undefined, page: number, onlyInvalid: boolean) {
+  return useQuery({ queryKey: ["ledger", "import-preview", id, page, onlyInvalid], queryFn: () => importApi.previewExtractedJob(id!, page, onlyInvalid), enabled: !!id, retry: false });
+}
+
+export function useMapExtractedJob() {
+  return useMutation({ mutationFn: ({ id, mapping }: { id: string; mapping: ImportJob["mapping"] }) => importApi.mapExtractedJob(id, mapping) });
+}
+
+export function useCommitExtractedJob() {
+  const client = useQueryClient();
+  return useMutation({ mutationFn: ({ id, skipInvalid }: { id: string; skipInvalid: boolean }) => importApi.commitExtractedJob(id, skipInvalid), onSuccess: () => invalidateEntryData(client) });
+}
+
+export function useDeleteExtractedJob() {
+  return useMutation({ mutationFn: importApi.deleteExtractedJob });
+}
+
+export function useReviewCategory() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ entry, categoryId, all }: { entry: Entry; categoryId: string; all: boolean }) => {
+      if (all && entry.merchant) return importApi.saveMerchantRule({ merchant: entry.merchant, categoryId, applyToExisting: true });
+      return updateEntry(entry.id, { categoryId });
+    },
+    onSuccess: () => invalidateEntryData(client),
+  });
 }
