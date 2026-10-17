@@ -113,6 +113,7 @@ def upsert_synced_holdings(db, user_id, *, source: Literal["kiwoom", "toss", "co
 - "증권사 잔고 불러오기" 버튼 → 다이얼로그: 활성 연결 선택(없으면 `/settings/connections` 안내) → 실행 → 결과 요약(추가·갱신·삭제·건너뜀 목록). 연결 목록은 08의 `GET /api/market/connections`를 `features/allocation/api.ts`에서 부른다(`status=active`만 선택 가능).
 - 동기화 자산 행: 증권사 배지, 마지막 동기화 시각, 자동 분류 근거 툴팁, 분류를 바꿨으면 "직접 지정" 표시, 금액 수정 비활성.
 - Mock 연결(`source=mock`)로 불러온 행에는 "샘플" 배지를 달고, 그런 행이 하나라도 있으면 목록에 `Disclaimer variant="sample"`을 붙인다.
+- 배분에 포함된 자산 중 `source=mock` 행이 하나라도 있으면 `/allocation` 리포트와 추천 결과 화면(`features/allocation`의 리포트·추천 컴포넌트)에도 `Disclaimer variant="sample"`을 붙인다(갱신 2026-10-17, 웨이브 3 통합 검증 K2). 배분 계산은 바꾸지 않는다.
 - 연결별 "다시 동기화" 버튼.
 
 ## 8. 테스트

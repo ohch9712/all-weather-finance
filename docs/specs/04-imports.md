@@ -278,6 +278,7 @@ def create_job_from_table(db, user_id, *, kind_key: str, file_name: str,
 - 단계: ① 파일 선택(끌어 놓기 + 버튼, `.csv,.xlsx,.xls,.html,.htm`) → ② 열 매핑(목표 필드별 열 선택 `Select`, 각 열의 예시 값 표시, 필수 표시, `mappingSource` 배지 "자동 인식"/"AI 추천"/"직접 지정"/"알려진 형식", "AI 추천" 옆에 `AiProviderBadge scope="personal" compact`) → ③ 미리보기(정상·오류 수, 오류 행 강조와 메시지, "오류 행 제외하고 저장" 토글) → ④ 결과(저장·중복·실패 수, `onCommitted` 호출).
 - 시트가 여러 개면 ①에서 시트 선택을 보여 준다(다시 업로드).
 - 업로드 진행 표시, 만료(410) 시 처음으로 돌아가는 안내.
+- 저장(commit)이 성공한 뒤에는 그 작업의 미리보기를 다시 요청하지 않는다(커밋된 작업의 preview는 `409`. 갱신 2026-10-17, 웨이브 3 통합 검증 K1).
 - `api.ts`: `listImportKinds`, `createImportJob(kind, file, sheetName?)`(FormData, `apiFetch`는 FormData일 때 Content-Type을 넣지 않는다), `getImportJob`, `updateMapping`, `getPreview`, `commitImportJob`, `deleteImportJob`. `hooks.ts`에 대응 훅.
 
 ## 10. 테스트

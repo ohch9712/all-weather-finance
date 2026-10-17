@@ -86,6 +86,7 @@
   - 새 행의 `source`는 공급자(`kiwoom`·`toss`·`mock`), `broker`는 `kiwoom`·`toss`면 같은 값, `mock`이면 NULL.
   - 중복 판정은 체결마다 이 순서다.
     1. 같은 `(connection_id, external_id)` 행이 있으면 바뀐 값만 갱신한다. 실제로 바뀐 칸이 있으면 `updated`, 없으면 `unchanged`로 센다(같은 기간을 두 번 불러도 데이터가 그대로다).
+       - 비용(갱신 2026-10-17, 웨이브 3 통합 검증 F1): 체결의 `fee`·`tax`가 `None`(증권사 미제공)이면 저장된 `fee`·`tax`·`cost_estimated`를 바꾸지 않는다. 요율을 바꿔도 지난 거래는 그대로이고(05b 3절), 사용자가 PATCH로 고친 비용도 남는다. 증권사가 값을 준 칸만 그 값으로 바꾸고, 두 칸 모두 증권사 값이면 `cost_estimated=false`다. 새로 삽입하는 체결만 지금 요율로 추정한다.
     2. 없으면, `connection_id`가 없는 내 거래(수동·파일) 중 체결일(KST)·종목코드·매매구분·수량·단가가 같고 아직 다른 체결과 짝지어지지 않은 거래가 있으면 건너뛴다(`skippedDuplicates`). 기존 거래 하나는 체결 하나만 가린다(같은 값 체결이 두 건이고 수동 거래가 한 건이면 한 건은 삽입). 수동 거래는 시각이 없을 수 있어 `dedup_hash`로 비교하지 않는다.
     3. 그 밖이면 삽입(`inserted`).
   - 응답 `200 {"inserted": 12, "updated": 0, "unchanged": 0, "skippedDuplicates": 3, "costEstimated": 12, "from": "…", "to": "…", "syncedAt": "…"}`. `costEstimated`는 이번 요청에서 수수료·세금을 05b 요율로 추정해 넣은 거래(삽입·갱신) 수다. 한 요청은 한 트랜잭션이다.
