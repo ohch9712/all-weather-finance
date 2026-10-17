@@ -1,6 +1,10 @@
 from calendar import monthrange
+from collections import Counter
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from hashlib import sha256
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -9,10 +13,13 @@ from sqlalchemy.orm import Session
 from app.core.errors import AppError, field_error
 from app.core.schemas import Page, PageParams
 from app.core.time import today_kst
+from app.modules.imports.registry import ImportResult, RowError
 from app.modules.ledger import repository
+from app.modules.ledger.categorize import categorize, merchant_key
 from app.modules.ledger.models import LedgerCategory, LedgerEntry
 from app.modules.ledger.repository import EntryFilter
 from app.modules.ledger.schemas import (
+    MAX_AMOUNT,
     CategoryAmount,
     CategoryCreate,
     CategoryUpdate,
@@ -21,9 +28,13 @@ from app.modules.ledger.schemas import (
     EntryOut,
     EntryPatch,
     MerchantAmount,
+    MerchantRuleInput,
+    MerchantRuleOut,
+    MerchantRuleSaved,
     MonthlySummary,
     MonthTotals,
     TrendOut,
+    check_occurred_on,
 )
 
 # 내 카테고리를 지우면 내역이 옮겨 가는 기본 카테고리
@@ -199,6 +210,11 @@ def update_entry(db: Session, user_id: UUID, entry_id: UUID, data: EntryPatch) -
             changes.get("category_id", entry.category_id),
             changes.get("kind", entry.kind),
         )
+    if entry.source in ("import", "codef") and "category_id" in changes:
+        if entry.category.kind != "expense":
+            raise invalid_category()
+        if entry.merchant and merchant_key(entry.merchant):
+            repository.upsert_rule(db, user_id, merchant_key(entry.merchant), entry.category.id)
     for field in ("kind", "occurred_on", "amount", "merchant", "payment_method", "memo"):
         if field in changes:
             setattr(entry, field, changes[field])
@@ -225,16 +241,21 @@ def get_monthly_summary(db: Session, user_id: UUID, month: date) -> MonthlySumma
     kind_totals = {"income": current.get("income", 0), "expense": current.get("expense", 0)}
     previous_expense = previous.get("expense", 0)
 
+    category_totals = repository.totals_by_category(db, user_id, start, end)
+    denominators = {
+        kind: sum(row[3] for row in category_totals if row[2] == kind)
+        for kind in ("income", "expense")
+    }
     by_category = [
         CategoryAmount(
             category_id=category_id,
             name=name,
             kind=kind,
             amount=amount,
-            ratio=percent(amount, kind_totals[kind]),
+            ratio=percent(amount, denominators[kind]),
         )
         for category_id, name, kind, amount in sorted(
-            repository.totals_by_category(db, user_id, start, end),
+            category_totals,
             key=lambda row: (KIND_ORDER[row[2]], -row[3], row[1]),
         )
     ]
@@ -286,3 +307,111 @@ def get_trend(db: Session, user_id: UUID, months: int) -> TrendOut:
             )
         )
     return TrendOut(items=items)
+
+
+@dataclass(frozen=True)
+class LedgerImportRow:
+    occurred_on: date
+    merchant: str
+    amount: int
+    is_cancellation: bool
+    card_name: str | None = None
+    approval_no: str | None = None
+    merchant_category: str | None = None
+
+
+def import_entries(
+    db: Session,
+    user_id: UUID,
+    rows: list[LedgerImportRow],
+    *,
+    source: Literal["import", "codef"],
+    batch_id: UUID | None = None,
+) -> ImportResult:
+    if source not in ("import", "codef"):
+        raise ValueError("지원하지 않는 가져오기 출처입니다.")
+    valid = []
+    errors = []
+    for number, row in enumerate(rows, 1):
+        try:
+            check_occurred_on(row.occurred_on)
+            if type(row.amount) is not int or not 1 <= row.amount <= MAX_AMOUNT:
+                raise ValueError("금액을 확인해 주세요.")
+            if not merchant_key(row.merchant) or len(row.merchant) > 100:
+                raise ValueError("가맹점을 확인해 주세요.")
+            if (row.card_name and len(row.card_name) > 50) or (
+                row.approval_no and len(row.approval_no) > 30
+            ):
+                raise ValueError("카드명 또는 승인번호 길이를 확인해 주세요.")
+            valid.append(row)
+        except ValueError as exc:
+            errors.append(RowError(number, None, str(exc)))
+    categories = categorize(db, user_id, valid) if valid else {}
+    seen = Counter()
+    inserted = skipped = 0
+    for row in valid:
+        key = merchant_key(row.merchant)
+        base = (
+            f"{user_id}|{row.occurred_on}|{key}|{row.amount}|"
+            f"{row.approval_no or ''}|{row.is_cancellation}"
+        )
+        n = seen[base]
+        seen[base] += 1
+        digest = sha256((base + (f"|{n}" if n else "")).encode()).hexdigest()
+        saved = repository.insert_import_entry(
+            db,
+            dict(
+                user_id=user_id,
+                kind="expense",
+                occurred_on=row.occurred_on,
+                amount=row.amount,
+                category_id=categories[key],
+                merchant=row.merchant,
+                payment_method="card",
+                source=source,
+                dedup_hash=digest,
+                card_name=row.card_name,
+                approval_no=row.approval_no,
+                is_cancellation=row.is_cancellation,
+                import_batch_id=batch_id,
+            ),
+        )
+        inserted += int(saved)
+        skipped += int(not saved)
+    db.flush()
+    return ImportResult(inserted, skipped, len(errors), errors)
+
+
+def save_merchant_rule(db: Session, user_id: UUID, data: MerchantRuleInput) -> MerchantRuleSaved:
+    category = _category_for(db, user_id, data.category_id, "expense")
+    key = merchant_key(data.merchant)
+    if not key:
+        raise field_error("merchant", "가맹점을 입력해 주세요.")
+    rule = repository.upsert_rule(db, user_id, key, category.id)
+    count = 0
+    if data.apply_to_existing:
+        for entry in repository.imported_entries(db, user_id):
+            if (
+                entry.merchant
+                and merchant_key(entry.merchant) == key
+                and entry.category_id != category.id
+            ):
+                entry.category = category
+                count += 1
+    db.commit()
+    return MerchantRuleSaved(
+        **MerchantRuleOut.model_validate(rule).model_dump(exclude={"updated_count"}),
+        updated_count=count,
+    )
+
+
+def list_merchant_rules(db: Session, user_id: UUID):
+    return repository.list_rules(db, user_id)
+
+
+def delete_merchant_rule(db: Session, user_id: UUID, rule_id: UUID) -> None:
+    rule = repository.find_rule(db, user_id, rule_id)
+    if rule is None:
+        raise AppError(404, "NOT_FOUND", "가맹점 규칙을 찾을 수 없습니다.")
+    repository.remove(db, rule)
+    db.commit()

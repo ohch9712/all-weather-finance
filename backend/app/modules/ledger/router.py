@@ -3,12 +3,18 @@ from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, DBSession, PageQuery, require_json
 from app.core.errors import AppError, field_error
 from app.core.schemas import Page
+from app.integrations.llm.deps import StructuredLLMDep
+from app.modules.imports.registry import register_import_kind
+from app.modules.imports.schemas import ImportJobView
 from app.modules.ledger import service
+from app.modules.ledger.extract import extract_statement
+from app.modules.ledger.import_kind import LEDGER_CARD
 from app.modules.ledger.repository import EntryFilter
 from app.modules.ledger.schemas import (
     CategoryCreate,
@@ -18,9 +24,16 @@ from app.modules.ledger.schemas import (
     EntryInput,
     EntryOut,
     EntryPatch,
+    MerchantRuleInput,
+    MerchantRuleList,
+    MerchantRuleOut,
+    MerchantRuleSaved,
     MonthlySummary,
     TrendOut,
 )
+from app.modules.ledger.upload import read_upload
+
+register_import_kind(LEDGER_CARD)
 
 router = APIRouter(prefix="/ledger", tags=["ledger"])
 
@@ -49,6 +62,7 @@ def get_entry_filter(
     kind: Annotated[str | None, Query()] = None,
     category_id: Annotated[str | None, Query(alias="categoryId")] = None,
     q: Annotated[str | None, Query(max_length=100)] = None,
+    import_batch_id: Annotated[UUID | None, Query(alias="importBatchId")] = None,
 ) -> EntryFilter:
     # 화면은 빈 필터를 `kind=&categoryId=&q=`로 보내므로 빈 값은 조건 없음으로 본다.
     if kind and kind not in KINDS:
@@ -60,8 +74,9 @@ def get_entry_filter(
         except ValueError as exc:
             raise query_error("categoryId") from exc
     return EntryFilter(
-        start=month,
-        end=service.month_end(month),
+        start=None if import_batch_id else month,
+        end=None if import_batch_id else service.month_end(month),
+        import_batch_id=import_batch_id,
         kind=kind or None,
         category_id=parsed_category,
         q=(q or "").strip() or None,
@@ -152,3 +167,32 @@ def get_trend(
     months: Annotated[int, Query(ge=1, le=24)] = 6,
 ):
     return service.get_trend(db, user.id, months)
+
+
+@router.get("/merchant-rules", response_model=MerchantRuleList)
+def merchant_rules(db: DBSession, user: CurrentUser):
+    return MerchantRuleList(
+        items=[
+            MerchantRuleOut.model_validate(rule)
+            for rule in service.list_merchant_rules(db, user.id)
+        ]
+    )
+
+
+@router.post(
+    "/merchant-rules", response_model=MerchantRuleSaved, dependencies=[Depends(require_json)]
+)
+def save_rule(data: MerchantRuleInput, db: DBSession, user: CurrentUser):
+    return service.save_merchant_rule(db, user.id, data)
+
+
+@router.delete("/merchant-rules/{rule_id}", status_code=204, dependencies=[Depends(require_json)])
+def delete_rule(rule_id: UUID, db: DBSession, user: CurrentUser):
+    service.delete_merchant_rule(db, user.id, rule_id)
+    return Response(status_code=204)
+
+
+@router.post("/import/extract", response_model=ImportJobView)
+async def extract(request: Request, db: DBSession, user: CurrentUser, llm: StructuredLLMDep):
+    upload = await read_upload(request)
+    return await run_in_threadpool(extract_statement, db, user.id, upload, llm)
