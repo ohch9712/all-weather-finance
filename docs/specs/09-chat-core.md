@@ -439,13 +439,15 @@ type Card =
 - 기본 도구 설명에 "인자 없이 빈 객체({})로 부른다"를 넣었다. 수동 확인에서 작은 로컬 모델이 결과 필드 이름을 인자로 넣어 `INVALID_INPUT`이 났기 때문이다(검증·오류 처리는 스펙대로 동작했다).
 - 프론트: 새 대화는 첫 질문을 보낼 때 만든다(위젯 포함, 빈 대화를 남기지 않는다). `/chat?c=<id>`로 대화를 열고 위젯의 "전체 화면으로"가 이 주소를 쓴다. 예시 질문 버튼은 누르면 바로 보낸다. 남은 횟수가 0이거나 429를 받으면 상한 안내를 보이고 입력을 막는다. SSE 전 JSON 오류(409·429·503 등)는 질문을 되돌려 입력창에 다시 채운다. 받은 글자는 도구 실행 뒤 다음 라운드 앞에 빈 줄을 넣어 상세의 `DisplayMessage`(라운드 텍스트를 `"\n\n"`으로 합침)와 같게 보인다. 한글 조합 중 Enter는 보내지 않는다.
 - 위젯을 닫으면 Sheet 내용이 사라지므로 진행 중인 답변은 "멈추기"와 같이 끊긴다. 다시 열면 최근 대화를 다시 고른다.
-- `sse.ts`는 스펙 9.3대로 `fetch`를 쓰되, 01b 구조 테스트(`fetch(` 직접 호출은 `lib/api-client.ts`만)를 지키려고 `globalThis.fetch`로 부른다. `apiFetch`는 10초 타임아웃과 JSON 본문 처리 때문에 스트림에 쓸 수 없다.
+- `sse.ts`는 스펙 9.3대로 `fetch`를 직접 부른다(develop `52e5dd5`가 구조 테스트에 이 파일을 예외로 명시했다). `apiFetch`는 10초 타임아웃과 JSON 본문 처리 때문에 스트림에 쓸 수 없다.
+- AI 고지(`Disclaimer variant="ai"`)는 입력창 안이 아니라 `ChatThread` 아래에 늘 붙인다. 읽기 전용 대화나 공급자가 꺼진 상태에서도 저장된 AI 답변이 보이기 때문이다(검증 지적 수정). 처리 위치 문구는 9.1대로 입력창 아래에만 둔다.
 
 ### 검사 결과
 
 - 백엔드: `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 854개 통과(챗봇 122개), `uv run alembic check` 변경 없음.
 - 마이그레이션: 빈 DB `finance_09_cycle`에서 `upgrade heads` → `downgrade base` → `upgrade heads` 성공 후 DB 삭제.
-- 프론트: `npm run lint`·`npx tsc --noEmit` 통과, `npm run test` 315개 통과(챗봇 30개), `npm run build` 성공.
+- 프론트: `npm run lint`·`npx tsc --noEmit` 통과, `npm run test` 319개 통과(챗봇 34개), `npm run build` 성공.
+- 검증 지적 수정 후(develop 병합 포함): 백엔드 검사 동일하게 통과(854개). 실제 서버·Orca 독립 프로필 360px에서 읽기 전용 대화(이전 모델)·공급자 꺼짐 대화·입력 가능한 새 대화·공급자 꺼짐 위젯 모두 `[data-variant="ai"]` 고지 1개, 저장된 답변·카드 표시, `scrollWidth` 360, 콘솔 오류 0건을 확인했다.
 - 수동 확인(완료 기준 2): `OLLAMA_MODEL` 기본값 `gemma4:12b`는 이 기기에 없고 디스크 여유가 적어 받지 않았다. 대신 이미 받아 둔 도구 지원 모델 `qwen2.5:7b`로 환경변수만 바꿔(`LLM_PERSONAL_PROVIDER=ollama OLLAMA_MODEL=qwen2.5:7b OLLAMA_THINKING=false scripts/start.sh`, 8009·3009) 확인했다. "내 나이대 알려줘" → `get_my_profile` 호출(`tool_start`·`tool_end ok`·`key_value` 카드) → "당신은 30대입니다." 스트리밍, 이어지는 "오늘은 무슨 요일이야?" → `get_today` → 토요일(KST), 응답 대기 중 `: ping`, 응답 헤더(`no-cache`, `X-Accel-Buffering: no`), 2초 뒤 연결을 끊으면 질문 행만 남고 부분 응답은 저장되지 않음(서버 오류 로그 없음). 결제가 연결된 Gemini 키는 없어 가짜 SDK 클라이언트 테스트로 대신했다.
 - 화면(Orca 독립 프로필 브라우저): 360px `/chat`에서 질문 → 도구 칩·글자 스트리밍·카드·"멈추기" → 완료 후 제목·남은 횟수 갱신, `/ledger`의 위젯(전체 화면 Sheet, 최근 대화 잇기, "전체 화면으로" 링크), 모바일 대화 목록 Sheet, 1280px `/chat`(위젯 숨김)을 확인했다. 360px에서 `scrollWidth` 360, 넘치는 요소 0개. 백엔드를 기본 설정(personal 꺼짐)으로 다시 띄우면 기존 대화는 읽을 수 있고 입력창 자리에 공급자 설정 안내, 목록에 "이전 AI 설정" 배지가 보이며 콘솔 오류가 없다. 확인 후 `scripts/stop.sh`로 서버를 멈췄다.
 
