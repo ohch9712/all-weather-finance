@@ -600,7 +600,7 @@ def sync_trades(db, user_id, data):
         external = {(t.connection_id, t.external_id): t for t in trades if t.external_id}
         unmatched = defaultdict(list)
         for trade in trades:
-            if trade.connection_id is None:
+            if trade.connection_id is None and trade.source in {"manual", "import"}:
                 unmatched[execution_match(trade)].append(trade)
         for execution in executions:
             market = (

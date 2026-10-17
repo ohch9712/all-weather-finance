@@ -25,7 +25,7 @@ def commit(client, job):
     return response.json()["result"]
 
 
-def test_generic_csv_repeated_identical_rows_and_manual_untouched(
+def test_generic_csv_repeated_identical_rows_and_isolation(
     auth_client, fake_llm, other_auth_client
 ):
     # 범용 헤더로 만든 가짜 파일이며 실제 증권사 내보내기 형식이 아니다.
