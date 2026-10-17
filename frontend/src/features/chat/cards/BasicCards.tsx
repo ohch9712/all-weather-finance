@@ -3,6 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { KeyValueCard, LinkCard, TableCard } from "../types";
+import { CardDetailLink, isInternalHref } from "./CardParts";
 
 // 기본 카드 3종(스펙 09 7절). 값은 서버가 형식화한 문자열을 그대로 보여 준다.
 
@@ -69,14 +70,11 @@ export function TableCardView({ card }: { card: TableCard }) {
           </table>
         </div>
         {card.footnote && <p className="text-xs text-muted-foreground break-keep">{card.footnote}</p>}
+        {/* 15가 더한 선택 필드 href(앱 내부 경로만) */}
+        <CardDetailLink href={card.href} />
       </CardContent>
     </Card>
   );
-}
-
-/** 앱 내부 경로만 연다. 외부 주소는 그리지 않는다. */
-export function isInternalHref(href: unknown): href is string {
-  return typeof href === "string" && href.startsWith("/") && !href.startsWith("//");
 }
 
 export function LinkCardView({ card }: { card: LinkCard }) {

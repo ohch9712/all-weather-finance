@@ -660,3 +660,39 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 1. 중요 — 정규화된 `next`가 `//`로 시작해 외부 이동: `/.//verify.invalid`, `/a/..//verify.invalid`, `/%2e//verify.invalid`, `/.\/verify.invalid`는 들어온 값 검사를 통과했지만 URL 정규화(점 구간 `.`·`..`·`%2e` 제거, `\` → `/`)가 `//verify.invalid`를 만들었다. `getSafeRedirectPath`가 이제 돌려줄 최종 값도 검사한다. (a) 들어온 값과 같은 위험 검사(제어문자, `//`·`/\` 시작, 한 번 디코딩한 값 포함)를 다시 적용하고, (b) 그 값을 `new URL(result, origin)`으로 다시 해석해 origin이 같고 다시 만든 `pathname + search + hash`가 똑같을 때(고정점)만 돌려준다. 하나라도 어기면 `/`다. 사용처 `LoginForm`은 그대로다.
    - 테스트(`redirect.test.ts`): 검증 코멘트의 4건과 `/%2e%2e//…`, `/.\/…`, `/a/../..//…`, `/./%2e//…`, `/.%2e//…`, `/%2F/…`, `/%5C…` → `/`. 성질 테스트: 구간 후보 11개(`.`, `..`, `%2e`, `%2E`, `%2e%2e`, `.%2e`, 빈 문자열, `a`, `\`, `%5c`, `%2f`)를 깊이 1~4로 조합한 16,104개 × 앞에 `/` 있음·없음 = 32,208개 입력 뒤에 `/evil.example/x`를 붙여, 결과가 `/`로 시작하고 `//`·`/\`로 시작하지 않으며 같은 origin이고 다시 넣어도 같은 값인지 확인한다(이전 코드는 2,925개가 외부로 나갔고 지금은 0개). 정상 경로 `/allocation?x=1#a`, `/learn/per`, `/stocks/005930`, `/settings/profile`는 그대로다. 정규화 뒤 같은 사이트 경로로 남는 값(`/a/.\./\evil…` → `/a//evil…`)은 그 경로로 보낸다. `auth-forms.test.tsx` LoginForm에 검증 코멘트의 4건 추가.
    - 헤드리스 Chrome에서 `/login?next=` 뒤에 위 4건(인코딩해서)을 붙여 로그인하면 모두 `http://localhost:3001/`로, `/allocation?x=1#a`는 그대로 이동한다.
+
+### 웨이브 3 통합 재검증 수정(K5)
+
+#### 구현한 것
+
+- 원인: 공용 숨김 표 `ChartDataTable`(`components/charts/ChartParts.tsx`)이 `<table className="sr-only">`였다. 표 상자는 `sr-only`의 `height: 1px`를 최소 높이로만 쓰고 `overflow: hidden`도 적용되지 않아, 절대 위치인 채로 행 수만큼 높아져 문서의 스크롤 높이를 늘렸다(가로 넘침은 `white-space: nowrap`·1px 너비로 문제없었다).
+- 수정: `sr-only`를 감싸는 `<div>`에 걸고 표는 그 안에 클래스 없이 둔다. 블록 컨테이너라 1px 높이와 `overflow: hidden`이 그대로 적용되어 표가 문서 높이에 영향을 주지 않는다. 표의 caption·thead·tbody, `scope`, 차트의 `role="img"`·`aria-label`·범례·색은 바꾸지 않았다. `LineChart`·`BarChart`·`DonutChart`가 모두 이 컴포넌트를 쓰므로 세 차트에 함께 반영된다.
+- 테스트(`tests/foundation/charts.test.tsx`): 숨김 표 헬퍼가 표 자체가 아니라 감싸는 `div`에 `sr-only`가 있는지 확인하도록 바꿨고, 262행 `LineChart` 회귀 테스트를 더했다(표가 `sr-only` 블록 안에 있고 표 자체에는 `sr-only`가 없음, caption 이름으로 찾는 `table`, 열·행 머리글, 셀 값, 그림 밖에 있음). 이전 코드에서는 숨김 표 테스트 4개가 실패하고 수정 후 통과한다.
+
+#### 검사 결과
+
+- `npm run lint` 통과, `npx tsc --noEmit` 통과, `npm run test` 44 files / 436 tests 통과, `npm run build` 통과.
+- 실제 서버(`scripts/start.sh`, 슬롯 01)와 `market.jobs seed-mock` 후, 독립 헤드리스 Chrome 브라우저 컨텍스트에서 새 테스트 사용자로 UI 로그인해 높이 900px로 쟀다(자산배분·가계부 데이터는 API로 미리 넣음). `documentElement.scrollHeight`와 `main` 끝(문서 좌표):
+
+| 화면 | 폭 | 수정 전 scrollHeight / main 끝 | 수정 후 scrollHeight / main 끝 |
+| --- | --- | --- | --- |
+| `/stocks/069500` 3개월(67행) | 360 | 2,228 / 1,108.5 | 1,109 / 1,108.5 |
+| `/stocks/069500` 1년(262행) | 360 | 6,908 / 1,108.5 | 1,109 / 1,108.5 |
+| `/stocks/005930` 1년(262행) | 360 | 6,908 / 1,056.5 | 1,057 / 1,056.5 |
+| `/allocation` 리포트(도넛 2개) | 360 | 2,090 / 2,089.5 | 2,090 / 2,089.5 |
+| `/ledger?month=2026-10` 요약(차트 3개) | 360 | 3,888 / 3,888 | 3,888 / 3,888 |
+| `/stocks/069500` 3개월 | 1280 | 2,192 / 900 | 900 / 900 |
+| `/stocks/069500` 1년 | 1280 | 6,872 / 900 | 900 / 900 |
+| `/stocks/005930` 1년 | 1280 | 6,872 / 900 | 900 / 900 |
+| `/allocation` 리포트 | 1280 | 1,481 / 1,480.5 | 1,481 / 1,480.5 |
+| `/ledger?month=2026-10` 요약 | 1280 | 3,100 / 3,100 | 3,100 / 3,100 |
+
+- 수정 후 모든 화면에서 빈 세로 영역이 없고(차이 0~1px), 가로 넘침이 없으며, 숨김 표를 감싼 블록의 높이는 1px다. 행이 적은 `/allocation`·`/ledger`는 원래 표가 본문 안에서 끝나 수치가 같다. Chrome 접근성 트리에서 1년 차트의 표가 caption 이름("KODEX 200 종가 추이(1년)", "삼성전자 종가 추이(1년)")과 행 262개로 수정 전과 같게 노출된다.
+
+#### 스펙과 다른 점과 이유
+
+- 없음. 11.1의 "같은 데이터의 숨김 표(`sr-only`)"를 `sr-only` 블록 안의 표로 지킨다. 의존성 추가 없음.
+
+#### 남은 일
+
+- 코디네이터의 별도 검증과 PR 병합.

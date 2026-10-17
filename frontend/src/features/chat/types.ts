@@ -2,7 +2,7 @@
 
 export type ChatProviderName = "gemini" | "ollama";
 
-/** 화면 카드(프론트·백엔드 공통 계약, 스펙 7절). 15가 타입을 추가한다. */
+/** 화면 카드(프론트·백엔드 공통 계약, 스펙 09 7절·15 5절). 표시 값은 서버가 형식화한 문자열이다. */
 export type KeyValueCard = { type: "key_value"; title: string; items: { label: string; value: string }[] };
 export type TableCard = {
   type: "table";
@@ -10,10 +10,88 @@ export type TableCard = {
   columns: { key: string; label: string; align?: "left" | "right" }[];
   rows: Record<string, string>[];
   footnote?: string;
+  /** 15가 더한 선택 필드. 앱 내부 경로("/"로 시작)면 표 아래에 "자세히 보기" 링크를 그린다. */
+  href?: string;
 };
 /** 앱 내부 경로("/"로 시작)만 */
 export type LinkCard = { type: "link"; title: string; description?: string; href: string };
-export type Card = KeyValueCard | TableCard | LinkCard;
+
+// ── 15 전용 카드 ─────────────────────────────────────────────
+
+export type AllocationCard = {
+  type: "allocation";
+  status: string;
+  score: number | null;
+  grade: string | null;
+  /** 도넛을 그리므로 비중은 숫자(%)다. */
+  classes: { assetClass: string; label: string; actualWeight: number | null; targetWeight: number | null }[];
+  href: "/allocation";
+};
+export type SpendingCard = {
+  type: "spending";
+  month: string;
+  incomeTotal: string;
+  expenseTotal: string;
+  net: string;
+  topCategories: { name: string; amount: string; ratio: string }[];
+  href: string;
+};
+export type StockCard = {
+  type: "stock";
+  code: string;
+  name: string;
+  price: string | null;
+  changeRate: string | null;
+  metrics: { label: string; value: string }[];
+  source: string;
+  href: string;
+};
+export type StockListCard = {
+  type: "stock_list";
+  title: string;
+  asOf: string | null;
+  source: string;
+  items: { code: string; name: string; price: string | null; changeRate: string | null; extra: string | null }[];
+  href: string | null;
+};
+export type GiftTaxCard = {
+  type: "gift_tax";
+  title: string;
+  steps: { label: string; amount: string; note: string | null }[];
+  payableTax: string;
+  href: string;
+};
+export type LinkListCard = {
+  type: "link_list";
+  title: string;
+  links: { title: string; description: string | null; href: string }[];
+};
+export type DirectionsCard = {
+  type: "directions";
+  title: string;
+  items: { title: string; body: string; amount: string | null }[];
+  href: "/allocation/recommendation/detail";
+};
+export type ComparisonCard = {
+  type: "comparison";
+  title: string;
+  horizonDate: string;
+  rows: { key: string; label: string; totalTax: string; familyReceives: string; recommended: boolean }[];
+  href: "/estate?tab=compare";
+};
+
+export type Card =
+  | KeyValueCard
+  | TableCard
+  | LinkCard
+  | AllocationCard
+  | SpendingCard
+  | StockCard
+  | StockListCard
+  | GiftTaxCard
+  | LinkListCard
+  | DirectionsCard
+  | ComparisonCard;
 
 export interface ChatStatus {
   enabled: boolean;

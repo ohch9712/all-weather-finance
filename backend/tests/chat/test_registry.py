@@ -22,7 +22,7 @@ from app.modules.chat.tools.registry import (
     get_registered_tools,
     register_tool,
 )
-from tests.chat.conftest import user_by_email
+from tests.chat.conftest import ALL_TOOL_NAMES, user_by_email
 
 
 class NoInput(BaseModel):
@@ -61,7 +61,7 @@ def test_tools_are_sorted_by_name(temp_tool):
     temp_tool(ToolSpec("aaa_temp", "임시", NoInput, "임시", handler))
     tool_names = [tool.name for tool in get_registered_tools()]
     assert tool_names == sorted(tool_names)
-    assert tool_names == ["aaa_temp", "get_my_profile", "get_today", "zzz_temp"]
+    assert tool_names == sorted(["aaa_temp", "zzz_temp", *ALL_TOOL_NAMES])
 
 
 def test_default_tools():
@@ -71,7 +71,8 @@ def test_default_tools():
         assert re.fullmatch(r"[a-z][a-z0-9_]*", tool.name)
         assert tool.input_model.model_config.get("extra") == "forbid"
         assert tool.description and tool.label
-        assert portable_json_schema(tool.input_model) == {
+    for name in ("get_today", "get_my_profile"):
+        assert portable_json_schema(tools[name].input_model) == {
             "type": "object",
             "properties": {},
             "additionalProperties": False,

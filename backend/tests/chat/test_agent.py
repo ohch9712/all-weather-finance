@@ -14,6 +14,7 @@ from app.modules.chat.models import ChatConversation
 from app.modules.chat.prompts import SYSTEM_PROMPT
 from app.modules.chat.tools.registry import ToolContext, ToolOutput, ToolSpec
 from tests.chat.conftest import (
+    ALL_TOOL_NAMES,
     create_conversation,
     enable_gemini,
     names,
@@ -57,7 +58,7 @@ def test_text_only(auth_client, use_provider, db):
     recorded = provider.calls[0]
     assert recorded["system"] == SYSTEM_PROMPT
     assert (recorded["effort"], recorded["max_tokens"]) == (task.effort, task.max_tokens)
-    assert [t.name for t in recorded["tools"]] == ["get_my_profile", "get_today"]
+    assert [t.name for t in recorded["tools"]] == ALL_TOOL_NAMES
     assert recorded["history"] == [{"role": "user", "content": "안녕"}]
 
 

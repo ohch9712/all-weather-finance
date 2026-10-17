@@ -271,8 +271,8 @@ features/<module>/
 | chat | `chat_messages` | id, conversation_id, user_id, seq, turn_id, role, kind, content(JSONB, 공급자 원본 항목 배열), text_preview, cards(JSONB), model, stop_reason, usage(JSONB), created_at | 09 |
 | watchlist | `watchlist_items` | id, user_id, stock_code, group_name, memo, sort_order, created_at | 12 |
 | screener | `saved_screens` | id, user_id, name, query_text, filter(JSONB), created_at | 13 |
-| connectors | `connector_accounts` | id, user_id, provider, kind, connected_id_enc, label, created_at | 17 |
-| connectors | `connector_syncs` | id, user_id, account_id, kind, status, started_at, finished_at, summary(JSONB), error_code | 17 |
+| connectors | `connector_accounts` | id, user_id, provider, kind, organization, label, connected_id_enc, created_at | 17 |
+| connectors | `connector_syncs` | id, user_id, account_id, kind, status, range_start, range_end, started_at, finished_at, summary(JSONB), error_code | 17 |
 
 공통 규칙
 
@@ -339,10 +339,13 @@ def get_target_allocation(db, user_id) -> TargetAllocation        # 나이대·�
 def get_recommendation(db, user_id) -> Recommendation             # 목표 반영 권장 배분·관리 방향·추천 이유(02 7.10). 부수 효과 없음
 def get_allocation_report(db, user_id) -> AllocationReport        # 보유·실제 비중·목표 반영 권장 비중·점수·등급·리밸런싱
 def get_asset_breakdown(db, user_id) -> AssetBreakdown            # 배분 대상 자산의 자산군별 합계와 제외 자산 합계(원)
+def get_situation(db, user_id) -> SituationEnvelope               # 저장된 상황(없으면 situation=None). 16이 사용
+def list_goals(db, user_id) -> GoalList                           # 재무 목표 목록. 16이 사용
 def upsert_synced_holdings(db, user_id, *, source: str, connection_id: UUID, items: list[SyncedHolding]) -> HoldingSyncResult   # 14가 추가. flush까지(commit은 호출자)
 
 # app/modules/ledger/service.py  (03, 10)
 def get_monthly_summary(db, user_id, month: date) -> MonthlySummary   # month는 그 달 1일
+def get_trend(db, user_id, months: int) -> TrendOut              # 이번 달을 포함한 최근 months개월 합계(빈 달은 0). 16이 사용
 def import_entries(db, user_id, rows: list[LedgerImportRow], *, source: str, batch_id: UUID | None = None) -> ImportResult   # 10이 추가, 17이 사용. flush까지(commit은 호출자)
 
 # app/modules/imports/registry.py  (04)
@@ -367,6 +370,9 @@ def list_members(db, user_id) -> list[MemberInfo]
 def build_compare_input(db, user_id, *, base_date: date, horizon_years: int, growth_rate: Decimal,
                         lump_sum_per_child: int, assets: CompareAssets | None = None) -> EstateCompareInput   # 가족·증여 기록·자산 사전 채움을 모은다
 def compare_estate_plans(req: EstateCompareInput) -> EstateCompareResult   # 순수 함수. 상속·증여 방향 비교(06 8.1)
+def resolve_gift_input(db, user_id, req: GiftTaxRequest) -> GiftTaxInput   # 가족·증여 기록으로 계산 입력을 만든다. 15가 사용
+def member_recipient(db, user_id, member_id: UUID) -> Recipient          # NOT_FOUND. 15가 사용
+def prior_gifts(db, user_id, member_id: UUID) -> list[PriorGift]          # 그 가족이 받은 증여 기록. 15가 사용
 
 # app/modules/learn/service.py  (07)
 def search_posts(db, query: str, *, kind: str | None = None, limit: int = 5) -> list[PostSummary]
