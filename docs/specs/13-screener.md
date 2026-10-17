@@ -219,3 +219,10 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 - 별도 빈 DB `finance_13_impl_verify`에서 `upgrade heads → downgrade base → upgrade heads`를 통과하고 DB를 삭제했다. 360px·1280px에서 문서 가로 넘침이 없고 브라우저 pageerror가 없음을 확인했으며, 조건 수정·실행과 Mock 키움 탭도 확인했다. `scripts/stop.sh`로 두 서버를 종료했다.
 - 스펙과 다른 점: 없음. 코디네이터가 갱신한 예시 문구(develop `1975b0c`)와 이름 보완 지침을 반영했다. 공유 파일·08 모듈·증권사 어댑터·의존성은 수정하지 않았고 테스트에서 실제 외부 API/LLM은 호출하지 않았다.
 - 남은 일: 별도 검증 워커의 PR 검증과 코디네이터 병합. 실제 Gemini·증권사 연결 확인은 이 작업에서 수행하지 않았다.
+
+### PR 검증 후 정렬 상태 수정
+
+- 중요 발견 1번을 수정했다. 숫자 열의 정렬 표시와 다음 방향 계산은 상위 `ScreenFilter.sort`를 사용하고, 명시적인 필터 변경/불러오기 외의 재조회에서는 마지막 성공 결과를 유지한다. 재조회 중 표를 유지하고 `aria-busy`·로딩 문구를 표시하며 정렬 조작을 잠시 비활성화한다. 종목명·시장 및 키움 결과의 화면 내 정렬만 별도 표시 상태로 처리한다.
+- 회귀 테스트 3개를 추가했다. 수정 전 3개 모두 실패한 것을 확인한 뒤, 숫자 열 두 번 클릭의 `asc → desc` 요청 순서·헤더 방향·지연 응답 중 동일한 표 유지, 모바일 선택 필드 유지·방향 전환, URL 및 저장 검색의 sort 복원을 모두 통과했다.
+- 수정 후 `npm run lint`, `npx tsc --noEmit`, `npm run test`(전체 **362개**, screener **11개**), `npm run build` 통과. 백엔드·의존성·공유 파일은 수정하지 않았다.
+- 실제 서버와 독립 Playwright Chrome 컨텍스트에서 1280px PER `asc → desc`, 360px PBR 선택 후 `asc → desc`, 응답 지연 중 표 유지, URL ROE `desc → asc`, 저장 검색 현재가 `desc → asc` 요청과 표시를 확인했다. 두 너비의 문서 가로 넘침과 pageerror는 없었고 실제 외부 API/LLM은 호출하지 않았다. `scripts/stop.sh`로 서버를 종료했다.

@@ -352,6 +352,8 @@ function ScreenWorkspace({ encoded }: { encoded: string | null }) {
           {run.data && (
             <ResultTable
               result={run.data}
+              sort={filter.sort}
+              isPending={run.isPending}
               onSort={(field, direction) => {
                 const next = { ...filter, sort: { field, direction } };
                 setFilter(next);

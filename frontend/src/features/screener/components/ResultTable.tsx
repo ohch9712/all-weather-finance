@@ -17,7 +17,12 @@ import { Disclaimer } from "@/components/common/Disclaimer";
 import { formatKRW, formatKRWCompact, formatPercent } from "@/lib/format";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { useAddWatchlist } from "../hooks";
-import type { FilterField, ScreenItem, ScreenResult } from "../types";
+import type {
+  FilterField,
+  ScreenFilter,
+  ScreenItem,
+  ScreenResult,
+} from "../types";
 
 const columns = [
   ["name", "종목명"],
@@ -41,37 +46,47 @@ function display(item: ScreenItem, key: Column) {
 }
 export function ResultTable({
   result,
+  sort: filterSort,
+  isPending = false,
   onSort,
 }: {
   result: ScreenResult;
+  sort?: ScreenFilter["sort"];
+  isPending?: boolean;
   onSort?: (field: FilterField, direction: "asc" | "desc") => void;
 }) {
-  const [sort, setSort] = useState<{
+  const [localSort, setLocalSort] = useState<{
     field: Column;
     direction: "asc" | "desc";
   } | null>(null);
+  const sort = localSort ??
+    filterSort ?? { field: "marketCap", direction: "desc" };
   const [messages, setMessages] = useState<Record<string, string>>({});
   const add = useAddWatchlist();
   const items = [...result.items];
-  if (sort)
+  if (localSort)
     items.sort((a, b) => {
-      const left = a[sort.field],
-        right = b[sort.field];
+      const left = a[localSort.field],
+        right = b[localSort.field];
       if (left === null)
         return right === null ? a.code.localeCompare(b.code) : 1;
       if (right === null) return -1;
-      const comparison = ["name", "market"].includes(sort.field)
+      const comparison = ["name", "market"].includes(localSort.field)
         ? String(left).localeCompare(String(right), "ko")
         : Number(left) - Number(right);
       return comparison === 0
         ? a.code.localeCompare(b.code)
-        : comparison * (sort.direction === "asc" ? 1 : -1);
+        : comparison * (localSort.direction === "asc" ? 1 : -1);
     });
   function sortBy(field: Column) {
     const direction =
       sort?.field === field && sort.direction === "asc" ? "desc" : "asc";
-    setSort({ field, direction });
-    if (field !== "name" && field !== "market") onSort?.(field, direction);
+    if (onSort && field !== "name" && field !== "market") {
+      setLocalSort(null);
+      onSort(field, direction);
+    } else {
+      setLocalSort({ field, direction });
+    }
   }
   function addItem(code: string) {
     add.mutate(code, {
@@ -87,7 +102,11 @@ export function ResultTable({
     });
   }
   return (
-    <section className="min-w-0 space-y-3" aria-label="검색 결과">
+    <section
+      className="min-w-0 space-y-3"
+      aria-label="검색 결과"
+      aria-busy={isPending}
+    >
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <strong>{result.total}개 종목</strong>
         <span>기준일 {result.asOf ?? "없음"}</span>
@@ -128,7 +147,11 @@ export function ResultTable({
                           : "none"
                       }
                     >
-                      <button type="button" onClick={() => sortBy(key)}>
+                      <button
+                        type="button"
+                        disabled={isPending}
+                        onClick={() => sortBy(key)}
+                      >
                         {label}
                         {sort?.field === key
                           ? sort.direction === "asc"
@@ -196,9 +219,17 @@ export function ResultTable({
               <select
                 aria-label="결과 정렬"
                 className="ml-2 max-w-full rounded border bg-background p-2"
-                value={sort?.field ?? "marketCap"}
+                disabled={isPending}
+                value={
+                  columns.some(([field]) => field === sort.field)
+                    ? sort.field
+                    : ""
+                }
                 onChange={(e) => sortBy(e.target.value as Column)}
               >
+                <option value="" disabled>
+                  그 밖의 지표
+                </option>
                 {columns.map(([key, label]) => (
                   <option key={key} value={key}>
                     {label}
@@ -209,7 +240,16 @@ export function ResultTable({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => sortBy(sort?.field ?? "marketCap")}
+              disabled={isPending}
+              onClick={() => {
+                if (columns.some(([field]) => field === sort.field))
+                  sortBy(sort.field as Column);
+                else
+                  onSort?.(
+                    sort.field as FilterField,
+                    sort.direction === "asc" ? "desc" : "asc",
+                  );
+              }}
             >
               정렬 방향 바꾸기
             </Button>

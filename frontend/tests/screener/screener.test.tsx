@@ -156,6 +156,152 @@ describe("조건검색 화면", () => {
       expect(requested?.sort).toEqual({ field: "per", direction: "asc" }),
     );
   });
+  it("숫자 열의 정렬을 asc에서 desc로 전환하고 재조회 중 표를 유지한다", async () => {
+    const requested: ScreenFilter["sort"][] = [];
+    let release: (() => void) | undefined;
+    server.use(
+      http.post(apiUrl("/api/screener/run"), async ({ request }) => {
+        const { filter } = (await request.json()) as { filter: ScreenFilter };
+        requested.push(filter.sort);
+        if (requested.length > 1)
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        return HttpResponse.json(results);
+      }),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />);
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    const table = await screen.findByRole("table");
+    await user.click(within(table).getByRole("button", { name: /PER/ }));
+    await waitFor(() =>
+      expect(requested.at(-1)).toEqual({ field: "per", direction: "asc" }),
+    );
+    expect(screen.getByRole("table")).toBe(table);
+    expect(screen.getByText("종목을 검색하고 있어요.")).toBeInTheDocument();
+    release?.();
+    await waitFor(() =>
+      expect(
+        screen.queryByText("종목을 검색하고 있어요."),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      within(table).getByRole("columnheader", { name: "PER ↑" }),
+    ).toHaveAttribute("aria-sort", "ascending");
+    await user.click(within(table).getByRole("button", { name: "PER ↑" }));
+    await waitFor(() =>
+      expect(requested.slice(1)).toEqual([
+        { field: "per", direction: "asc" },
+        { field: "per", direction: "desc" },
+      ]),
+    );
+    expect(screen.getByRole("table")).toBe(table);
+    release?.();
+    await waitFor(() =>
+      expect(
+        screen.queryByText("종목을 검색하고 있어요."),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      within(table).getByRole("columnheader", { name: "PER ↓" }),
+    ).toHaveAttribute("aria-sort", "descending");
+  });
+  it("모바일 정렬 필드를 응답 후 유지하고 해당 필드의 방향을 바꾼다", async () => {
+    const requested: ScreenFilter["sort"][] = [];
+    server.use(
+      http.post(apiUrl("/api/screener/run"), async ({ request }) => {
+        requested.push(
+          ((await request.json()) as { filter: ScreenFilter }).filter.sort,
+        );
+        return HttpResponse.json(results);
+      }),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />);
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    await user.selectOptions(await screen.findByLabelText("결과 정렬"), "per");
+    await waitFor(() =>
+      expect(requested.at(-1)).toEqual({ field: "per", direction: "asc" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByText("종목을 검색하고 있어요."),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText("결과 정렬")).toHaveValue("per");
+    await user.click(screen.getByRole("button", { name: "정렬 방향 바꾸기" }));
+    await waitFor(() =>
+      expect(requested.at(-1)).toEqual({ field: "per", direction: "desc" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByText("종목을 검색하고 있어요."),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText("결과 정렬")).toHaveValue("per");
+  });
+  it("URL과 저장한 검색의 sort를 헤더와 다음 정렬 요청에 적용한다", async () => {
+    const requested: ScreenFilter["sort"][] = [];
+    const urlFilter: ScreenFilter = {
+      ...emptyFilter(),
+      sort: { field: "per", direction: "desc" },
+    };
+    const savedFilter: ScreenFilter = {
+      ...emptyFilter(),
+      sort: { field: "pbr", direction: "desc" },
+    };
+    server.use(
+      http.post(apiUrl("/api/screener/run"), async ({ request }) => {
+        requested.push(
+          ((await request.json()) as { filter: ScreenFilter }).filter.sort,
+        );
+        return HttpResponse.json(results);
+      }),
+      http.get(apiUrl("/api/screener/saved"), () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: "sorted",
+              name: "정렬한 검색",
+              queryText: null,
+              filter: savedFilter,
+              createdAt: "2026-10-16T00:00:00Z",
+            },
+          ],
+        }),
+      ),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />, {
+      route: `/stocks/screener?f=${encodeFilter(urlFilter)}`,
+    });
+    await screen.findByRole("table");
+    expect(screen.getByRole("columnheader", { name: "PER ↓" })).toHaveAttribute(
+      "aria-sort",
+      "descending",
+    );
+    expect(screen.getByLabelText("결과 정렬")).toHaveValue("per");
+    await user.click(screen.getByRole("button", { name: "PER ↓" }));
+    await waitFor(() =>
+      expect(requested.at(-1)).toEqual({ field: "per", direction: "asc" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByText("종목을 검색하고 있어요."),
+      ).not.toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole("button", { name: "불러오기" }));
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    await screen.findByRole("table");
+    expect(requested.at(-1)).toEqual(savedFilter.sort);
+    expect(screen.getByLabelText("결과 정렬")).toHaveValue("pbr");
+    expect(screen.getByRole("columnheader", { name: "PBR ↓" })).toHaveAttribute(
+      "aria-sort",
+      "descending",
+    );
+    await user.click(screen.getByRole("button", { name: "정렬 방향 바꾸기" }));
+    await waitFor(() =>
+      expect(requested.at(-1)).toEqual({ field: "pbr", direction: "asc" }),
+    );
+  });
   it("URL 필터로 바로 실행하고 ETF 종류를 표시한다", async () => {
     const filter = { ...emptyFilter(), kinds: ["etf"] as ["etf"] };
     const handler = vi.fn(() => HttpResponse.json(results));
