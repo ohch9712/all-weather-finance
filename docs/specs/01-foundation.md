@@ -324,7 +324,7 @@ def compute_age_band(birth_year: int, today: date) -> AgeBand
 - `time.now_utc()`(aware datetime), `time.today_kst()`(date). 모든 모듈은 `datetime.now()`를 직접 쓰지 않는다.
 - `logging.SecretMaskingFilter`: 로그 레코드의 메시지·인자에서 `app_key`, `appkey`, `app_secret`, `secretkey`, `secret`, `token`, `password`, `account_no`, `authorization` 키의 값을 `***`로 바꾼다.
 - `domain.py`: architecture 6절 상수와 한국어 표시명, `AGE_BAND_REPRESENTATIVE_AGE = {"20s": 25, "30s": 35, "40s": 45, "50s": 55, "60s": 65}`.
-- `format.py`: 프론트 `lib/format.ts`(11.2)와 같은 규칙. `format_krw(1234000)` → `"1,234,000원"`(음수 `"-5,000원"`). `format_krw_compact(n)`: 절댓값이 1억 이상이면 억 단위 소수 첫째 자리(ROUND_HALF_UP, `.0`은 생략: `100000000` → `"1억원"`, `123400000` → `"1.2억원"`, `2710264056` → `"27.1억원"`), 1만 이상이면 만 단위 정수(ROUND_HALF_UP, 천 단위 쉼표: `56700000` → `"5,670만원"`, `12345678` → `"1,235만원"`, 반올림 결과가 10,000만이면 `"1억원"`), 1만 미만은 `format_krw`. 음수는 앞에 `-`.
+- `format.py`: 프론트 `lib/format.ts`(11.2)와 같은 규칙. `format_krw(1234000)` → `"1,234,000원"`(음수 `"-5,000원"`). `format_krw_compact(n)`: 절댓값이 1억 이상이면 억 단위 소수 첫째 자리(ROUND_HALF_UP, `.0`은 생략, 정수부는 천 단위 쉼표: `100000000` → `"1억원"`, `123400000` → `"1.2억원"`, `2710264056` → `"27.1억원"`, `1275600000000` → `"12,756억원"`, `123456789012` → `"1,234.6억원"`. 프론트 `formatEok`와 같다), 1만 이상이면 만 단위 정수(ROUND_HALF_UP, 천 단위 쉼표: `56700000` → `"5,670만원"`, `12345678` → `"1,235만원"`, 반올림 결과가 10,000만이면 `"1억원"`), 1만 미만은 `format_krw`. 음수는 앞에 `-`.
 
 ## 10. 개발 인프라 (01a)
 
