@@ -53,7 +53,7 @@
 | `get_gift_deductions` | `{"memberName": str \| null}` | `estate.list_members`, `estate.get_deduction_status` | `table` |
 | `estimate_gift_tax` | `{"memberName": str \| null, "relation": … \| null, "birthDate": date \| null, "donorGroup": …, "amount": int, "giftedOn": date \| null}` | `estate.resolve_gift_input`(가족이면 `memberId`, 아니면 `recipient`로 `GiftTaxRequest`를 만든다), `estate.calc_gift_tax` | `gift_tax` |
 | `compare_estate_plans` | `{"horizonYears": int \| null, "annualGrowthRate": str \| null, "lumpSumPerChild": int \| null}`(null이면 06 기본값 20년·"3"·1억, 재산은 사전 채움) | `estate.build_compare_input`, `estate.compare_estate_plans` | `comparison` |
-| `plan_gifts` | `{"memberName": str \| null, "birthDate": date \| null, "targetAge": int \| null, "annualReturnRate": str \| null}` | `estate.member_recipient`, `estate.prior_gifts`, `estate.simulate_gift_plan`(06 라우터 `POST /api/estate/simulate/gift-plan`과 같은 순서로 `GiftPlanInput`을 만든다) | `table` + `link` |
+| `plan_gifts` | `{"memberName": str \| null, "birthDate": date \| null, "targetAge": int \| null, "annualReturnRate": str \| null}` | `estate.member_recipient`, `estate.prior_gifts`, `estate.simulate_gift_plan`(06 라우터 `POST /api/estate/simulate/gift-plan`과 같은 순서로 `GiftPlanInput`을 만든다) | `table`(`href: "/estate?tab=plan"`) |
 | `search_learning` | `{"query": str}` | `learn.search_posts(limit=5)` | `link_list` |
 
 도구 설명(`description`) 작성 규칙
@@ -72,14 +72,14 @@ develop `5d82533`의 실제 코드와 대조해 정한 내용이다. 표와 어�
 - **예상 오류는 도구가 상태로 바꾼다.** 09의 `execute_tool`은 핸들러가 던진 예외를 모두 "도구 실행 실패"(`is_error`)로 바꾸고 예외 로그를 남긴다. 그래서 아래 `AppError`는 핸들러가 잡아 `{"status": "<상태>", "message": "<서버 메시지>"}`를 담은 정상 결과로 돌려준다. 그 밖의 예외는 잡지 않는다.
   - `allocation.get_target_allocation`: 409 `PROFILE_INCOMPLETE` → `profile_incomplete`, 409 `RISK_PROFILE_REQUIRED` → `risk_profile_required`
   - `watchlist.add_item`: 404 `NOT_FOUND` → `not_found`, 409 `CONFLICT`(이미 담김, 100개 상한) → `conflict`
-  - `estate.build_compare_input`: 사전 채움 재산이 없으면 422 `VALIDATION_ERROR`(`assets`) → `assets_required`(4절 안내 문장)
-  - `estate.resolve_gift_input`·`member_recipient`·`prior_gifts`·`get_deduction_status`: 404 `NOT_FOUND`·422 `VALIDATION_ERROR` → `invalid_input`(메시지 그대로)
+  - `estate.build_compare_input`: 사전 채움 재산이 없으면 422 `VALIDATION_ERROR`(`assets`) → `assets_required`(4절 안내 문장). 실제 06 코드는 자산이 없어도 0원 사전 채움을 돌려주므로, 만든 입력의 `assets` 합계가 0이어도 `assets_required`다.
+  - estate 공개 함수 전부(`resolve_gift_input`·`member_recipient`·`prior_gifts`·`get_deduction_status`·`calc_gift_tax`·`simulate_gift_plan`·`compare_estate_plans`)와 `plan_gifts`의 자체 입력 검증(06 라우터와 같은 `field_error`): 404 `NOT_FOUND`·422 `VALIDATION_ERROR` → `invalid_input`(메시지와 `details`의 메시지를 그대로)
   - `allocation.get_allocation_report`·`get_recommendation`은 오류 대신 `status` 필드(`needs_profile`·`needs_assessment`·`needs_holdings`, 추천은 앞의 둘)로 데이터 없음을 알린다. 그 값을 그대로 전달한다.
 - **`add_to_watchlist`의 커밋**: `watchlist.add_item`은 함수 안에서 `commit`(실패 경로는 `commit` 또는 `rollback`)한다. 09의 `TurnWriter`가 메시지 행을 쓸 때마다 커밋하므로 도구 실행 시점에 미커밋 변경이 없어 안전하다. 이 순서를 바꾸지 않는다. SQLAlchemy 2.0에서는 `begin_nested()` 안의 `commit`이 바깥 트랜잭션까지 커밋한다.
 - **카드에 넣을 값의 출처**
   - `allocation`: `AllocationReport.classes`의 `asset_class`·`actual_weight`·`target_weight`, 이름은 `app.core.domain.ASSET_CLASS_LABEL`. `classes`가 null이면 빈 목록. 리포트에는 Mock 잔고 여부가 없어 이 카드에는 샘플 배지를 달지 않는다(링크한 `/allocation` 화면이 고지를 보여 준다).
   - `directions`: `Recommendation.directions`를 `priority` 순으로 앞 3개, `amount`는 형식화한 원 또는 null.
-  - `spending`: `MonthlySummary`의 `income_total`·`expense_total`·`net`, `topCategories`는 `by_category` 앞 5개. `href`는 `/ledger?month=YYYY-MM`.
+  - `spending`: `MonthlySummary`의 `income_total`·`expense_total`·`net`, `topCategories`는 `by_category` 중 `kind == "expense"` 앞 5개. `href`는 `/ledger?month=YYYY-MM`.
   - `stock`: `StockDetail.quote`(가격·등락률), `snapshot`(PER·PBR·ROE·시가총액 등 있는 값만), `source`. `get_stock_detail`이 None이면 카드 없이 `not_found` 상태.
   - `stock_list`: `search_stocks`는 시세가 없는 종목 마스터 검색이라 `price`·`changeRate`는 null, `source`는 `"master"`(배지 없음), `extra`는 시장·ETF 표시. `screen_stocks`는 `ScreenResult.as_of`·`source`·`items`, `get_watchlist`는 항목의 `quote`와 첫 항목의 `source`.
   - `link_list`: `search_posts` 결과의 `title`·`summary`, `href`는 `/learn/{slug}`.
@@ -107,6 +107,7 @@ develop `5d82533`의 실제 코드와 대조해 정한 내용이다. 표와 어�
     href: "/estate?tab=compare" }
 ```
 
+- 09의 `table` 카드에 선택 필드 `href?: string`(앱 내부 경로, "/"로 시작)을 더한다. 있으면 표 아래에 "자세히 보기" 링크를 그린다. 도구 하나는 카드 하나만 낸다(09의 `ToolOutput.card`·SSE `tool_end.card` 형식을 바꾸지 않는다). `plan_gifts`는 `/estate?tab=plan`, `get_trade_stats`·`get_positions`는 `/journal`, `get_gift_deductions`는 `/estate?tab=deductions`를 쓴다.
 - 카드의 표시 값은 서버에서 형식화한 문자열이다(`"1,234,000원"`, `"-1.11%"`). `allocation` 카드는 도넛을 그리므로 비중은 숫자다.
 - `stock`·`stock_list` 카드는 `source=mock`이면 "샘플 데이터" 배지, `gift_tax`·`comparison` 카드는 `tax` 고지 한 줄, `directions` 카드는 `investment` 고지 한 줄을 붙인다. `directions`는 방향 앞 3개, `comparison`은 06 8.1의 방향 순서다.
 - 프론트: `features/chat/cards/`에 타입별 컴포넌트를 추가하고 레지스트리에 등록한다. 01b의 `DonutChart`와 `--asset-*` 색을 쓴다.
