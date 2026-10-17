@@ -150,14 +150,29 @@ def execute_tool(ctx: ToolContext, call: ToolCall) -> ToolRun:
     return ToolRun(ToolExecResult(call, content, False), _safe_card(output.card))
 
 
+def _internal_href(href: object) -> bool:
+    return isinstance(href, str) and href.startswith("/") and not href.startswith("//")
+
+
 def _safe_card(card: dict | None) -> dict | None:
+    """카드의 링크는 앱 내부 경로("/"로 시작)만 허용한다(스펙 09 7절, 15 5절)."""
     if not isinstance(card, dict) or not isinstance(card.get("type"), str):
         return None
-    if card["type"] == "link":
-        # 앱 내부 경로("/"로 시작)만 허용한다(스펙 7절).
-        href = card.get("href")
-        if not isinstance(href, str) or not href.startswith("/") or href.startswith("//"):
+    # link 카드는 href가 필수다. 다른 카드는 href가 있으면(null 제외) 내부 경로여야 한다.
+    if card["type"] == "link" or card.get("href") is not None:
+        if not _internal_href(card.get("href")):
             return None
+    if card["type"] == "link_list":
+        links = card.get("links")
+        if not isinstance(links, list):
+            return None
+        safe = [
+            link for link in links if isinstance(link, dict) and _internal_href(link.get("href"))
+        ]
+        if not safe:
+            return None
+        if len(safe) != len(links):
+            card = {**card, "links": safe}
     return card
 
 

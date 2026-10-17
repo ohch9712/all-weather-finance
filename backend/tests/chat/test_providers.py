@@ -24,6 +24,7 @@ from app.modules.chat.providers.base import (
 from app.modules.chat.providers.gemini import GeminiChatProvider
 from app.modules.chat.providers.ollama_provider import OllamaChatProvider
 from app.modules.chat.tools.registry import get_registered_tools
+from tests.chat.conftest import ALL_TOOL_NAMES
 
 
 @pytest.fixture
@@ -95,7 +96,7 @@ def test_gemini_call_arguments(settings):
         }
         for tool in get_registered_tools()
     ]
-    assert [tool["name"] for tool in args["tools"]] == ["get_my_profile", "get_today"]
+    assert [tool["name"] for tool in args["tools"]] == ALL_TOOL_NAMES
     assert args["generation_config"] == {
         "thinking_level": "medium",
         "max_output_tokens": 8000,

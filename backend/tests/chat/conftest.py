@@ -16,6 +16,28 @@ from tests.chat.fakes import FakeChatProvider, FakeRound
 
 MODEL = "gemma4:12b"
 
+# 09 기본 도구 2개 + 15 모듈 데이터 도구 16개(이름순, 스펙 15 8절)
+ALL_TOOL_NAMES = [
+    "add_to_watchlist",
+    "compare_estate_plans",
+    "estimate_gift_tax",
+    "get_allocation_report",
+    "get_gift_deductions",
+    "get_my_profile",
+    "get_positions",
+    "get_recommendation",
+    "get_risk_profile",
+    "get_spending_summary",
+    "get_stock_detail",
+    "get_today",
+    "get_trade_stats",
+    "get_watchlist",
+    "plan_gifts",
+    "screen_stocks",
+    "search_learning",
+    "search_stocks",
+]
+
 
 @pytest.fixture
 def chat_settings(monkeypatch) -> Settings:
