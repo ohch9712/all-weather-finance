@@ -166,15 +166,13 @@ def get_positions(ctx: ToolContext, params: BaseModel) -> ToolOutput:
         "title": "보유 종목",
         "columns": [
             {"key": "name", "label": "종목"},
-            {"key": "quantity", "label": "수량", "align": "right"},
             {"key": "avgCost", "label": "평균단가", "align": "right"},
             {"key": "currentPrice", "label": "현재가", "align": "right"},
             {"key": "unrealized", "label": "평가손익", "align": "right"},
         ],
         "rows": [
             {
-                "name": item.symbol_name,
-                "quantity": f"{item.quantity}주",
+                "name": f"{item.symbol_name} ({item.quantity}주)",
                 "avgCost": money(item.avg_cost, item.currency),
                 "currentPrice": money(item.current_price, item.currency) or "-",
                 "unrealized": (

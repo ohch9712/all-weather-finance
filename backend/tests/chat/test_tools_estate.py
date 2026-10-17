@@ -8,6 +8,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.core.format import format_krw_compact
 from app.modules.chat.tools import estate as estate_tool
 from app.modules.estate import service as estate_service
 from app.modules.estate.schemas import EstateCompareInput, GiftPlanRequest, GiftTaxRequest
@@ -97,13 +98,13 @@ def test_gift_deductions_all_members(auth_client, db, monkeypatch):
     card = result.card
     assert card["type"] == "table" and card["href"] == "/estate?tab=deductions"
     assert card["title"] == "증여재산공제 현황 (2026.10.17 기준)"
-    row = next(row for row in card["rows"] if row["member"] == "첫째")
+    row = next(row for row in card["rows"] if row["member"] == "첫째 · 직계존속")
     assert row == {
-        "member": "첫째",
-        "category": "직계존속",
-        "limit": money(status.pools[0].limit),
-        "used": "30,000,000원",
-        "available": money(status.pools[0].available),
+        "member": "첫째 · 직계존속",
+        "available": (
+            f"{format_krw_compact(status.pools[0].available)} / "
+            f"{format_krw_compact(status.pools[0].limit)}"
+        ),
         "resetOn": "2035.01.11",
     }
     assert [column["key"] for column in card["columns"]] == list(row)
@@ -377,13 +378,14 @@ def test_plan_gifts_for_member(auth_client, db, monkeypatch):
     card = result.card
     assert card["type"] == "table" and card["href"] == "/estate?tab=plan"
     assert card["title"] == "둘째 분산 증여 플랜"
+    first = expected.schedule[0]
     assert card["rows"][0] == {
-        "giftOn": expected.schedule[0].gift_on.strftime("%Y.%m.%d"),
-        "age": f"{expected.schedule[0].age}세",
-        "amount": money(expected.schedule[0].amount),
-        "deduction": "기본 공제",
-        "tax": money(expected.schedule[0].tax),
+        "giftOn": f"{first.gift_on.strftime('%Y.%m.%d')} ({first.age}세)",
+        "amount": money(first.amount),
+        "deduction": "기본",
+        "tax": money(first.tax),
     }
+    assert [column["key"] for column in card["columns"]] == list(card["rows"][0])
     assert money(expected.lump_sum.payable_tax) in card["footnote"]
 
 

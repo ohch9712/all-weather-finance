@@ -8,9 +8,10 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 from typing import Any
 from uuid import UUID
@@ -25,6 +26,7 @@ from app.modules.chat.tools.registry import ToolOutput
 KRX_MARKETS = frozenset({"KOSPI", "KOSDAQ", "KONEX"})
 MARKET_LABEL = {"KOSPI": "코스피", "KOSDAQ": "코스닥", "KONEX": "코넥스"}
 NO_ARGUMENTS = "인자 없이 빈 객체({})로 부른다."
+COMPACT_EOK = re.compile(r"(-?)(\d+)(\.\d)?억원")
 
 
 class ToolInput(BaseModel):
@@ -91,7 +93,16 @@ def krw(value: int | Decimal | str | None) -> str | None:
 
 
 def krw_compact(value: int | None) -> str | None:
-    return None if value is None else format_krw_compact(value)
+    """`5,670만원`, `1.2억원`, `12,756억원`(프론트 formatKRWCompact와 같은 모양)"""
+    if value is None:
+        return None
+    text = format_krw_compact(value)
+    # core의 억 단위 정수부에는 쉼표가 없어(`12756억원`) 프론트 규칙(`12,756억원`)에 맞춘다.
+    match = COMPACT_EOK.fullmatch(text)
+    if match is None:
+        return text
+    sign, whole, fraction = match.groups()
+    return f"{sign}{int(whole):,}{fraction or ''}억원"
 
 
 def money(value: Decimal | str | None, currency: str) -> str | None:
@@ -118,30 +129,28 @@ def price(value: Decimal | str | None, market: str | None) -> str | None:
     return money(value, "KRW" if market is None or market in KRX_MARKETS else "USD")
 
 
+def _fixed(value: float | Decimal | int, digits: int) -> Decimal:
+    """소수 digits자리 사사오입(ROUND_HALF_UP). -0은 0으로 둔다."""
+    rounded = Decimal(str(value)).quantize(Decimal(1).scaleb(-digits), ROUND_HALF_UP)
+    return rounded.copy_abs() if rounded == 0 else rounded
+
+
 def rate(value: float | Decimal | None) -> str | None:
     """등락률·수익률: `+1.11%`, `-1.11%`, `0.00%`"""
     if value is None:
         return None
-    decimal = Decimal(str(value))
-    text = f"{decimal:.2f}%"
-    if text in ("-0.00%", "0.00%"):
-        return "0.00%"
-    return f"+{text}" if decimal > 0 else text
+    rounded = _fixed(value, 2)
+    return f"+{rounded}%" if rounded > 0 else f"{rounded}%"
 
 
 def share(value: float | Decimal | None) -> str | None:
     """비중: `35.2%`"""
-    if value is None:
-        return None
-    text = f"{Decimal(str(value)):.1f}%"
-    return "0.0%" if text == "-0.0%" else text
+    return None if value is None else f"{_fixed(value, 1)}%"
 
 
 def unit(value: Decimal | int | float | None, suffix: str, digits: int = 2) -> str | None:
     """PER `12.34배`, ROE `15.20%`처럼 고정 소수 자릿수와 단위를 붙인다."""
-    if value is None:
-        return None
-    return f"{Decimal(str(value)):,.{digits}f}{suffix}"
+    return None if value is None else f"{_fixed(value, digits):,}{suffix}"
 
 
 def day_text(value: date | None) -> str | None:

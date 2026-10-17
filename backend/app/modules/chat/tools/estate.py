@@ -18,6 +18,7 @@ from app.modules.chat.tools.common import (
     day_text,
     error_status,
     krw,
+    krw_compact,
     number,
     plain,
     status_output,
@@ -72,7 +73,7 @@ CATEGORY_LABEL = {
     "other_relative": "기타친족",
     "none": "공제 없음",
 }
-DEDUCTION_TYPE_LABEL = {"basic": "기본 공제", "marriage": "혼인·출산 공제"}
+DEDUCTION_TYPE_LABEL = {"basic": "기본", "marriage": "혼인·출산"}
 
 MemberName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20)]
 Money = Annotated[int, Field(ge=1, le=1_000_000_000_000)]
@@ -177,11 +178,9 @@ def get_gift_deductions(ctx: ToolContext, params: BaseModel) -> ToolOutput:
         entries.append(_deduction_entry(member, status))
         rows.extend(
             {
-                "member": member.display_name,
-                "category": CATEGORY_LABEL[pool.category],
-                "limit": krw(pool.limit),
-                "used": krw(pool.used_within10y),
-                "available": krw(pool.available),
+                # 360px 채팅 폭에 맞게 열을 줄이고 금액은 짧게 쓴다(정확한 값은 content에 있다).
+                "member": f"{member.display_name} · {CATEGORY_LABEL[pool.category]}",
+                "available": f"{krw_compact(pool.available)} / {krw_compact(pool.limit)}",
                 "resetOn": day_text(pool.next_reset_on) or "-",
             }
             for pool in status.pools
@@ -201,16 +200,14 @@ def get_gift_deductions(ctx: ToolContext, params: BaseModel) -> ToolOutput:
         "type": "table",
         "title": f"증여재산공제 현황 ({day_text(ctx.today)} 기준)",
         "columns": [
-            {"key": "member", "label": "가족"},
-            {"key": "category", "label": "공제 구분"},
-            {"key": "limit", "label": "한도", "align": "right"},
-            {"key": "used", "label": "10년 사용", "align": "right"},
-            {"key": "available", "label": "남은 공제", "align": "right"},
-            {"key": "resetOn", "label": "다시 생기는 날", "align": "right"},
+            {"key": "member", "label": "가족·공제"},
+            {"key": "available", "label": "남은 공제/한도", "align": "right"},
+            {"key": "resetOn", "label": "회복일", "align": "right"},
         ],
         "rows": rows,
         "footnote": (
-            "증여일 기준 10년 합산 공제를 반영한 참고용 추정입니다. 혼인·출산 공제는 따로 봅니다."
+            "남은 공제는 10년 합산 기준이고, 회복일은 다음 공제 회복일입니다. 혼인·출산 공제는 "
+            "따로 봅니다. 참고용 추정입니다."
         ),
         "href": "/estate?tab=deductions",
     }
@@ -492,16 +489,14 @@ def plan_gifts(ctx: ToolContext, params: BaseModel) -> ToolOutput:
         "type": "table",
         "title": f"{who} 분산 증여 플랜",
         "columns": [
-            {"key": "giftOn", "label": "증여일"},
-            {"key": "age", "label": "나이", "align": "right"},
+            {"key": "giftOn", "label": "증여일(나이)"},
             {"key": "amount", "label": "증여액", "align": "right"},
             {"key": "deduction", "label": "공제"},
             {"key": "tax", "label": "세금", "align": "right"},
         ],
         "rows": [
             {
-                "giftOn": day_text(item.gift_on),
-                "age": f"{item.age}세",
+                "giftOn": f"{day_text(item.gift_on)} ({item.age}세)",
                 "amount": krw(item.amount),
                 "deduction": DEDUCTION_TYPE_LABEL[item.deduction_type],
                 "tax": krw(item.tax),

@@ -14,7 +14,7 @@ from sqlalchemy import text
 from app.integrations.llm.schema import portable_json_schema
 from app.modules.chat import prompts
 from app.modules.chat.agent import _safe_card
-from app.modules.chat.tools.common import NoInput
+from app.modules.chat.tools.common import NoInput, krw_compact, rate
 from app.modules.chat.tools.registry import (
     ToolOutput,
     ToolSpec,
@@ -371,3 +371,27 @@ def test_score_question_scenario_saves_allocation_card(auth_client, use_provider
     ]
     assert assistant["cards"] == [card]
     assert user_by_email(db).email not in json.dumps(detail["messages"], ensure_ascii=False)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, None),
+        (5_000, "5,000원"),
+        (56_700_000, "5,670만원"),
+        (123_400_000, "1.2억원"),
+        (100_000_000, "1억원"),
+        (1_275_600_000_000, "12,756억원"),
+        (-218_910_000_000, "-2,189.1억원"),
+    ],
+)
+def test_compact_krw_matches_frontend(value, expected):
+    assert krw_compact(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(1.11, "+1.11%"), (-1.205, "-1.21%"), (0, "0.00%"), (-0.001, "0.00%"), (None, None)],
+)
+def test_rate_text(value, expected):
+    assert rate(value) == expected

@@ -175,7 +175,8 @@ def test_positions_with_quotes(auth_client, db, market, monkeypatch):
     card = result.card
     assert card["type"] == "table" and card["href"] == "/journal"
     row = card["rows"][0]
-    assert row["name"] == "삼성전자" and row["quantity"] == "10주"
+    assert row["name"] == "삼성전자 (10주)"
+    assert [column["key"] for column in card["columns"]] == list(row)
     assert row["avgCost"] == "70,000원" and row["currentPrice"] == "102,800원"
     assert row["unrealized"] == "+328,000원 (+46.86%)"
     assert card["footnote"].startswith("현재가는 샘플 데이터입니다.")
