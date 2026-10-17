@@ -162,3 +162,12 @@ def upsert_synced_holdings(db, user_id, *, source: Literal["kiwoom", "toss", "co
   - 360px에서 목록·다이얼로그의 `documentElement.scrollWidth === innerWidth === 360`, 1280px에서도 `scrollWidth === innerWidth === 1280`을 확인했다. 모바일 캡처를 시각 검토했고 Mock 행 6개와 sample/investment 고지를 확인했다. 임시 브라우저 프로필은 삭제했다.
   - 변경 경로는 전부 3절 소유 범위 안이며 `git diff --check` 통과. `scripts/stop.sh`로 서버 종료 완료.
 - 남은 일: 코디네이터의 별도 검증과 PR 병합. 실제 증권사 자격증명을 이용한 호출은 하지 않았다. 외화 환산·주기 동기화는 원래 제외 범위다.
+
+### 웨이브 3 통합 검증 수정
+
+- 경미 K2: 배분 리포트와 추천 결과에 `AllocationSampleDisclaimer`를 추가했다. 기존 `useHoldings()`와 `GET /api/allocation/holdings`를 재사용해 `source="mock"`이고 `includeInAllocation=true`인 행이 하나라도 있을 때만 공용 `Disclaimer variant="sample"`을 표시한다. 금액이 0인 Mock 행도 포함 여부에 따라 판단하며 기존 investment 고지를 유지한다.
+- 프론트 컴포넌트와 테스트만 수정했다. 배분 계산, 백엔드 응답, 페이지 파일과 의존성은 바꾸지 않았다. 스펙과 다르게 한 점은 없다.
+- `frontend/tests/allocation/sample-disclaimer.test.tsx`에 두 화면 각각 혼합 자산, 0원 Mock, 제외된 Mock, 수동 입력, 키움·토스·CODEF, 빈 목록의 표시 여부를 확인하는 16개 회귀 테스트를 추가했다. API는 기존 MSW 가짜를 사용하며 외부 API·LLM을 호출하지 않는다.
+- 검증(2026-10-17): `scripts/worktree-setup.sh` 성공. `npm run lint`, `npx tsc --noEmit`, `npm run test`(44개 파일·432개 테스트), `npm run build`, `git diff --check` 모두 통과했다.
+- 독립 Playwright 브라우저 세션에서 실제 로컬 서버에 로그인하고 수동 자산만 있을 때 두 화면의 샘플 고지 미표시, 개발용 Mock 연결 잔고 6개 동기화 후 표시, 모든 Mock 행을 배분에서 제외한 뒤 미표시를 확인했다. 두 화면 모두 360px·1280px에서 `documentElement.scrollWidth === innerWidth`를 확인하고 모바일 캡처를 시각 검토했다. `scripts/stop.sh`로 서버를 종료했다.
+- 남은 일: 코디네이터의 별도 검증과 PR 병합.

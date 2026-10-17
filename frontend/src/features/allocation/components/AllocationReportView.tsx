@@ -19,6 +19,7 @@ import { ALLOCATION_PATHS, GRADE_MESSAGE } from "../constants";
 import { useRecommendation, useReport, useScores } from "../hooks";
 import type { AllocationReport, ByAssetClass, ReportClass } from "../types";
 import { AllocationDonut } from "./AllocationDonut";
+import { AllocationSampleDisclaimer } from "./AllocationSampleDisclaimer";
 import { StatusNotice } from "./StatusNotice";
 import { TargetTableDialog } from "./TargetTableDialog";
 
@@ -55,6 +56,7 @@ export function AllocationReportView() {
       ) : (
         <ReadyReport report={report.data} />
       )}
+      <AllocationSampleDisclaimer />
       <Disclaimer variant="investment" />
     </div>
   );
