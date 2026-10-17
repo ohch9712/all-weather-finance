@@ -53,6 +53,7 @@ class Trade(Base):
     quantity: Mapped[Decimal] = mapped_column(Numeric(20, 6))
     price: Mapped[Decimal] = mapped_column(Numeric(20, 6))
     currency: Mapped[str] = mapped_column(String(3))
+    cost_estimated: Mapped[bool] = mapped_column(server_default=text("false"))
     fee: Mapped[Decimal] = mapped_column(Numeric(20, 6), server_default="0")
     tax: Mapped[Decimal] = mapped_column(Numeric(20, 6), server_default="0")
     broker: Mapped[str | None] = mapped_column(String(10))
@@ -88,6 +89,23 @@ class TradeNote(Base):
     tags: Mapped[list[str]] = mapped_column(ARRAY(String(20)), server_default=text("'{}'"))
     emotion: Mapped[str | None] = mapped_column(String(12))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
+class TradeCostSettings(Base):
+    __tablename__ = "trade_cost_settings"
+    __table_args__ = tuple(
+        CheckConstraint(f"{name} >= 0 AND {name} <= 5", name=name)
+        for name in ("krx_commission_rate", "krx_sell_tax_rate", "us_commission_rate")
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    krx_commission_rate: Mapped[Decimal] = mapped_column(Numeric(6, 4))
+    krx_sell_tax_rate: Mapped[Decimal] = mapped_column(Numeric(6, 4))
+    us_commission_rate: Mapped[Decimal] = mapped_column(Numeric(6, 4))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=now_utc, onupdate=now_utc
     )

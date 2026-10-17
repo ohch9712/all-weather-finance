@@ -11,7 +11,7 @@ const roundedTrade: Trade = {
   tradedOn: "2026-10-01", tradedTime: null, tradedAt: "2026-10-01T00:00:00Z", timeKnown: false,
   market: "US", currency: "USD", symbolCode: "AAPL", symbolName: "애플", side: "buy",
   quantity: "1000", price: "10.01", fee: "0.00", tax: "0.00", broker: null, accountLabel: null,
-  source: "manual", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z",
+  source: "manual", costEstimated: false, createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z",
 };
 
 describe("매매 부분 수정", () => {

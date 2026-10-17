@@ -8,6 +8,10 @@ from app.api.deps import CurrentUser, DBSession, PageQuery, require_json
 from app.core.schemas import Page
 from app.modules.journal import service
 from app.modules.journal.schemas import (
+    CostEstimate,
+    CostEstimateInput,
+    CostSettings,
+    CostSettingsInput,
     Kind,
     NoteInput,
     NoteOut,
@@ -108,3 +112,23 @@ def update_note(note_id: UUID, data: NotePatch, db: DBSession, user: CurrentUser
 def delete_note(note_id: UUID, db: DBSession, user: CurrentUser):
     service.delete_note(db, user.id, note_id)
     return Response(status_code=204)
+
+
+@router.get("/cost-settings", response_model=CostSettings)
+def cost_settings(db: DBSession, user: CurrentUser):
+    return service.get_cost_settings(db, user.id)
+
+
+@router.put("/cost-settings", response_model=CostSettings, dependencies=[Depends(require_json)])
+def save_cost_settings(data: CostSettingsInput, db: DBSession, user: CurrentUser):
+    return service.save_cost_settings(db, user.id, data)
+
+
+@router.delete("/cost-settings", response_model=CostSettings, dependencies=[Depends(require_json)])
+def reset_cost_settings(db: DBSession, user: CurrentUser):
+    return service.reset_cost_settings(db, user.id)
+
+
+@router.get("/cost-estimate", response_model=CostEstimate)
+def cost_estimate(data: Annotated[CostEstimateInput, Query()], db: DBSession, user: CurrentUser):
+    return service.get_cost_estimate(db, user.id, data)
