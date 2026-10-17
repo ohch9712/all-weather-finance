@@ -1,10 +1,13 @@
 import json
 from collections.abc import Callable
+from datetime import date
 
 import pytest
-from sqlalchemy import select
+from fastapi.testclient import TestClient
+from sqlalchemy import select, text
 
 from app.core.config import Settings
+from app.integrations.brokers.mock import MockBroker
 from app.integrations.llm import status
 from app.modules.auth.models import User
 from app.modules.chat import service
@@ -12,9 +15,33 @@ from app.modules.chat.models import ChatMessage
 from app.modules.chat.providers.base import get_chat_provider
 from app.modules.chat.tools import registry
 from app.modules.chat.tools.registry import ToolSpec
+from app.modules.market import service as market_service
 from tests.chat.fakes import FakeChatProvider, FakeRound
 
 MODEL = "gemma4:12b"
+SNAPSHOT_DAY = date(2026, 10, 16)
+
+# 09 기본 도구 2개 + 15 모듈 데이터 도구 16개(이름순, 스펙 15 8절)
+ALL_TOOL_NAMES = [
+    "add_to_watchlist",
+    "compare_estate_plans",
+    "estimate_gift_tax",
+    "get_allocation_report",
+    "get_gift_deductions",
+    "get_my_profile",
+    "get_positions",
+    "get_recommendation",
+    "get_risk_profile",
+    "get_spending_summary",
+    "get_stock_detail",
+    "get_today",
+    "get_trade_stats",
+    "get_watchlist",
+    "plan_gifts",
+    "screen_stocks",
+    "search_learning",
+    "search_stocks",
+]
 
 
 @pytest.fixture
@@ -121,3 +148,46 @@ def rows(db, conversation_id) -> list[ChatMessage]:
 
 def user_by_email(db, email: str = "first@example.com") -> User:
     return db.scalar(select(User).where(User.email == email))
+
+
+@pytest.fixture
+def market(db, monkeypatch) -> MockBroker:
+    """08 종목 마스터·스냅샷을 Mock 고정 데이터로 채우고 운영자 클라이언트를 Mock으로 고정한다.
+
+    인스턴스마다 시세 캐시 키가 달라 다른 테스트의 캐시와 섞이지 않는다.
+    """
+    db.execute(text("DELETE FROM stock_snapshots"))
+    db.execute(text("DELETE FROM stocks"))
+    db.commit()
+    broker = MockBroker()
+    market_service.refresh_stocks(db, broker)
+    assert market_service.refresh_snapshot(db, broker, SNAPSHOT_DAY)["success"] > 0
+    monkeypatch.setattr(market_service, "get_market_data_client", lambda: broker)
+    return broker
+
+
+@pytest.fixture
+def empty_market(db, monkeypatch) -> MockBroker:
+    """종목도 스냅샷도 없는 상태"""
+    db.execute(text("DELETE FROM stock_snapshots"))
+    db.execute(text("DELETE FROM stocks"))
+    db.commit()
+    broker = MockBroker()
+    monkeypatch.setattr(market_service, "get_market_data_client", lambda: broker)
+    return broker
+
+
+@pytest.fixture
+def bare_client(app):
+    """출생연도를 입력하지 않은 세 번째 사용자"""
+    with TestClient(app, raise_server_exceptions=False) as instance:
+        response = instance.post(
+            "/api/auth/signup",
+            json={
+                "email": "third@example.com",
+                "password": "test-password",
+                "passwordConfirm": "test-password",
+            },
+        )
+        assert response.status_code == 201, response.text
+        yield instance

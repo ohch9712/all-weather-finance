@@ -1,7 +1,7 @@
 import Link from "next/link";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { isInternalHref } from "../cards/BasicCards";
+import { isInternalHref } from "../cards/CardParts";
 
 // 도우미 답변 Markdown. 원시 HTML은 그리지 않는다(react-markdown 기본값).
 const components: Components = {

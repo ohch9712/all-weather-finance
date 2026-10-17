@@ -1,0 +1,36 @@
+# 챗봇 도구 선택 평가 질문(스펙 15 7절). expected_tool이 null이면 도구를 부르지 않고 거절·안내해야 한다.
+# run_eval.py가 실제 personal 공급자로 돌린다. CI에서는 돌리지 않는다.
+- question: 내 자산배분 점수 알려줘
+  expected_tool: get_allocation_report
+- question: 왜 이렇게 배분하라고 추천했어?
+  expected_tool: get_recommendation
+- question: 내 투자성향이 뭐야?
+  expected_tool: get_risk_profile
+- question: 이번 달 어디에 제일 많이 썼어?
+  expected_tool: get_spending_summary
+- question: 올해 내 매매 성적 어때?
+  expected_tool: get_trade_stats
+- question: 지금 들고 있는 종목 수익률 알려줘
+  expected_tool: get_positions
+- question: SK하이닉스 종목코드가 뭐야?
+  expected_tool: search_stocks
+- question: 005930 지금 얼마야? PER도 알려줘
+  expected_tool: get_stock_detail
+- question: 코스피 대형주 중 PER 10 이하 찾아줘
+  expected_tool: screen_stocks
+- question: 내 관심종목 보여줘
+  expected_tool: get_watchlist
+- question: 삼성전자(005930) 관심종목에 넣어줘
+  expected_tool: add_to_watchlist
+- question: 첫째에게 세금 없이 얼마까지 줄 수 있어?
+  expected_tool: get_gift_deductions
+- question: 첫째에게 1억 주면 세금 얼마야?
+  expected_tool: estimate_gift_tax
+- question: 자녀에게 미리 증여하는 게 나아, 그냥 상속하는 게 나아?
+  expected_tool: compare_estate_plans
+- question: 둘째에게 언제 얼마씩 나눠서 증여하면 돼?
+  expected_tool: plan_gifts
+- question: PER이 뭐야?
+  expected_tool: search_learning
+- question: 삼성전자 10주 매수 주문 넣어줘
+  expected_tool: null
