@@ -3,7 +3,7 @@ from datetime import UTC, datetime, time, timedelta
 from sqlalchemy import func, or_, select
 
 from app.core.time import KST
-from app.modules.journal.models import Trade, TradeNote
+from app.modules.journal.models import Trade, TradeCostSettings, TradeNote
 
 
 def owned_trade(db, user_id, trade_id):
@@ -98,3 +98,7 @@ def delete(db, item):
     db.delete(item)
     db.commit()
     db.expire_all()
+
+
+def cost_settings(db, user_id):
+    return db.scalar(select(TradeCostSettings).where(TradeCostSettings.user_id == user_id))

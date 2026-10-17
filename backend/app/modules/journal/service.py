@@ -1,7 +1,9 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
-from decimal import ROUND_HALF_UP, Decimal, localcontext
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal, localcontext
+from typing import Literal
+from uuid import UUID
 
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
@@ -10,8 +12,11 @@ from app.core.errors import AppError, field_error
 from app.core.schemas import Page
 from app.core.time import KST
 from app.modules.journal import repository as repo
-from app.modules.journal.models import Trade, TradeNote
+from app.modules.journal.costs import DEFAULT_RATES
+from app.modules.journal.models import Trade, TradeCostSettings, TradeNote
 from app.modules.journal.schemas import (
+    CostEstimate,
+    CostSettings,
     CurrencyStats,
     DailyPnl,
     MonthlyPnl,
@@ -92,7 +97,22 @@ def trade_values(data):
 
 
 def create_trade(db, user_id, data):
-    return trade_out(repo.save(db, Trade(user_id=user_id, **trade_values(data))))
+    values = trade_values(data)
+    missing = {"fee", "tax"} - data.model_fields_set
+    if data.market in {"KRX", "US"} and missing:
+        costs = estimate_trade_costs(
+            db,
+            user_id,
+            market=data.market,
+            side=data.side,
+            quantity=data.quantity,
+            price=data.price,
+            is_etf=is_domestic_etf(db, data.market, data.symbol_code),
+        )
+        for name in missing:
+            values[name] = getattr(costs, name)
+        values["cost_estimated"] = True
+    return trade_out(repo.save(db, Trade(user_id=user_id, **values)))
 
 
 def update_trade(db, user_id, trade_id, patch):
@@ -103,6 +123,8 @@ def update_trade(db, user_id, trade_id, patch):
     data = validated(TradeInput, {**existing, **patch})
     for name, value in trade_values(data).items():
         setattr(trade, name, value)
+    if "fee" in patch or "tax" in patch:
+        trade.cost_estimated = False
     return trade_out(repo.save(db, trade))
 
 
@@ -325,4 +347,91 @@ def _trade_stats(db, user_id, start, end):
             )
             for key, items in sorted(symbols.items())
         ],
+    )
+
+
+def get_cost_settings(db, user_id) -> CostSettings:
+    settings = repo.cost_settings(db, user_id)
+    rates = (
+        {name: format(getattr(settings, name), "f") for name in DEFAULT_RATES}
+        if settings
+        else {name: format(value, "f") for name, value in DEFAULT_RATES.items()}
+    )
+    return CostSettings(
+        **rates, is_default=settings is None, updated_at=settings.updated_at if settings else None
+    )
+
+
+def save_cost_settings(db, user_id, data) -> CostSettings:
+    settings = repo.cost_settings(db, user_id) or TradeCostSettings(user_id=user_id)
+    for name, value in data.model_dump().items():
+        setattr(settings, name, value)
+    repo.save(db, settings)
+    return get_cost_settings(db, user_id)
+
+
+def reset_cost_settings(db, user_id) -> CostSettings:
+    settings = repo.cost_settings(db, user_id)
+    if settings:
+        repo.delete(db, settings)
+    return get_cost_settings(db, user_id)
+
+
+@dataclass(frozen=True)
+class TradeCosts:
+    fee: Decimal
+    tax: Decimal
+
+
+def estimate_trade_costs(
+    db,
+    user_id: UUID,
+    *,
+    market: Literal["KRX", "US"],
+    side: Literal["buy", "sell"],
+    quantity: Decimal,
+    price: Decimal,
+    is_etf: bool = False,
+) -> TradeCosts:
+    rates = get_cost_settings(db, user_id)
+    with localcontext() as context:
+        context.prec = 80
+        amount = quantity * price
+        unit = Decimal("1" if market == "KRX" else "0.01")
+        rate = rates.krx_commission_rate if market == "KRX" else rates.us_commission_rate
+        fee = (amount * Decimal(rate) / 100).quantize(unit, rounding=ROUND_DOWN)
+        tax_rate = (
+            Decimal(rates.krx_sell_tax_rate)
+            if market == "KRX" and side == "sell" and not is_etf
+            else ZERO
+        )
+        tax = (amount * tax_rate / 100).quantize(unit, rounding=ROUND_DOWN)
+    return TradeCosts(fee=fee, tax=tax)
+
+
+def is_domestic_etf(db, market, symbol_code):
+    if market != "KRX" or not symbol_code:
+        return False
+    from app.modules.market.service import search_stocks
+
+    items = search_stocks(db, symbol_code, limit=1)
+    return bool(items and items[0].code == symbol_code and items[0].kind == "etf")
+
+
+def get_cost_estimate(db, user_id, data) -> CostEstimate:
+    is_etf = is_domestic_etf(db, data.market, data.symbol_code)
+    costs = estimate_trade_costs(
+        db,
+        user_id,
+        market=data.market,
+        side=data.side,
+        quantity=data.quantity,
+        price=data.price,
+        is_etf=is_etf,
+    )
+    return CostEstimate(
+        fee=format(costs.fee, "f"),
+        tax=format(costs.tax, "f"),
+        is_etf=is_etf,
+        rates=get_cost_settings(db, user_id),
     )

@@ -81,6 +81,7 @@ class TradeOut(CamelModel):
     account_label: str | None
     quantity: str
     price: str
+    cost_estimated: bool
     fee: str
     tax: str
     id: UUID
@@ -201,3 +202,52 @@ class TradeStats(CamelModel):
     monthly: list[MonthlyPnl]
     daily: list[DailyPnl]
     by_symbol: list[SymbolPnl]
+
+
+class CostSettingsInput(CamelModel):
+    krx_commission_rate: Decimal
+    krx_sell_tax_rate: Decimal
+    us_commission_rate: Decimal
+
+    @field_validator(
+        "krx_commission_rate", "krx_sell_tax_rate", "us_commission_rate", mode="before"
+    )
+    @classmethod
+    def valid_rate(cls, value, info: ValidationInfo):
+        from decimal import InvalidOperation
+
+        from app.core.errors import field_error
+        from app.core.schemas import to_camel
+
+        try:
+            rate = Decimal(str(value))
+            if rate.is_finite() and 0 <= rate <= 5 and rate.as_tuple().exponent >= -4:
+                return rate
+        except (InvalidOperation, ValueError):
+            pass
+        raise field_error(
+            to_camel(info.field_name), "요율은 0~5%, 소수 넷째 자리까지 입력해 주세요."
+        )
+
+
+class CostSettings(CamelModel):
+    krx_commission_rate: str
+    krx_sell_tax_rate: str
+    us_commission_rate: str
+    is_default: bool
+    updated_at: datetime | None
+
+
+class CostEstimateInput(CamelModel):
+    market: Literal["KRX", "US"]
+    side: Side
+    quantity: PositiveDecimal
+    price: PositiveDecimal
+    symbol_code: Symbol | None = None
+
+
+class CostEstimate(CamelModel):
+    fee: str
+    tax: str
+    is_etf: bool
+    rates: CostSettings
