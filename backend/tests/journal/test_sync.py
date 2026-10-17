@@ -52,8 +52,10 @@ def test_mock_sync_idempotent_status_isolation(auth_client, other_auth_client):
     first = sync(auth_client, cid)
     assert first.status_code == 200, first.text
     assert first.json()["inserted"] == 20
+    assert first.json()["costEstimated"] == 0
     second = sync(auth_client, cid).json()
     assert (second["inserted"], second["updated"], second["unchanged"]) == (0, 0, 20)
+    assert second["costEstimated"] == 0
     trades = auth_client.get("/api/journal/trades?pageSize=100").json()["items"]
     assert len(trades) == 20
     assert all(t["source"] == "mock" and t["broker"] is None for t in trades)
@@ -165,6 +167,7 @@ def test_kiwoom_missing_costs_market_conversion_and_etf(auth_client, db, respx_m
     respx_mock.post("https://mockapi.kiwoom.com/api/dostk/acnt").mock(side_effect=response)
     first = sync(auth_client, cid, **{"from": "2026-10-16", "to": "2026-10-16"})
     assert first.status_code == 200, first.text
+    assert first.json()["costEstimated"] == 1
     trade = auth_client.get("/api/journal/trades").json()["items"][0]
     assert trade["market"] == "KRX" and trade["source"] == "kiwoom"
     assert trade["costEstimated"] and trade["fee"] == "21" and trade["tax"] == "284"
@@ -172,6 +175,7 @@ def test_kiwoom_missing_costs_market_conversion_and_etf(auth_client, db, respx_m
     monkeypatch.setattr(service, "is_domestic_etf", lambda *args: True)
     result = sync(auth_client, cid, **{"from": "2026-10-16", "to": "2026-10-16"}).json()
     assert result["updated"] == 1
+    assert result["costEstimated"] == 1
     assert auth_client.get("/api/journal/trades").json()["items"][0]["tax"] == "0"
     stored = db.scalar(select(Trade).where(Trade.connection_id == UUID(cid)))
     assert stored.external_id == "20261016:1:1" and stored.synced_at

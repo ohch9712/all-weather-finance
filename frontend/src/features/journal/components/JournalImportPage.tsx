@@ -30,12 +30,12 @@ function recentStart() { const date = new Date(`${todayKst()}T00:00:00Z`); date.
 export function JournalImportPage() {
   const connections = useConnections(); const status = useSyncStatus(); const sync = useSyncTrades();
   const client = useQueryClient(); const [result, setResult] = useState<SyncResult | null>(null);
-  const [message, setMessage] = useState(""); const [completed, setCompleted] = useState(false);
+  const [message, setMessage] = useState("");
   const form = useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema), defaultValues: { connectionId: "", from: recentStart(), to: todayKst() } });
   const active = connections.data?.items.filter(c => c.status === "active") ?? [];
   const connectionId = useWatch({ control: form.control, name: "connectionId" });
   const selected = active.find(c => c.id === connectionId);
-  const invalidate = () => { setCompleted(true); void client.invalidateQueries({ queryKey: ["journal"] }); };
+  const invalidate = () => { void client.invalidateQueries({ queryKey: ["journal"] }); };
   return <div className="min-w-0 space-y-6">
     <PageHeader title="매매내역 가져오기" description="파일이나 연결한 증권사에서 체결 내역을 가져오세요." actions={<Button variant="outline" asChild><Link href="/journal">매매일지로</Link></Button>} />
     <p className="text-sm text-muted-foreground">종목코드 열이 없으면 커밋 때 종목코드를 찾습니다. 종목명을 정확히 확인해 주세요.</p>
@@ -60,7 +60,7 @@ export function JournalImportPage() {
       {status.error && <p role="alert">{getErrorMessage(status.error)}</p>}
       <ul className="space-y-2 text-sm">{status.data?.items.map(item => <li className="break-words" key={item.connectionId}>{item.label} · 마지막 동기화 {item.lastSyncedAt ? formatDateTime(item.lastSyncedAt) : "없음"} · {item.tradeCount}건</li>)}</ul>
     </CardContent></Card>
-    {completed && <p className="text-sm">수수료·세금 미제공 항목은 기본 요율로 추정했어요. <Link className="text-primary underline" href="/settings/trading-costs">수수료·세금 설정</Link>에서 확인해 주세요.</p>}
+    {result && result.costEstimated > 0 && <p className="text-sm">증권사가 수수료·세금을 주지 않아 기본 요율로 추정했어요. <Link className="text-primary underline" href="/settings/trading-costs">수수료·세금 설정</Link>에서 확인해 주세요.</p>}
     <Disclaimer variant="investment" />
   </div>;
 }

@@ -16,7 +16,7 @@ function setup(provider = "mock") {
 
 it("증권사 불러오기 결과와 샘플 고지를 보여 주고 모든 매매일지 캐시를 갱신한다", async () => {
   setup(); let payload: unknown;
-  server.use(http.post(apiUrl("/api/journal/sync"), async ({ request }) => { payload = await request.json(); return HttpResponse.json({ inserted: 20, updated: 0, unchanged: 0, skippedDuplicates: 1, from: "2026-09-01", to: "2026-10-16", syncedAt: "2026-10-16T00:00:00Z" }); }));
+  server.use(http.post(apiUrl("/api/journal/sync"), async ({ request }) => { payload = await request.json(); return HttpResponse.json({ inserted: 20, updated: 0, unchanged: 0, skippedDuplicates: 1, costEstimated: 0, from: "2026-09-01", to: "2026-10-16", syncedAt: "2026-10-16T00:00:00Z" }); }));
   const client = createTestQueryClient(); const invalidate = vi.spyOn(client, "invalidateQueries");
   const { user } = renderWithProviders(<JournalImportPage />, { queryClient: client });
   await screen.findByRole("option", { name: "내 연결 (샘플)" });
@@ -27,6 +27,16 @@ it("증권사 불러오기 결과와 샘플 고지를 보여 주고 모든 매�
   expect(await screen.findByText("삽입 20건 · 갱신 0건 · 변화 없음 0건 · 건너뜀 1건")).toBeInTheDocument();
   expect(payload).toMatchObject({ connectionId: "conn-1" });
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ["journal"] });
+  expect(screen.queryByText(/증권사가 수수료·세금을 주지 않아 기본 요율로 추정했어요/)).not.toBeInTheDocument();
+});
+
+it("추정 비용이 있는 동기화 결과에만 비용 안내를 보여 준다", async () => {
+  setup("kiwoom");
+  server.use(http.post(apiUrl("/api/journal/sync"), () => HttpResponse.json({ inserted: 1, updated: 0, unchanged: 0, skippedDuplicates: 0, costEstimated: 1, from: "2026-09-01", to: "2026-10-16", syncedAt: "2026-10-16T00:00:00Z" })));
+  const { user } = renderWithProviders(<JournalImportPage />);
+  await user.selectOptions(await screen.findByLabelText("증권사 연결"), "conn-1");
+  await user.click(screen.getByRole("button", { name: "불러오기" }));
+  expect(await screen.findByText(/증권사가 수수료·세금을 주지 않아 기본 요율로 추정했어요/)).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "수수료·세금 설정" })).toHaveAttribute("href", "/settings/trading-costs");
 });
 

@@ -43,5 +43,5 @@ export interface CostEstimate { fee: string; tax: string; isEtf: boolean; rates:
 
 export interface BrokerConnection { id: string; label: string; provider: "mock" | "kiwoom" | "toss"; status: string }
 export interface SyncInput { connectionId: string; from: string; to: string }
-export interface SyncResult { inserted: number; updated: number; unchanged: number; skippedDuplicates: number; from: string; to: string; syncedAt: string }
+export interface SyncResult { inserted: number; updated: number; unchanged: number; skippedDuplicates: number; costEstimated: number; from: string; to: string; syncedAt: string }
 export interface SyncStatusItem { connectionId: string; label: string; provider: string; lastSyncedAt: string | null; tradeCount: number }

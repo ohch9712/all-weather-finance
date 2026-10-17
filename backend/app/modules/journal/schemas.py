@@ -269,6 +269,7 @@ class SyncResult(CamelModel):
     updated: int = 0
     unchanged: int = 0
     skipped_duplicates: int = 0
+    cost_estimated: int = 0
     start: date = Field(alias="from")
     end: date = Field(alias="to")
     synced_at: datetime

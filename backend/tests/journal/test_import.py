@@ -120,6 +120,49 @@ def test_missing_code_lookup_success_failure_ambiguity(auth_client, fake_llm, mo
 
 
 @pytest.mark.parametrize(
+    "headers,values,expected_error",
+    [
+        ("거래일,종목명,구분,수량,단가,통화", "2026-10-01,삼성전자,매수,1,70000,KRW", None),
+        (
+            "거래일,종목명,구분,수량,단가,시장,통화",
+            "2026-10-01,삼성전자,매수,1,70000,US,USD",
+            "market",
+        ),
+    ],
+)
+def test_missing_code_market_currency_after_lookup(
+    auth_client, fake_llm, monkeypatch, headers, values, expected_error
+):
+    monkeypatch.setattr(
+        market,
+        "search_stocks",
+        lambda db, query, **kwargs: [SimpleNamespace(code="005930", name="삼성전자", kind="stock")],
+    )
+    job = upload(auth_client, f"{headers}\n{values}".encode())
+    assert job["preview"]["validCount"] == 1
+    assert job["preview"]["invalidCount"] == 0
+    result = commit(auth_client, job)
+    if expected_error:
+        assert result["inserted"] == 0 and result["failed"] == 1
+        assert result["errors"] == [
+            {
+                "rowNumber": 1,
+                "field": expected_error,
+                "message": "찾은 종목의 시장·통화와 맞지 않습니다. 종목코드 열을 매핑해 주세요.",
+            }
+        ]
+        assert auth_client.get("/api/journal/trades").json()["total"] == 0
+    else:
+        assert result["inserted"] == 1 and result["failed"] == 0
+        trade = auth_client.get("/api/journal/trades").json()["items"][0]
+        assert (trade["symbolCode"], trade["market"], trade["currency"]) == (
+            "005930",
+            "KRX",
+            "KRW",
+        )
+
+
+@pytest.mark.parametrize(
     "quantity,price,amount,fee",
     [("0", "100", "", ""), ("1", "", "", ""), ("1", "100", "", "-1"), ("1", "-1", "", "")],
 )

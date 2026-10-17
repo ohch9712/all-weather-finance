@@ -490,6 +490,8 @@ def imported_values(db, user_id, row):
     from dataclasses import asdict
 
     values = asdict(row)
+    values.pop("market_explicit", None)
+    values.pop("currency_explicit", None)
     values["cost_estimated"] = row.fee is None or row.tax is None
     if values["cost_estimated"]:
         costs = estimate_trade_costs(
@@ -514,6 +516,7 @@ def import_trades(
     from hashlib import sha256
 
     from app.modules.imports.registry import RowError
+    from app.modules.journal.import_kind import _PendingSymbolTradeImportRow
     from app.modules.market.service import search_stocks
 
     repo.lock_imports(db, user_id)
@@ -523,7 +526,9 @@ def import_trades(
     for number, row in enumerate(rows, 1):
         if not row.symbol_code:
             matches = [
-                s for s in search_stocks(db, row.symbol_name, limit=5) if s.name == row.symbol_name
+                s
+                for s in search_stocks(db, row.symbol_name, limit=5)
+                if s.name == row.symbol_name and s.code.isdigit() and len(s.code) == 6
             ]
             if len(matches) != 1:
                 result.failed += 1
@@ -535,11 +540,26 @@ def import_trades(
                     )
                 )
                 continue
-            code = matches[0].code
-            market = "KRX" if code.isdigit() and len(code) == 6 else "US"
-            row = replace(
-                row, symbol_code=code, market=market, currency="KRW" if market == "KRX" else "USD"
+            mismatch = (
+                ("market", row.market)
+                if row.market != "KRX"
+                and (not isinstance(row, _PendingSymbolTradeImportRow) or row.market_explicit)
+                else ("currency", row.currency)
+                if row.currency != "KRW"
+                and (not isinstance(row, _PendingSymbolTradeImportRow) or row.currency_explicit)
+                else None
             )
+            if mismatch:
+                result.failed += 1
+                result.errors.append(
+                    RowError(
+                        number,
+                        mismatch[0],
+                        "찾은 종목의 시장·통화와 맞지 않습니다. 종목코드 열을 매핑해 주세요.",
+                    )
+                )
+                continue
+            row = replace(row, symbol_code=matches[0].code, market="KRX", currency="KRW")
         local = row.traded_at.astimezone(KST)
         known_time = local.strftime("%H:%M") if row.time_known else ""
         key = (
@@ -632,6 +652,8 @@ def sync_trades(db, user_id, data):
                     for key, value in values.items():
                         setattr(existing, key, value)
                     result.updated += 1
+                    if values["cost_estimated"]:
+                        result.cost_estimated += 1
                 else:
                     result.unchanged += 1
                 existing.synced_at = now
@@ -659,6 +681,8 @@ def sync_trades(db, user_id, data):
             )
             external[(connection.id, execution.external_id)] = trade
             result.inserted += 1
+            if values["cost_estimated"]:
+                result.cost_estimated += 1
         db.commit()
         return result
     except Exception:

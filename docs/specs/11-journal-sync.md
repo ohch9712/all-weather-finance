@@ -173,11 +173,17 @@ def import_trades(db, user_id, rows: list[TradeImportRow], *, source: str, batch
 검증 결과:
 
 - `scripts/worktree-setup.sh --skip-install`: 슬롯 11·8011/3011·`finance_11` 준비 성공. 의존성 추가·재설치 없음.
-- 백엔드 `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`: 통과, 1,144개 테스트. 기존 05·05b 회귀와 신규 파일·동기화·평가손익 테스트 포함.
+- 백엔드 `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`: 통과, 1,174개 테스트. 기존 05·05b 회귀와 신규 파일·동기화·평가손익 테스트 포함.
 - 별도 빈 DB `finance_11_impl_verify`에서 `uv run alembic upgrade heads` → `uv run alembic downgrade base` → `uv run alembic upgrade heads`: 통과, DB 삭제 완료.
-- 프론트 `npm run lint`, `npx tsc --noEmit`, `npm run test -- --maxWorkers=2`, `npm run build`: 통과, 39개 파일·378개 테스트. 첫 기본 병렬 실행은 기존 가계부 테스트 1건이 5초 제한을 초과했고, 동시 실행 수를 줄인 전체 재검사에서 통과했다.
+- 프론트 `npm run lint`, `npx tsc --noEmit`, `npm run test -- --maxWorkers=2`, `npm run build`: 통과, 40개 파일·390개 테스트.
 - Playwright의 독립 Chrome context에서 실제 로컬 API·화면으로 파일 업로드→매핑→미리보기→저장, Mock 첫 동기화 20건·재조회 `unchanged=20`, 기록 샘플 배지와 보유 평가손익을 확인했다. 360px·1280px에서 문서 너비가 뷰포트를 넘지 않으며 브라우저 오류는 없었다. 확인용 사용자는 삭제했고 `scripts/stop.sh`로 서버를 종료했다.
 - 테스트는 FakeStructuredLLM·MockBroker·respx 고정 응답만 사용했다. 실제 증권사 키·Gemini·Ollama 호출은 하지 않았다. 실키 수동 검증은 수행하지 않았다.
+
+PR #20 검증 수정:
+
+- 코드 없는 행은 국내 종목 검색 전 시장·통화 불일치로 걸러지지 않도록 보류 상태로 정규화한다. 저장 시 국내 종목 검색으로 찾은 코드는 KRX로 처리하고, 명시한 시장 또는 통화가 KRX·KRW와 다르면 해당 필드 오류로 저장을 거부한다. 시장·통화 열이 없는 기존 종목명 검색 테스트도 유지한다.
+- 동기화 응답의 `costEstimated`는 이번 요청에서 비용을 추정해 삽입·갱신한 거래 수다. 프론트는 이 값이 0보다 클 때만 비용 추정 안내를 표시한다.
+- 테스트: Mock 동기화 `costEstimated=0` 및 안내 없음, 키움 고정 respx 응답의 None 비용은 추정 수 1 및 안내 표시. 실제 API 요청으로 재현 A(KRW→005930/KRX 저장), 재현 B(US/USD→시장 오류·거래 미생성), Mock 동기화의 `costEstimated=0`을 확인했다.
 
 스펙과 다른 점: 없음. 위 행 경고 안내 위치와 마지막 동기화 시각 계산은 소유 범위에서 정한 구현 세부 사항이다.
 

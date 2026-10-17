@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from decimal import Decimal, DecimalException, localcontext
 
 from pydantic import ValidationError
@@ -5,6 +6,12 @@ from pydantic import ValidationError
 from app.modules.imports.registry import CommitContext, ImportKind, RowValidationError, TargetField
 from app.modules.journal.schemas import TradeInput
 from app.modules.journal.service import TradeImportRow, import_trades, trade_values
+
+
+@dataclass(frozen=True)
+class _PendingSymbolTradeImportRow(TradeImportRow):
+    market_explicit: bool = False
+    currency_explicit: bool = False
 
 
 def normalize_row(values: dict) -> TradeImportRow:
@@ -21,7 +28,14 @@ def normalize_row(values: dict) -> TradeImportRow:
         except DecimalException as exc:
             raise RowValidationError("price", "단가를 확인해 주세요.") from exc
     code = values.get("symbolCode") or ""
-    market = values.get("market") or ("KRX" if code.isdigit() and len(code) == 6 else "US")
+    market_explicit = values.get("market") is not None
+    currency_explicit = values.get("currency") is not None
+    market = values.get("market") or (
+        "KRX" if not code or code.isdigit() and len(code) == 6 else "US"
+    )
+    currency = values.get("currency") or ("KRW" if market == "KRX" else "USD")
+    validation_market = "KRX" if not code else market
+    validation_currency = "KRW" if not code else currency
     data = dict(
         traded_on=values["tradedOn"],
         traded_time=values.get("tradedTime"),
@@ -30,8 +44,8 @@ def normalize_row(values: dict) -> TradeImportRow:
         side=values["side"],
         quantity=values["quantity"],
         price=price,
-        market=market,
-        currency=values.get("currency") or ("KRW" if market == "KRX" else "USD"),
+        market=validation_market,
+        currency=validation_currency,
         fee=values.get("fee") or Decimal(0),
         tax=values.get("tax") or Decimal(0),
     )
@@ -47,6 +61,13 @@ def normalize_row(values: dict) -> TradeImportRow:
     normalized = trade_values(validated)
     normalized.pop("account_label")
     normalized.update(symbol_code=code.upper(), fee=values.get("fee"), tax=values.get("tax"))
+    if not code:
+        normalized.update(market=market, currency=currency)
+        return _PendingSymbolTradeImportRow(
+            **normalized,
+            market_explicit=market_explicit,
+            currency_explicit=currency_explicit,
+        )
     return TradeImportRow(**normalized)
 
 
