@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAiStatus } from "@/lib/ai-status";
 import { getErrorMessage } from "@/lib/api-client";
-import { useExtractStatement } from "../hooks";
+import { useExtractStatement, useInvalidateLedgerData } from "../hooks";
 import { ExtractedStatementWizard } from "./ExtractedStatementWizard";
 
 export function LedgerImportPage() {
@@ -21,10 +21,14 @@ export function LedgerImportPage() {
   const status = useAiStatus();
   const personal = status.data?.personal;
   const extract = useExtractStatement();
+  const invalidateLedgerData = useInvalidateLedgerData();
   const [file, setFile] = useState<File | null>(null);
   const [consent, setConsent] = useState(false);
   const [job, setJob] = useState<ImportJob | null>(null);
-  const onCommitted = (next: ImportJob) => router.push(`/ledger/import/review?batch=${next.id}`);
+  const onCommitted = async (next: ImportJob) => {
+    await invalidateLedgerData();
+    router.push(`/ledger/import/review?batch=${next.id}`);
+  };
 
   return <div className="min-w-0 space-y-6">
     <PageHeader title="카드 명세서 가져오기" description="이용내역을 확인한 뒤 가계부에 저장하세요." />

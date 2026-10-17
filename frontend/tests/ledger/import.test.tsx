@@ -6,7 +6,9 @@ import type { ImportJob } from "@/features/imports";
 import { LedgerImportPage } from "@/features/ledger/components/LedgerImportPage";
 import { LedgerImportReview } from "@/features/ledger/components/LedgerImportReview";
 import { ExtractedStatementWizard } from "@/features/ledger/components/ExtractedStatementWizard";
-import { apiUrl, errorResponse, memoryRouter, renderWithProviders, server } from "../utils";
+import { getCategories, getEntries, getSummary, getTrend } from "@/features/ledger/api";
+import { ledgerKeys } from "@/features/ledger/hooks";
+import { apiUrl, createTestQueryClient, errorResponse, memoryRouter, renderWithProviders, server } from "../utils";
 import { mockLedger } from "./mock-ledger";
 
 const job: ImportJob = {
@@ -33,6 +35,43 @@ function mockImports(provider: "ollama" | "gemini" | null = "ollama") {
 }
 
 describe("카드 명세서 가져오기", () => {
+  it.each(["table", "ai"])("%s 저장 후 30초 이내의 기존 가계부 캐시도 새로 읽는다", async (tab) => {
+    mockImports();
+    const state = mockLedger([{ occurredOn: "2026-10-01", amount: 5000, category: "식비", merchant: "기존 상점" }]);
+    const client = createTestQueryClient();
+    client.setDefaultOptions({ queries: { staleTime: 30_000, retry: false } });
+    const params = { month: "2026-10", kind: null, categoryId: null, q: "", page: 1, pageSize: 20 };
+    const queries = {
+      summary: { queryKey: ledgerKeys.summary("2026-10"), queryFn: () => getSummary("2026-10") },
+      entries: { queryKey: ledgerKeys.entryList(params), queryFn: () => getEntries(params) },
+      trend: { queryKey: ledgerKeys.trend(6), queryFn: () => getTrend(6) },
+      categories: { queryKey: ledgerKeys.categories(), queryFn: getCategories },
+    };
+    expect((await client.fetchQuery(queries.summary)).expenseTotal).toBe(5000);
+    await Promise.all([client.fetchQuery(queries.entries), client.fetchQuery(queries.trend), client.fetchQuery(queries.categories)]);
+    server.use(http.post(apiUrl("/api/imports/jobs/:id/commit"), () => {
+      state.entries.push({ ...state.entries[0], id: "new-entry", source: "import", importBatchId: job.id });
+      return HttpResponse.json({ ...job, status: "committed", result: { inserted: 1, skippedDuplicates: 0, failed: 0, errors: [] } });
+    }));
+    const user = userEvent.setup();
+    renderWithProviders(<LedgerImportPage />, { queryClient: client });
+    if (tab === "table") {
+      await user.upload(screen.getByLabelText("가져올 파일"), new File(["이용일,가맹점,금액"], "generic.csv", { type: "text/csv" }));
+    } else {
+      await user.click(screen.getByRole("tab", { name: "PDF·이미지 명세서(AI)" }));
+      await user.upload(await screen.findByLabelText("명세서 파일"), new File(["fake"], "generic.pdf", { type: "application/pdf" }));
+      await user.click(screen.getByLabelText("AI로 명세서를 처리하는 데 동의합니다"));
+      await user.click(screen.getByRole("button", { name: "명세서 추출하기" }));
+    }
+    await user.click(await screen.findByRole("button", { name: "매핑 확정" }));
+    await user.click(await screen.findByRole("button", { name: "저장하기" }));
+    await waitFor(() => expect(memoryRouter.router.push).toHaveBeenCalledWith("/ledger/import/review?batch=batch-1"));
+    expect((await client.fetchQuery(queries.summary)).expenseTotal).toBe(10000);
+    expect((await client.fetchQuery(queries.entries)).total).toBe(2);
+    expect((await client.fetchQuery(queries.trend)).items.at(-1)?.expenseTotal).toBe(10000);
+    await client.fetchQuery(queries.categories);
+    expect(state.requests.filter((request) => request.startsWith("GET /api/ledger/categories"))).toHaveLength(2);
+  });
   it("일반 파일 위저드를 거쳐 저장 후 리뷰로 이동한다", async () => {
     const requests = mockImports();
     const user = userEvent.setup();
@@ -96,22 +135,33 @@ it("리뷰에서 취소 표시, 단건 분류 변경과 같은 가맹점 일괄 
   mockImports();
   const state = mockLedger([{ occurredOn: "2026-10-01", amount: 5000, category: "식비", merchant: "동네상점", source: "import" }]);
   Object.assign(state.entries[0], { isCancellation: true, importBatchId: "batch-1" });
+  const client = createTestQueryClient();
+  client.setDefaultOptions({ queries: { staleTime: 30_000, retry: false } });
+  const summaryQuery = { queryKey: ledgerKeys.summary("2026-10"), queryFn: () => getSummary("2026-10") };
+  expect((await client.fetchQuery(summaryQuery)).byCategory[0].name).toBe("식비");
   let ruleBody: unknown;
   server.use(
     http.get(apiUrl("/api/imports/jobs/:id"), () => HttpResponse.json({ ...job, result: { inserted: 1, skippedDuplicates: 2, failed: 0, errors: [] } })),
-    http.post(apiUrl("/api/ledger/merchant-rules"), async ({ request }) => { ruleBody = await request.json(); return HttpResponse.json({ updatedCount: 1 }); }),
+    http.post(apiUrl("/api/ledger/merchant-rules"), async ({ request }) => { ruleBody = await request.json();
+      const categoryId = (ruleBody as { categoryId: string }).categoryId;
+      Object.assign(state.entries[0], { categoryId, categoryName: state.categories.find((category) => category.id === categoryId)?.name });
+      return HttpResponse.json({ updatedCount: 1 }); }),
   );
   const user = userEvent.setup();
-  renderWithProviders(<LedgerImportReview />, { route: "/ledger/import/review?batch=batch-1" });
+  renderWithProviders(<LedgerImportReview />, { route: "/ledger/import/review?batch=batch-1", queryClient: client });
   expect(await screen.findByText("취소 거래")).toBeVisible();
   expect(screen.getByText("저장 1건 · 중복 2건 · 실패 0건")).toBeVisible();
   await user.click(screen.getByRole("combobox", { name: "카테고리" }));
   await user.click(screen.getByRole("option", { name: "교통" }));
   await waitFor(() => expect(state.bodies.some((b) => b.method === "PATCH" && (b.body as { categoryId: string }).categoryId === "cat-e3")).toBe(true));
   await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
+  expect((await client.fetchQuery(summaryQuery)).byCategory[0].name).toBe("교통");
   await user.click(screen.getByLabelText("같은 가맹점 모두 바꾸기"));
   await user.click(screen.getByRole("combobox", { name: "카테고리" }));
   await user.click(screen.getByRole("option", { name: "쇼핑" }));
   await waitFor(() => expect(ruleBody).toEqual({ merchant: "동네상점", categoryId: "cat-e5", applyToExisting: true }));
+  await waitFor(() => expect(screen.getByRole("combobox")).toBeEnabled());
+  expect((await client.fetchQuery(summaryQuery)).byCategory[0].name).toBe("쇼핑");
+  expect(state.requests.filter((request) => request.startsWith("GET /api/ledger/categories")).length).toBeGreaterThanOrEqual(3);
   expect(state.requests.some((request) => request.includes("importBatchId=batch-1") && !request.includes("month="))).toBe(true);
 });

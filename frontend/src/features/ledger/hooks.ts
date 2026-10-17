@@ -28,13 +28,21 @@ export const ledgerKeys = {
   trend: (months: number) => ["ledger", "trend", months] as const,
 };
 
-/** 내역이 바뀌면 목록·요약·추이를 다시 불러온다. */
-function invalidateEntryData(queryClient: QueryClient) {
+/** 저장·분류 변경 후 목록·요약·추이·카테고리를 함께 갱신한다. */
+function invalidateLedgerData(queryClient: QueryClient) {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: ledgerKeys.entries() }),
     queryClient.invalidateQueries({ queryKey: ledgerKeys.summaries() }),
     queryClient.invalidateQueries({ queryKey: ledgerKeys.trends() }),
+    queryClient.invalidateQueries({ queryKey: ledgerKeys.categories() }),
   ]);
+}
+
+
+/** 두 업로드 탭이 같은 갱신을 마친 뒤 리뷰로 이동할 때 사용한다. */
+export function useInvalidateLedgerData() {
+  const queryClient = useQueryClient();
+  return () => invalidateLedgerData(queryClient);
 }
 
 export function useCategories() {
@@ -62,7 +70,7 @@ export function useSaveEntry() {
   return useMutation({
     mutationFn: ({ id, input }: { id?: string; input: EntryInput }) =>
       id ? updateEntry(id, input) : createEntry(input),
-    onSuccess: () => invalidateEntryData(queryClient),
+    onSuccess: () => invalidateLedgerData(queryClient),
   });
 }
 
@@ -70,7 +78,7 @@ export function useDeleteEntry() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: deleteEntry,
-    onSuccess: () => invalidateEntryData(queryClient),
+    onSuccess: () => invalidateLedgerData(queryClient),
   });
 }
 
@@ -113,8 +121,7 @@ export function useMapExtractedJob() {
 }
 
 export function useCommitExtractedJob() {
-  const client = useQueryClient();
-  return useMutation({ mutationFn: ({ id, skipInvalid }: { id: string; skipInvalid: boolean }) => importApi.commitExtractedJob(id, skipInvalid), onSuccess: () => invalidateEntryData(client) });
+  return useMutation({ mutationFn: ({ id, skipInvalid }: { id: string; skipInvalid: boolean }) => importApi.commitExtractedJob(id, skipInvalid) });
 }
 
 export function useDeleteExtractedJob() {
@@ -128,6 +135,6 @@ export function useReviewCategory() {
       if (all && entry.merchant) return importApi.saveMerchantRule({ merchant: entry.merchant, categoryId, applyToExisting: true });
       return updateEntry(entry.id, { categoryId });
     },
-    onSuccess: () => invalidateEntryData(client),
+    onSuccess: () => invalidateLedgerData(client),
   });
 }
