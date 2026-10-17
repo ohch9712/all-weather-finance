@@ -131,6 +131,9 @@ docs/                    # architecture.md, roadmap.md, specs/
 
 # 보안·고지
 
+- **저장소는 공개(public)다.** 커밋, PR 제목·본문, PR 코멘트(검증 보고서 포함), `worker_done` 요약, `ask` 메시지에 비밀값(API 키, 앱키·시크릿, 계좌번호 원문, `APP_ENCRYPTION_KEY`, 세션 토큰)을 쓰지 않는다. `.env`·`.env.local` 내용을 출력하지 않고(`cat` 등), 환경변수 전체를 출력하지 않는다(`env`, `printenv`, `set`). 명령 출력을 붙일 때 비밀값이 섞이지 않았는지 확인한다.
+- 실제 API 키는 기본 체크아웃의 `backend/.env`에만 있다. 워크트리의 `.env`는 `scripts/worktree-setup.sh`가 예시 파일에서 만들어 키가 없다. 실제 키로 외부 API를 부르는 확인은 코디네이터가 지시할 때만 한다.
+- 로컬 pre-commit hook(모든 워크트리 공유)과 GitHub push protection이 `.env` 파일과 비밀값 커밋을 막는다. hook을 우회(`--no-verify`)하지 않는다. 막히면 값을 지우고 다시 커밋한다.
 - 자격증명은 `app.core.crypto`로 암호화해 저장하고 응답에는 끝 4자리만 보낸다.
 - 업로드 파일은 디스크에 저장하지 않는다.
 - 다른 사용자 자원에 접근하면 404다. 테스트로 확인한다.
