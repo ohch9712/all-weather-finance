@@ -261,6 +261,7 @@ def test_ollama_call_arguments(settings, effort, thinking, think):
         }
         for tool in get_registered_tools()
     ]
+    assert [tool["function"]["name"] for tool in args["tools"]] == ALL_TOOL_NAMES
     assert args["stream"] is True
     assert args["think"] is think
     assert args["options"] == {"num_predict": 8000, "num_ctx": 4096}
