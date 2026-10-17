@@ -138,14 +138,25 @@ def execute_tool(ctx: ToolContext, call: ToolCall) -> ToolRun:
         params = spec.input_model.model_validate(call.arguments)
     except ValidationError as exc:
         return ToolRun(ToolExecResult(call, invalid_input_content(_summarize(exc)), True), None)
+    # 도구가 DB 오류를 내도 대화 저장은 이어 가도록 savepoint 안에서 실행한다.
+    # 컨텍스트 매니저(`with begin_nested()`)는 쓰지 않는다. 그 안에서는 commit 뒤 쿼리가
+    # InvalidRequestError가 되는데, 12의 add_item(add_to_watchlist)처럼 함수 안에서 commit하고
+    # 이어서 조회하는 공개 함수가 있기 때문이다(SQLAlchemy 2.0: 안쪽 commit은 바깥까지 커밋하고
+    # savepoint를 닫는다). TurnWriter가 행마다 커밋하므로 도구 실행 전에는 미커밋 변경이 없다.
+    savepoint = ctx.db.begin_nested()
     try:
-        # 도구가 DB 오류를 내도 대화 저장은 이어 가도록 savepoint 안에서 실행한다.
-        with ctx.db.begin_nested():
-            output = spec.handler(ctx, params)
+        output = spec.handler(ctx, params)
     except Exception:
         # 내부 메시지는 사용자·모델에 보이지 않는다. 로그에만 남긴다.
         logger.exception("챗봇 도구 실행 오류: %s", call.name)
+        if savepoint.is_active:
+            savepoint.rollback()
+        else:
+            # 도구가 이미 커밋해 savepoint가 닫혔다. 그 뒤의 변경만 버리고 세션을 정리한다.
+            ctx.db.rollback()
         return ToolRun(ToolExecResult(call, tool_failed_content(), True), None)
+    if savepoint.is_active:
+        savepoint.commit()
     content = output.content if isinstance(output.content, str) else to_json(output.content)
     return ToolRun(ToolExecResult(call, content, False), _safe_card(output.card))
 
