@@ -379,3 +379,20 @@ class SnapshotSet:
 
 - 구현 범위의 남은 작업은 없다. 별도 검증 워커의 계약 검증·PR 검토·병합은 코디네이터가 진행한다.
 - 실제 키·허용 IP가 필요한 실서비스 연동은 외부 호출 없이 공식 응답을 고정한 테스트로 확인했다. 토스 개별 체결·조건검색, 외화 평가액 미제공과 키움 체결 비용 미제공 제한은 위 표와 같다.
+
+### 웨이브 4 통합 검증 수정
+
+- 발견 사항(경미 F3): `/settings/connections`를 열면 `BrokerConnectionsSection`의 `useEgressIp`(`useQuery`)가 사용자 동작 없이 실행돼 `GET /api/market/connections/egress-ip`를 부르고, 서버가 외부 IP 조회 서비스를 불렀다.
+- 고친 내용: `useEgressIp`를 `useMutation`으로 바꿔 "서버 공인 IP 확인" 버튼을 누를 때만 부른다. 누르기 전 "버튼을 누르면 확인합니다", 조회 중 "확인 중…", null이나 요청 실패면 "확인할 수 없음"을 보여 준다. 상태는 컴포넌트에 머물러 화면을 떠나면 사라지고, 다시 들어오면 버튼을 다시 눌러야 한다. 백엔드와 API 계약은 바꾸지 않았다.
+- 세부 결정: 응답을 받으면(IP·null 모두) 버튼을 비활성화해 그 화면에 머무는 동안 다시 부르지 않는다. 백엔드 `get_egress_ip`가 null까지 프로세스 캐시하므로 null 뒤 재요청은 의미가 없다. 요청 자체가 실패(HTTP 오류·네트워크 오류)했을 때만 버튼을 다시 누를 수 있다.
+- 회귀 테스트(`frontend/tests/market/connections.test.tsx`): 화면 진입 시 egress-ip 요청 0회와 안내 문구, 버튼 클릭 시 "확인 중…"·1회 요청·결과 표시, 결과 뒤 버튼 비활성과 재클릭 시 추가 요청 없음, 요청 실패 시 "확인할 수 없음"과 재시도를 확인한다. 기존 IP 표시·null 테스트는 버튼을 누른 뒤 확인하도록 바꿨다. 새 진입 테스트는 수정 전 코드에서 실패하는 것을 확인했다.
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 08(8008·3008·finance_08) 준비 성공 |
+| `npm run lint` / `npx tsc --noEmit` | 통과 |
+| `npm run test` | 47개 파일·468개 테스트 통과(시장 화면 6개) |
+| `npm run build` | Next.js 16.4.2 프로덕션 빌드 성공 |
+| 실제 서버(슬롯 08) + 독립 Playwright Chrome context, egress-ip는 브라우저에서 가로채 가짜 응답 | 1280·360·768px 모두 진입 시 요청 0회·"버튼을 누르면 확인합니다", 클릭 시 "확인 중…"·버튼 비활성 → 1회 요청 후 `203.0.113.7`(null 응답은 "확인할 수 없음") 표시, 재클릭 시 추가 요청 없음, `scrollWidth`가 viewport 너비 이하, 브라우저 오류 0 |
+| 백엔드 로그 | 확인 동안 egress-ip 요청 0건(외부 IP 조회 서비스 미호출) |
+| `scripts/stop.sh` | 기동한 frontend·backend 종료, 확인용 사용자 삭제 |
