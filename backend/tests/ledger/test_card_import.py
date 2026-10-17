@@ -329,3 +329,10 @@ def test_extract_validation(auth_client, fake_llm):
     assert error_of(request("x.txt", b"x", "true"), 415)["code"] == "IMPORT_FILE_UNSUPPORTED"
     fake_llm.set_enabled("ledger.extract_statement", False)
     assert error_of(request("x.pdf", pdf_bytes(), "true"), 503)["code"] == "LLM_UNAVAILABLE"
+
+
+def test_zero_amount_preview_error(auth_client):
+    job = upload(auth_client, "generic.csv", "이용일,가맹점,금액\n2026-10-01,상점,0\n".encode())
+    assert job["preview"]["invalidCount"] == 1
+    assert job["preview"]["rows"][0]["errors"][0]["message"] == "금액이 0입니다."
+    assert commit(auth_client, job)["failed"] == 1
