@@ -16,7 +16,7 @@ import { applyFieldErrors, toSubmitErrors } from "@/lib/form-errors";
 import type { HoldingPreset } from "../constants";
 import { useCreateHolding, useUpdateHolding } from "../hooks";
 import type { Holding } from "../types";
-import { holdingSchema, type HoldingFormInput, type HoldingFormOutput } from "../validation";
+import { holdingSchema, syncedHoldingSchema, type HoldingFormInput, type HoldingFormOutput } from "../validation";
 import { AmountInput } from "./AmountInput";
 
 const FIELDS = ["name", "assetClass", "amount", "includeInAllocation", "memo"] as const;
@@ -67,12 +67,12 @@ function HoldingForm({ target, onDone }: { target: HoldingDialogTarget; onDone: 
   const createHolding = useCreateHolding();
   const updateHolding = useUpdateHolding();
   const [formError, setFormError] = useState<string | null>(null);
+  const editing = target.mode === "edit";
+  const synced = editing && !!target.holding.connectionId;
   const form = useForm<HoldingFormInput, unknown, HoldingFormOutput>({
-    resolver: zodResolver(holdingSchema),
+    resolver: zodResolver(synced ? syncedHoldingSchema : holdingSchema),
     defaultValues: defaults(target),
   });
-  const editing = target.mode === "edit";
-
   useEffect(() => {
     // 빠른 추가는 이름·자산군이 채워져 있으니 금액부터 입력하게 한다.
     if (target.mode === "create" && target.preset) form.setFocus("amount");
@@ -82,7 +82,10 @@ function HoldingForm({ target, onDone }: { target: HoldingDialogTarget; onDone: 
     setFormError(null);
     try {
       if (target.mode === "edit") {
-        await updateHolding.mutateAsync({ id: target.holding.id, input: values });
+        const input = synced
+          ? { assetClass: values.assetClass, includeInAllocation: values.includeInAllocation, memo: values.memo }
+          : values;
+        await updateHolding.mutateAsync({ id: target.holding.id, input });
       } else {
         await createHolding.mutateAsync(values);
       }
@@ -99,7 +102,7 @@ function HoldingForm({ target, onDone }: { target: HoldingDialogTarget; onDone: 
       <form onSubmit={form.handleSubmit(onSubmit)} noValidate className="space-y-4">
         <DialogHeader>
           <DialogTitle>{editing ? "자산 수정" : "자산 추가"}</DialogTitle>
-          <DialogDescription>지금 평가금액(원)을 입력해 주세요.</DialogDescription>
+          <DialogDescription>{synced ? "불러온 자산의 이름과 금액은 다시 동기화하면 갱신돼요. 자산군은 직접 지정할 수 있어요." : "지금 평가금액(원)을 입력해 주세요."}</DialogDescription>
         </DialogHeader>
         {formError && (
           <Alert variant="destructive">
@@ -113,7 +116,7 @@ function HoldingForm({ target, onDone }: { target: HoldingDialogTarget; onDone: 
             <FormItem>
               <FormLabel>이름</FormLabel>
               <FormControl>
-                <Input placeholder="예: 비상금 통장" {...field} />
+                <Input placeholder="예: 비상금 통장" {...field} readOnly={synced} disabled={synced} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -157,6 +160,8 @@ function HoldingForm({ target, onDone }: { target: HoldingDialogTarget; onDone: 
                   onChange={field.onChange}
                   onBlur={field.onBlur}
                   placeholder="0"
+                  readOnly={synced}
+                  disabled={synced}
                 />
               </FormControl>
               <FormMessage />

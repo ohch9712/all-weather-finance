@@ -67,6 +67,8 @@ export const holdingSchema = z.object({
     .refine((value) => charLength(value) <= 200, allocationMessages.memo)
     .transform((value) => (value.trim() === "" ? null : value)),
 });
+// 동기화 금액은 조회한 값이며 수동 입력 상한으로 분류 수정을 막지 않는다.
+export const syncedHoldingSchema = holdingSchema.extend({ amount: z.string().transform(Number) });
 export type HoldingFormInput = z.input<typeof holdingSchema>;
 export type HoldingFormOutput = z.output<typeof holdingSchema>;
 

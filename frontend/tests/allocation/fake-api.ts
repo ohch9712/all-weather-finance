@@ -54,6 +54,9 @@ export function holding(overrides: Partial<Holding> & Pick<Holding, "id" | "name
   return {
     includeInAllocation: true,
     source: "manual",
+    connectionId: null,
+    syncedAt: null,
+    classOverride: false,
     memo: null,
     createdAt: "2026-10-16T03:00:00Z",
     updatedAt: "2026-10-16T03:00:00Z",
