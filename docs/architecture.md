@@ -377,7 +377,7 @@ def get_progress(db, user_id) -> LearnProgress
 def get_market_data_client() -> BrokerClient                     # MARKET_DATA_PROVIDER 기준 운영자 클라이언트
 def get_user_broker_client(db, user_id, connection_id: UUID) -> BrokerClient   # BROKER_NOT_CONNECTED
 def list_connections(db, user_id) -> list[Connection]            # 내 증권사 연결(공급자·별칭·상태, 비밀값 없음). 14가 사용
-def search_stocks(db, query: str, *, limit: int = 20) -> list[StockSummary]
+def search_stocks(db, query: str, *, limit: int = 20, kind: Literal["stock", "etf"] | None = None) -> list[StockSummary]   # kind는 08b가 추가(하위 호환)
 def get_stock_detail(db, code: str) -> StockDetail | None
 def get_quotes(codes: list[str]) -> list[Quote]                   # 30초 메모리 캐시
 def list_snapshot_rows(db, as_of: date | None = None) -> SnapshotSet   # 최신(또는 지정일) 전 종목 스냅샷
