@@ -59,7 +59,8 @@ class Quote:            code: str; price: Decimal; change: Decimal | None; chang
 class Candle:           day: date; open: Decimal; high: Decimal; low: Decimal; close: Decimal; volume: int
 @dataclass(frozen=True)
 class BrokerHolding:    code: str; name: str; market: Market; quantity: Decimal; avg_price: Decimal | None
-                        eval_amount: int; currency: Literal["KRW", "USD"]
+                        eval_amount: int | None; currency: Literal["KRW", "USD"]
+                        # eval_amount는 원화 평가금액(정수 원). 증권사가 원화 값을 주지 않는 외화 보유분은 None(환율을 직접 곱하지 않는다. 14가 skipped로 알린다)
 @dataclass(frozen=True)
 class HoldingsSnapshot: holdings: list[BrokerHolding]; cash_krw: int | None; as_of: datetime
 @dataclass(frozen=True)
