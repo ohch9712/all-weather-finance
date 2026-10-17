@@ -526,9 +526,12 @@ register_tool(
         name="get_gift_deductions",
         description=(
             "등록한 가족별 증여재산공제(10년 합산) 한도·사용액·남은 공제·다시 생기는 날과 "
-            "혼인·출산 공제 현황을 확인한다. '첫째에게 세금 없이 얼마까지 줄 수 있어?' 같은 "
-            f"질문에 쓴다. memberName이 null이면 가족 전원을 본다. {MEMBER_NAME_RULE} 결과는 "
-            "참고용 추정이다."
+            "혼인·출산 공제 현황을 확인한다. '첫째에게 세금 없이 얼마까지 줄 수 있어?'처럼 남은 "
+            "공제 한도·사용액·다시 생기는 날만 궁금할 때 쓴다. 금액이 주어진 세금 질문('1억 주면 "
+            "세금 얼마야?')에는 이 도구를 쓰지 않고 estimate_gift_tax를 쓴다. 언제·얼마씩 나눠 "
+            "줄지 묻는 일정 질문에는 이 도구를 쓰지 않고 plan_gifts를 쓴다. 두 계산 도구가 공제 "
+            "한도를 직접 반영한다. memberName이 null이면 가족 전원을 본다. "
+            f"{MEMBER_NAME_RULE} 결과는 참고용 추정이다."
         ),
         input_model=DeductionInput,
         label="증여 공제 확인 중",
@@ -539,8 +542,11 @@ register_tool(
     ToolSpec(
         name="estimate_gift_tax",
         description=(
-            "증여세를 계산한다. '첫째에게 1억 주면 세금 얼마야?' 같은 질문에 쓴다. 등록한 가족이면 "
-            "memberName으로 부르고(그 가족의 증여 기록 10년 합산까지 반영), 등록하지 않은 사람이면 "
+            "증여세를 계산한다. '첫째에게 1억 주면 세금 얼마야?'처럼 증여 금액이 주어진 세금 "
+            "질문에 쓴다. 공제 한도와 10년 합산 증여 기록을 이 도구가 직접 반영하므로 "
+            "get_gift_deductions를 먼저 부를 필요가 없다. 사용자가 '첫째'·'둘째'처럼 가족을 "
+            "말하면 memberName에 그 별칭만 넣고 바로 부른다. 그 가족의 관계·생년월일·증여 "
+            "기록은 도구가 가족 정보에서 채우므로 사용자에게 묻지 않는다. 등록하지 않은 사람이면 "
             "memberName을 null로 두고 relation(spouse·child·grandchild·parent·other_relative)과 "
             "birthDate를 넣는다. donorGroup은 증여하는 사람(parents·grandparents·spouse·children·"
             "relative·non_relative, 보통 parents), amount는 원 단위 정수(1억=100000000), "
@@ -580,11 +586,14 @@ register_tool(
         description=(
             "자녀·손자녀에게 목표 나이까지 10년마다 공제 한도만큼 나눠 증여하는 "
             "일정(증여일·나이·금액·세금)과 총 증여액·세금·목표 시점 평가액, 같은 금액을 지금 한 "
-            "번에 줄 때의 세금을 계산한다. '둘째에게 언제 얼마씩 증여하면 돼?' 같은 질문에 쓴다. "
-            "등록한 가족은 memberName, 등록하지 않았으면 memberName을 null로 두고 birthDate를 "
-            "넣는다(둘 중 하나만). targetAge는 19~40(기본 "
-            '30), annualReturnRate는 연 수익률 % 숫자 문자열(0~20, 기본 "4")이고 null이면 '
-            "기본값이다. "
+            "번에 줄 때의 세금을 계산한다. '둘째에게 언제 얼마씩 증여하면 돼?'처럼 언제·얼마씩 "
+            "나눠 줄지 묻는 일정 질문에 쓴다. 공제 한도와 10년 합산 증여 기록을 이 도구가 직접 "
+            "반영하므로 get_gift_deductions를 먼저 부를 필요가 없다. 사용자가 '첫째'·'둘째'처럼 "
+            "가족을 말하면 memberName에 그 별칭만 넣고 바로 부른다. 그 가족의 생년월일·증여 "
+            "기록은 도구가 가족 정보에서 채우므로 사용자에게 묻지 않는다. 등록하지 않은 사람이면 "
+            "memberName을 null로 두고 birthDate를 넣는다(둘 중 하나만). targetAge는 19~40(기본 "
+            '30), annualReturnRate는 연 수익률 % 숫자 문자열(0~20, 기본 "4")이다. 사용자가 '
+            "말하지 않았으면 묻지 말고 null로 두면 기본값으로 계산한다. "
             f"{MEMBER_NAME_RULE} 결과는 참고용 추정이다."
         ),
         input_model=PlanToolInput,

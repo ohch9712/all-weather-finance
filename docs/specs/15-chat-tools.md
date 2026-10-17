@@ -64,6 +64,11 @@
 - `estimate_gift_tax`·`plan_gifts`·`compare_estate_plans`는 결과가 참고용 추정이라고 적는다. `compare_estate_plans`는 사전 채움 재산이 없으면 오류 대신 "자산배분에 자산을 입력하거나 상속·증여 화면에서 재산을 입력해 주세요" 상태를 돌려준다.
 - `get_recommendation`은 "왜 이렇게 추천했어", "뭐부터 해야 해" 같은 질문에 쓴다고 적는다. 결과 `content`에는 방향·이유 문장을 그대로 담는다(모델이 새 수치를 만들지 않게).
 - `memberName`은 가족 별칭과 공백 무시 일치로 찾는다. 없거나 여럿이면 도구가 후보 목록을 결과로 돌려준다(오류가 아니다).
+- 상속·증여 도구 셋의 쓰임을 서로 구분해 적는다(웨이브 4 평가 F4: 13·15번 질문에서 계산 도구 대신 공제 현황 도구를 불렀다).
+  - `get_gift_deductions`: 남은 공제 한도·사용액·다시 생기는 날만 궁금할 때 쓴다. 금액이 주어진 세금 질문("1억 주면 세금 얼마")에는 쓰지 않고 `estimate_gift_tax`를, 언제·얼마씩 나눠 줄지 묻는 일정 질문에는 쓰지 않고 `plan_gifts`를 쓴다고 적는다.
+  - `estimate_gift_tax`·`plan_gifts`: 공제 한도와 10년 합산 증여 기록을 도구가 직접 반영하므로 `get_gift_deductions`를 먼저 부를 필요가 없다고 적는다.
+- `get_spending_summary`는 이번 달이면 `get_today` 없이 바로 `month: null`로 부른다고 적는다. 지난달처럼 상대적인 달만 날짜를 먼저 확인한다.
+- 6절 시스템 프롬프트에도 "세금 계산·증여 일정 질문은 공제 현황 도구가 아니라 계산 도구를 쓴다"는 뜻의 고정 문장 하나를 더한다(가변 값 없음).
 
 ### 4.1 착수 전 대조 결과 (코디네이터, 2026-10-17)
 
@@ -192,3 +197,60 @@ develop `5d82533`의 실제 코드와 대조해 정한 내용이다. 표와 어�
 
 - 실제 personal 공급자(로컬 Ollama `gemma4:12b` 또는 결제 Gemini)로 `run_eval.py`를 돌려 도구 일치율·금지 문구 0건·공급자·모델을 이 절에 남긴다.
 - 01a의 `format_krw_compact` 억 단위 쉼표를 프론트와 맞추면 `chat/tools/common.py`의 보정을 지울 수 있다.
+
+### 평가 세트 실행 결과 (코디네이터, 2026-10-18)
+
+- 환경: develop `e0d69ca`, personal 공급자 로컬 Ollama 0.40.5, 모델 `gemma4:12b`. `uv run python -m app.modules.chat.evals.run_eval`(시드 사용자는 실행 뒤 롤백). 문항당 약 1분.
+- 처음 부른 도구 일치율 13/17(76.5%), 기대 도구 호출률 15/17(88.2%), 금지 문구 0건, 오류 응답 0건. 주문 요청(17번)은 도구 없이 거절 안내했다.
+
+| # | 기대 도구 | 처음 부른 도구 | 기대 도구 호출 |
+| --- | --- | --- | --- |
+| 4 | `get_spending_summary` | `get_today` | O(두 번째) |
+| 5 | `get_trade_stats` | `get_today` | O(두 번째) |
+| 13 | `estimate_gift_tax` | `get_gift_deductions` | X |
+| 15 | `plan_gifts` | `get_gift_deductions` | X |
+
+- 나머지 13문항은 처음 부른 도구가 기대와 같았다.
+- 4·5번은 날짜를 먼저 확인한 뒤 맞는 도구를 불렀다. `month`·`from`·`to`를 비우면 이번 달·전체라는 점을 도구 설명에 더 분명히 적으면 줄일 수 있다.
+- 13·15번은 공제 현황만 보고 세금 계산·분산 증여 일정을 직접 설명했다. 금액이 주어진 세금 질문은 `estimate_gift_tax`, 시기·나눠 주기 질문은 `plan_gifts`를 쓰라는 구분을 두 도구 설명과 `get_gift_deductions` 설명("세금 계산·일정에는 쓰지 않는다")에 더하는 것이 후속 과제다.
+
+### 웨이브 4 평가 수정(F4)
+
+- 대상: 위 평가에서 13번(`estimate_gift_tax`)·15번(`plan_gifts`)이 `get_gift_deductions`만 부르고, 4번(`get_spending_summary`)이 `get_today`를 먼저 부른 것. 브랜치 `feature/15-chat-tools-fix-1`(develop `aa88ccd`에서 시작).
+- 고친 것(4절 설명 규칙대로, 도구 이름·입력 모델·결과 형식·도구 순서는 그대로)
+  - `get_gift_deductions`: 남은 공제 한도·사용액·다시 생기는 날만 궁금할 때 쓰고, 금액이 주어진 세금 질문에는 `estimate_gift_tax`, 언제·얼마씩 나눠 줄지 묻는 일정 질문에는 `plan_gifts`를 쓴다고 적었다.
+  - `estimate_gift_tax`·`plan_gifts`: 공제 한도와 10년 합산 증여 기록을 도구가 직접 반영하므로 `get_gift_deductions`를 먼저 부를 필요가 없다고 적었다.
+  - `get_spending_summary`: 이번 달이면 `get_today` 없이 바로 `month: null`로 부르고(도구가 오늘 날짜로 이번 달을 정한다), 지난달처럼 상대적인 달만 날짜를 먼저 확인한다고 적었다.
+  - 시스템 프롬프트 "도구 사용" 절의 세금 질문 안내 바로 뒤에 고정 문장 하나를 더했다: "증여세 계산·증여 일정 질문은 공제 현황 도구(get_gift_deductions)가 아니라 계산 도구(세금은 estimate_gift_tax, 나눠 주는 일정은 plan_gifts)를 바로 쓴다." 가변 값은 없다.
+- 스펙에 없어 정한 것: 첫 수정 뒤 실제 서버 확인에서 13번이 도구 없이 "생년월일을 알려 주세요"라고 되묻고, 15번이 "목표 나이·수익률을 알려 주시면"이라며 공제 현황 도구를 불렀다. 그래서 두 계산 도구 설명에 "사용자가 '첫째'·'둘째'처럼 가족을 말하면 memberName에 그 별칭만 넣고 바로 부른다. 관계·생년월일·증여 기록은 도구가 가족 정보에서 채우므로 사용자에게 묻지 않는다"를, `plan_gifts`에는 "targetAge·annualReturnRate는 사용자가 말하지 않았으면 묻지 말고 null로 두면 기본값으로 계산한다"를 더했다. 원래 `plan_gifts` 설명의 "memberName, 등록하지" 사이 공백이 빠졌던 것도 함께 고쳤다.
+- 회귀 테스트 `backend/tests/chat/test_tool_descriptions.py`(11개): 세 상속·증여 도구 설명의 쓰임 구분 문구, 별칭만으로 바로 부르기·기본값을 묻지 않기 문구, `get_spending_summary`의 `get_today` 없이 `month: null` 문구, 시스템 프롬프트 새 문장의 위치(도구 사용 절, 세금 안내 바로 뒤)와 한 번만 있는지, 서로 다른 시각에 두 번 생성한 시스템 프롬프트가 바이트 단위로 같고 네 자리 숫자가 없는지.
+
+#### 검사 결과
+
+- 백엔드: `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 1366개 통과. 프론트와 마이그레이션은 바꾸지 않았다.
+- 실제 서버 확인(`LLM_PERSONAL_PROVIDER=ollama scripts/start.sh backend`, 8015, 로컬 Ollama `gemma4:12b`): `run_eval.seed_user`와 같은 시드를 공개 API로 만들고 질문을 보냈다.
+  - 첫 수정 뒤: 4번 `get_spending_summary` 처음 호출(해결), 13번 도구 없음(생년월일을 되물음), 15번 `get_gift_deductions`.
+  - 설명 보강 뒤: 13번 `estimate_gift_tax`, 15번 `plan_gifts`를 처음 불렀다. 확인 뒤 `scripts/stop.sh backend`로 멈췄다.
+- 평가 세트(설명 보강 뒤 한 번, `cd backend && LLM_PERSONAL_PROVIDER=ollama uv run python -m app.modules.chat.evals.run_eval`, 로컬 Ollama `gemma4:12b`, 약 17분, 시드는 롤백): 처음 부른 도구 일치율 16/17(94.1%), 기대 도구 호출률 17/17(100%), 금지 문구 0건, 오류 응답 0건.
+
+| 지표 | 이전(develop `e0d69ca`) | 이번 |
+| --- | --- | --- |
+| 처음 부른 도구 일치 | 13/17 | 16/17 |
+| 기대 도구 호출 | 15/17 | 17/17 |
+| 금지 문구 | 0건 | 0건 |
+| 오류 응답 | 0건 | 0건 |
+
+| # | 질문 | 기대 도구 | 이전 처음 부른 도구 | 이번 처음 부른 도구 |
+| --- | --- | --- | --- | --- |
+| 4 | 이번 달 어디에 제일 많이 썼어? | `get_spending_summary` | `get_today` | `get_spending_summary` |
+| 5 | 올해 내 매매 성적 어때? | `get_trade_stats` | `get_today` | `get_today`(두 번째에 기대 도구) |
+| 12 | 첫째에게 세금 없이 얼마까지 줄 수 있어? | `get_gift_deductions` | `get_gift_deductions` | `get_gift_deductions` |
+| 13 | 첫째에게 1억 주면 세금 얼마야? | `estimate_gift_tax` | `get_gift_deductions`(기대 도구 호출 X) | `estimate_gift_tax` |
+| 15 | 둘째에게 언제 얼마씩 나눠서 증여하면 돼? | `plan_gifts` | `get_gift_deductions`(기대 도구 호출 X) | `plan_gifts` |
+
+- 나머지 12문항(1~3, 6~11, 14, 16, 17)은 이전과 같이 처음 부른 도구가 기대와 같았다. 17번 주문 요청은 도구 없이 거절 안내했다. 12번(공제 현황 질문)이 계산 도구로 넘어가지 않은 것도 확인했다.
+
+#### 남은 일
+
+- 5번("올해 매매 성적")은 연도를 알아야 해서 `get_today`를 먼저 부른다. `get_trade_stats` 설명(`journal.py`)은 이번 소유 범위가 아니라 고치지 않았다.
+- 13번 응답 첫 문장이 세액을 "970,000원"이라고 잘못 옮겼다. 같은 시드로 `estate.calc_gift_tax`를 직접 부르면 `payable_tax`는 9,700,000원이고, 도구 결과(content·카드)는 맞다. 모델의 숫자 인용 오류라 도구 선택(F4) 범위 밖이다. 실제 서버 확인과 평가 두 번 모두 `gemma4:12b`가 같은 자릿수 오류를 냈다.

@@ -35,6 +35,8 @@ export function BrokerConnectionsSection({ allowMock = false }: { allowMock?: bo
   const egress = useEgressIp();
   const actions = useConnectionActions();
   const busy = actions.verify.isPending || actions.remove.isPending;
+  // 응답을 받으면(IP·null 모두) 이 화면에 머무는 동안 다시 부르지 않는다. 요청 자체가 실패했을 때만 다시 누를 수 있다.
+  const egressIp = egress.isIdle ? "버튼을 누르면 확인합니다" : egress.isPending ? "확인 중…" : egress.data?.ip ?? "확인할 수 없음";
 
   async function verify(id: string) {
     setActionError(null);
@@ -62,7 +64,10 @@ export function BrokerConnectionsSection({ allowMock = false }: { allowMock?: bo
         <CardContent className="space-y-3 text-sm break-words">
           <p>증권사 연동은 조회만 합니다. 주문은 할 수 없습니다.</p>
           <p>키움·토스 포털에서 이 서버의 IP를 허용 IP로 등록해야 연결됩니다.</p>
-          <p>서버 공인 IP: <strong>{egress.isPending ? "확인 중…" : egress.data?.ip ?? "확인할 수 없음"}</strong></p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p>서버 공인 IP: <strong>{egressIp}</strong></p>
+            <Button variant="outline" size="sm" disabled={egress.isPending || egress.isSuccess} onClick={() => egress.mutate()}>서버 공인 IP 확인</Button>
+          </div>
           <p className="text-muted-foreground">IP를 확인할 수 없으면 서버 관리자에게 공인 IP를 확인하세요.</p>
           <p><a className="underline underline-offset-4" href="https://openapi.kiwoom.com/" target="_blank" rel="noreferrer">키움 REST API 포털</a>의 API 사용 등록에서 앱키와 허용 IP를 관리하세요.</p>
           <p><a className="underline underline-offset-4" href="https://developers.tossinvest.com/" target="_blank" rel="noreferrer">토스증권 Open API 안내</a> · 토스 WTS 설정 → Open API → 허용 IP 관리</p>

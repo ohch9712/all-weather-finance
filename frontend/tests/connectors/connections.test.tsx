@@ -107,6 +107,44 @@ describe("데이터 자동 수집", () => {
     fireEvent.click(screen.getByRole("button", { name: "계정 삭제" }));
     await waitFor(() => expect(removed).toBe(true));
   });
+  it("계정을 삭제하면 그 계정의 이력은 다시 부르지 않고 캐시에서 지우며 남은 계정은 갱신한다", async () => {
+    const bank = { ...account, id: "other-account", kind: "bank", organization: "0004", organizationName: "KB국민", label: "월급 통장" };
+    const bankSync = { ...succeeded, id: "bank-sync", accountId: bank.id, kind: "bank_balances", rangeStart: null, rangeEnd: null, summary: { created: 1, updated: 2, removed: 0, skipped: [], syncedAt: succeeded.finishedAt } };
+    let deleted = false;
+    const afterDelete = { accounts: 0, syncs: [] as string[] };
+    handlers();
+    server.use(
+      http.get(`${root}/accounts`, () => {
+        if (deleted) afterDelete.accounts += 1;
+        return HttpResponse.json({ items: deleted ? [bank] : [account, bank] });
+      }),
+      http.get(`${root}/syncs`, ({ request }) => {
+        const id = new URL(request.url).searchParams.get("accountId") ?? "";
+        if (deleted) afterDelete.syncs.push(id);
+        if (deleted && id === account.id) return HttpResponse.json({ error: { code: "NOT_FOUND", message: "찾을 수 없습니다.", details: [] } }, { status: 404 });
+        return HttpResponse.json({ items: [id === account.id ? succeeded : bankSync], page: 1, pageSize: 20, total: 1 });
+      }),
+      http.delete(`${root}/accounts/${account.id}`, () => { deleted = true; return new HttpResponse(null, { status: 204 }); }),
+    );
+    const { queryClient } = renderWithProviders(<DataConnectionsSection />);
+    for (const name of ["ledger", "allocation", "dashboard"]) queryClient.setQueryData([name, "test"], { items: [] });
+    expect(await screen.findByText("저장 2건 · 중복 1건 · 실패 0건")).toBeInTheDocument();
+    expect(await screen.findByText("추가 1건 · 갱신 2건 · 삭제 0건")).toBeInTheDocument();
+    const card = screen.getByText("생활 카드").closest("[data-slot=card]") as HTMLElement;
+    fireEvent.click(within(card).getByRole("button", { name: "삭제" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "계정 삭제" }));
+    await waitFor(() => expect(screen.queryByText("생활 카드")).not.toBeInTheDocument());
+    // 삭제 처리(갱신 요청 포함)가 모두 끝난 뒤 요청 기록을 확인한다.
+    await waitFor(() => expect(queryClient.isMutating()).toBe(0));
+    expect(afterDelete.syncs).not.toContain(account.id);
+    expect(afterDelete.syncs).toContain(bank.id);
+    expect(afterDelete.accounts).toBeGreaterThan(0);
+    await waitFor(() => expect(queryClient.getQueryState(["connectors", "syncs", account.id])).toBeUndefined());
+    for (const name of ["ledger", "allocation", "dashboard"]) expect(queryClient.getQueryState([name, "test"])?.isInvalidated).toBe(true);
+    expect(screen.getByText("월급 통장")).toBeInTheDocument();
+    expect(screen.getByText("추가 1건 · 갱신 2건 · 삭제 0건")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
   it("실패 이력과 API 오류를 안내한다", async () => {
     handlers({ accounts: [account], syncs: [{ ...succeeded, status: "failed", summary: null, errorCode: "CF-03002" }] });
     renderWithProviders(<DataConnectionsSection />);
