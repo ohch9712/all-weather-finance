@@ -258,3 +258,13 @@ UNIQUE `(user_id, provider, kind, organization)`.
 
 - 화면 확인용 사용자는 API로 가입했고, 계정과 동기화 이력은 `$TMPDIR` 임시 스크립트로 가짜 connectedId(`app.core.crypto` 암호화)를 써서 finance_17에 직접 넣었다. 키가 없는 서버의 삭제는 CODEF 요청 전에 409로 끝나 로컬 행만 지우므로 실제 CODEF 호출은 없다. `/api/market/connections/egress-ip`는 브라우저에서 가로채 가짜 응답으로 바꿨다. 띄운 서버는 `scripts/stop.sh`로 멈췄다.
 - 백엔드는 바꾸지 않았다. 남은 일은 코디네이터 검증과 병합이다.
+
+### CODEF 샌드박스 실제 호출 확인 (코디네이터, 2026-10-18)
+
+- 환경: develop `25cfdea`, `CODEF_ENV=sandbox`, 사용자가 발급한 샌드박스 키. 공개 API를 같은 프로세스의 TestClient로 불렀고 DB 변경은 끝에 롤백했다. 로그인 아이디·비밀번호는 매번 임의 값을 썼다.
+- `GET /api/connectors/providers`: codef `available: true`, `environment: "sandbox"`.
+- 카드(`0306` 신한카드): 토큰 발급, RSA 암호화 계정 등록(`/v1/account/create`) 201, 승인내역 동기화 200 `succeeded`. 샌드박스 응답은 `data`가 배열이 아닌 객체 한 건이고 `resUsedDate`·`resMemberStoreName`·`resUsedAmount`가 모두 `********`로 가려져 있어 `inserted 0, failed 1`이 됐다(4.1 규칙대로 읽지 못한 행은 건너뛰고 `failed`에 센다). 객체 한 건 응답 처리(4절 "건이 하나면 객체")는 실제로 확인됐다. 승인내역의 가계부 반영은 실제 값이 오는 데모 키로만 확인할 수 있다.
+- 은행(`0004` KB국민): 계정 등록 201, 보유계좌 동기화 200 `succeeded`, `created 3`(원화 예금 3건이 현금 자산으로 반영, 계좌 끝 4자리만 이름에 표시).
+- 계정 삭제(`/v1/account/delete`) 두 건 모두 204, 은행 계정 삭제 뒤 codef 자산 0건.
+- 로그에 로그인 아이디·비밀번호·clientId·clientSecret이 남지 않음을 확인했다.
+- 남은 일: 실패 행의 `summary.errors`가 비어 있어 화면에 실패 이유가 나오지 않는다(경미). 데모 키로 실제 승인내역 반영을 확인한다.
