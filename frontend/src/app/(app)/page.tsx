@@ -1,5 +1,8 @@
-import { ComingSoon } from "@/components/common/ComingSoon";
+import type { Metadata } from "next";
+import { DashboardPage } from "@/features/dashboard/components/DashboardPage";
+
+export const metadata: Metadata = { title: "홈" };
 
 export default function HomePage() {
-  return <ComingSoon title="홈" taskId="16" />;
+  return <DashboardPage />;
 }
