@@ -6,9 +6,17 @@ import { LineChart } from "@/components/charts/LineChart";
 import { assetColor, seriesColor } from "@/components/charts/palette";
 import { formatKRW } from "@/lib/format";
 
+// 표 상자는 sr-only의 1px 높이·overflow를 따르지 않아 문서 높이를 늘린다(웨이브 3 K5). sr-only는 감싸는 블록에 건다.
+function expectInsideSrOnlyContainer(table: HTMLElement) {
+  expect(table).not.toHaveClass("sr-only");
+  const container = table.parentElement;
+  expect(container?.tagName).toBe("DIV");
+  expect(container).toHaveClass("sr-only");
+}
+
 function hiddenTable(name: string) {
   const table = screen.getByRole("table", { name });
-  expect(table).toHaveClass("sr-only");
+  expectInsideSrOnlyContainer(table);
   return within(table)
     .getAllByRole("row")
     .map((row) => Array.from(row.querySelectorAll("th, td"), (cell) => cell.textContent));
@@ -79,6 +87,30 @@ describe("차트 래퍼", () => {
       ["10.01", "72"],
       ["10.08", "-"],
     ]);
+  });
+
+  it("행이 많은 차트도 숨김 표를 sr-only 블록 안에 두고 caption·머리글·행을 갖춘 접근 가능한 표로 남긴다", () => {
+    const data = Array.from({ length: 262 }, (_, index) => ({ date: `D${index + 1}`, close: 10_000 + index }));
+    const { container } = render(
+      <LineChart
+        ariaLabel="1년 종가 추이"
+        xKey="date"
+        valueFormatter={formatKRW}
+        series={[{ key: "close", label: "종가", color: seriesColor(0) }]}
+        data={data}
+      />,
+    );
+    const table = screen.getByRole("table", { name: "1년 종가 추이" });
+    expectInsideSrOnlyContainer(table);
+    expect(container.querySelectorAll("table")).toHaveLength(1);
+    expect(container.querySelector("table.sr-only")).toBeNull();
+    expect(within(table).getByRole("columnheader", { name: "종가" })).toBeInTheDocument();
+    expect(within(table).getAllByRole("rowheader")).toHaveLength(262);
+    expect(within(table).getAllByRole("row")).toHaveLength(263);
+    expect(within(table).getByRole("cell", { name: "10,261원" })).toBeInTheDocument();
+    // 그림의 role·aria-label은 그대로이고 숨김 표는 그림 밖에 있다.
+    const figure = screen.getByRole("img", { name: "1년 종가 추이" });
+    expect(figure).not.toContainElement(table);
   });
 
   it("차트 색은 CSS 변수를 그대로 쓰고 계열 색은 돌려 쓰지 않는다", () => {
