@@ -256,7 +256,7 @@ features/<module>/
 | ledger | `ledger_entries` | id, user_id, kind, occurred_on, amount, category_id, merchant, payment_method, memo, source, dedup_hash, created_at, updated_at (+10: card_name, approval_no, is_cancellation, import_batch_id) | 03, 10 |
 | ledger | `ledger_merchant_rules` | id, user_id, merchant_key, category_id, created_at, updated_at | 10 |
 | imports | `import_jobs` | id, user_id, kind, status, file_name, sheet_names, header_row, columns(JSONB), rows(JSONB), mapping(JSONB), mapping_source, expires_at, created_at | 04 |
-| journal | `trades` | id, user_id, traded_at, market, symbol_code, symbol_name, side, quantity, price, currency, fee, tax, broker, source, dedup_hash, created_at, updated_at (+05b: cost_estimated, +11: connection_id, external_id, synced_at) | 05, 05b, 11 |
+| journal | `trades` | id, user_id, traded_at, market, symbol_code, symbol_name, side, quantity, price, currency, fee, tax, broker, source(`manual`/`import`/`kiwoom`/`toss`, +11: `mock`), dedup_hash, created_at, updated_at (+05b: cost_estimated, +11: connection_id, external_id, synced_at) | 05, 05b, 11 |
 | journal | `trade_cost_settings` | user_id(PK), krx_commission_rate, krx_sell_tax_rate, us_commission_rate, updated_at | 05b |
 | journal | `trade_notes` | id, user_id, trade_id(null 가능), symbol_code(null 가능), noted_on, kind(`plan`/`review`/`memo`), content, tags, emotion, created_at, updated_at | 05 |
 | estate | `family_members` | id, user_id, relation, display_name, birth_date, married_on, child_birth_dates, created_at, updated_at | 06 |
@@ -317,7 +317,7 @@ features/<module>/
 | `chat_0001` | chat | 09 | chat_conversations, chat_messages |
 | `ledger_0002` | ledger | 10 | ledger_merchant_rules, ledger_entries 컬럼 추가 |
 | `journal_0002` | journal | 05b | trade_cost_settings, trades.cost_estimated |
-| `journal_0003` | journal | 11 | trades 컬럼 추가 |
+| `journal_0003` | journal | 11 | trades 컬럼 추가, source CHECK에 `mock` 추가 |
 | `watchlist_0001` | watchlist | 12 | watchlist_items |
 | `screener_0001` | screener | 13 | saved_screens |
 | `allocation_0002` | allocation | 14 | holdings 컬럼 추가, source CHECK에 `mock` 추가 |
