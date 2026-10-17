@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { useWatchlist, useWatchlistMutations } from "@/features/watchlist/hooks";
 import { DEFAULT_GROUP } from "@/features/watchlist/utils";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
-import { formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useStockDetail } from "../hooks";
 import type { StockDetail } from "../types";
@@ -74,7 +74,7 @@ function WatchlistToggle({ stock }: { stock: StockDetail }) {
 export function StockDetailView({ stock }: { stock: StockDetail }) {
   const price = stock.quote?.price ?? stock.snapshot?.price ?? null;
   const rate = stock.quote?.changeRate ?? stock.snapshot?.changeRate ?? null;
-  const asOf = stock.quote ? formatDateTime(stock.quote.asOf) : stock.snapshot?.asOf;
+  const asOf = stock.quote ? formatDateTime(stock.quote.asOf) : stock.snapshot && formatDate(stock.snapshot.asOf);
 
   return (
     <div className="space-y-4">

@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Toaster } from "@/components/ui/sonner";
 import { WatchlistPage } from "@/features/watchlist/components/WatchlistPage";
@@ -62,6 +62,24 @@ describe("관심종목 화면", () => {
     expect(api.posts[1]).toEqual({ code: "069500", groupName: "기본", memo: null });
     const etfRow = await screen.findByRole("listitem", { name: "KODEX 200(069500)" });
     expect(within(etfRow).getByText("ETF")).toBeInTheDocument();
+  });
+
+  it("검색 입력이 결과를 누르기 전에 포커스를 잃어도(터치) 고를 수 있고, 잠시 뒤 목록을 닫는다", async () => {
+    const api = mockApi([]);
+    const { user } = renderPage();
+    await screen.findByText("관심종목이 비어 있어요");
+    const input = screen.getByRole("combobox");
+    await user.type(input, "NAVER");
+    const option = await screen.findByRole("option", { name: /NAVER/ });
+    fireEvent.blur(input);
+    fireEvent.click(option);
+    await waitFor(() => expect(api.posts).toEqual([{ code: "035420", groupName: "기본", memo: null }]));
+
+    await user.type(input, "KODEX");
+    await screen.findByRole("option", { name: /KODEX 200/ });
+    fireEvent.blur(input);
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+    expect(input).toHaveAttribute("aria-expanded", "false");
   });
 
   it("이미 담은 종목을 고르면 서버 메시지를 알린다", async () => {

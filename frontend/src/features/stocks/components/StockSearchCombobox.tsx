@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Loader2, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { getErrorMessage } from "@/lib/api-client";
@@ -32,13 +32,28 @@ export function StockSearchCombobox({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const debounced = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
   const search = useStockSearch(debounced);
   const results = debounced ? (search.data?.items ?? []) : [];
   const waiting = query.trim() !== debounced || search.isFetching;
   const showList = open && query.trim().length > 0;
 
+  function cancelClose() {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  }
+
+  // 입력이 포커스를 잃어도 바로 닫지 않는다. 터치·자동화 클릭처럼 결과를 누르기 전에 blur가 먼저 와도 고를 수 있게 한다.
+  function closeSoon() {
+    cancelClose();
+    closeTimer.current = setTimeout(() => setOpen(false), 150);
+  }
+
+  useEffect(() => cancelClose, []);
+
   function choose(stock: StockSummary) {
+    cancelClose();
     onSelect(stock);
     setQuery("");
     setOpen(false);
@@ -91,8 +106,11 @@ export function StockSearchCombobox({
           setOpen(true);
           setActive(0);
         }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
+        onFocus={() => {
+          cancelClose();
+          setOpen(true);
+        }}
+        onBlur={closeSoon}
         onKeyDown={handleKeyDown}
       />
       {showList && (

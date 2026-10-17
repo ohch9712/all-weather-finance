@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CircleHelp } from "lucide-react";
+import { formatDate } from "@/lib/format";
 import type { StockDetail } from "../types";
 import { formatCompactWon, formatMultiple, formatPrice, formatRate, formatWon } from "../utils";
 
@@ -38,7 +39,7 @@ export function StockMetrics({ stock }: { stock: StockDetail }) {
         <h2 id="metrics-heading" className="font-semibold">
           주요 지표
         </h2>
-        {stock.snapshot && <span className="text-xs text-muted-foreground">{stock.snapshot.asOf} 기준</span>}
+        {stock.snapshot && <span className="text-xs text-muted-foreground">{formatDate(stock.snapshot.asOf)} 기준</span>}
       </div>
       {isEtf && (
         <p className="text-sm text-muted-foreground break-keep">
