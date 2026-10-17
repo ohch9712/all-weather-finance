@@ -5,7 +5,14 @@ from typing import Literal, Protocol
 
 Market = Literal["KOSPI", "KOSDAQ", "KONEX", "NASDAQ", "NYSE", "AMEX", "OTHER"]
 Capability = Literal[
-    "STOCK_LIST", "FUNDAMENTALS", "QUOTES", "CANDLES", "HOLDINGS", "EXECUTIONS", "CONDITIONS"
+    "STOCK_LIST",
+    "ETF_LIST",
+    "FUNDAMENTALS",
+    "QUOTES",
+    "CANDLES",
+    "HOLDINGS",
+    "EXECUTIONS",
+    "CONDITIONS",
 ]
 
 
@@ -15,6 +22,7 @@ class StockInfo:
     name: str
     market: Market
     sector: str | None
+    kind: Literal["stock", "etf"] = "stock"
 
 
 @dataclass(frozen=True)
@@ -83,8 +91,8 @@ class Execution:
     side: Literal["buy", "sell"]
     quantity: Decimal
     price: Decimal
-    fee: Decimal
-    tax: Decimal
+    fee: Decimal | None
+    tax: Decimal | None
     currency: Literal["KRW", "USD"]
 
 
@@ -99,6 +107,7 @@ class BrokerClient(Protocol):
     capabilities: frozenset[Capability]
 
     def list_stocks(self, market: Market) -> list[StockInfo]: ...
+    def list_etfs(self) -> list[StockInfo]: ...
     def get_fundamentals(self, code: str) -> Fundamentals: ...
     def get_quotes(self, codes: list[str]) -> list[Quote]: ...
     def get_daily_candles(self, code: str, start: date, end: date) -> list[Candle]: ...

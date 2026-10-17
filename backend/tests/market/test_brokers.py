@@ -25,11 +25,12 @@ def immediate_buckets(monkeypatch):
 
 def test_mock_all_methods_are_deterministic():
     a, b = MockBroker(), MockBroker()
-    assert len(a.capabilities) == 7
+    assert len(a.capabilities) == 8
     assert len(a.list_stocks("KOSPI")) == 50
     assert len(a.list_stocks("KOSDAQ")) == 30
     for method, args in [
         ("list_stocks", ("KOSPI",)),
+        ("list_etfs", ()),
         ("get_fundamentals", ("005930",)),
         ("get_quotes", (["005930", "000660"],)),
         ("get_daily_candles", ("005930", date(2026, 1, 1), date(2026, 1, 10))),
@@ -104,6 +105,8 @@ def test_kiwoom_parsing_pagination_and_token_refresh(respx_mock, monkeypatch):
     def response(request):
         calls.append(request)
         if request.headers["api-id"] == "ka10099":
+            if json.loads(request.content)["mrkt_tp"] == "8":
+                return httpx.Response(200, json={"return_code": 0, "list": []})
             if request.headers["next-key"] == "next":
                 return httpx.Response(
                     200,
@@ -410,6 +413,9 @@ def test_kiwoom_executions_dates_side_and_cost_defaults(respx_mock, monkeypatch)
     assert len(rows) == 2 and len(requests) == 4
     assert {row.side for row in rows} == {"buy", "sell"}
     assert len({row.external_id for row in rows}) == 2
-    assert all(row.price == 71000 and row.quantity == 2 and row.fee == row.tax == 0 for row in rows)
+    assert all(
+        row.price == 71000 and row.quantity == 2 and row.fee is None and row.tax is None
+        for row in rows
+    )
     assert rows[0].executed_at == datetime(2026, 10, 16, 4, 7, 47, tzinfo=UTC)
     assert all(r["qry_tp"] == "1" and r["dmst_stex_tp"] == "KRX" for r in requests)

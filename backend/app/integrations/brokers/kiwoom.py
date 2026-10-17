@@ -7,7 +7,6 @@ import json
 import re
 import threading
 from datetime import date, datetime, timedelta
-from decimal import Decimal
 
 import httpx
 from websockets.exceptions import WebSocketException
@@ -61,7 +60,16 @@ def krx_code(value):
 class KiwoomBroker(UnsupportedBroker):
     provider = "kiwoom"
     capabilities = frozenset(
-        {"STOCK_LIST", "FUNDAMENTALS", "QUOTES", "CANDLES", "HOLDINGS", "EXECUTIONS", "CONDITIONS"}
+        {
+            "STOCK_LIST",
+            "ETF_LIST",
+            "FUNDAMENTALS",
+            "QUOTES",
+            "CANDLES",
+            "HOLDINGS",
+            "EXECUTIONS",
+            "CONDITIONS",
+        }
     )
 
     def __init__(
@@ -88,6 +96,10 @@ class KiwoomBroker(UnsupportedBroker):
         self.token = None
         self.expires_at = now_utc()
         self.token_lock = threading.Lock()
+        self._etf_codes = None
+        self._etf_list_at = now_utc()
+        self._etf_prices = {}
+        self._etf_prices_at = None
 
     @parsed_response
     def get_token(self):
@@ -168,11 +180,94 @@ class KiwoomBroker(UnsupportedBroker):
             if "_" not in r["code"]
         ]
 
+    @parsed_response
+    def list_etfs(self):
+        # 공식 kiwoom_api_spec.json(953e5db), ka10099: mrkt_tp=8, list의
+        # code/name/upName/marketCode/marketName. 시장 정보가 없으면 KOSPI로 둔다.
+        # https://github.com/Kiwoom-Securities/Kiwoom-REST-API/blob/953e5db/kiwoom/_data/kiwoom_api_spec.json
+        markets = {"0": "KOSPI", "10": "KOSDAQ", "50": "KONEX"}
+        names = {
+            "코스피": "KOSPI",
+            "코스닥": "KOSDAQ",
+            "코넥스": "KONEX",
+            "KOSPI": "KOSPI",
+            "KOSDAQ": "KOSDAQ",
+            "KONEX": "KONEX",
+        }
+        rows = [
+            StockInfo(
+                r["code"],
+                r["name"],
+                markets.get(r.get("marketCode"), names.get(r.get("marketName"), "KOSPI")),
+                r.get("upName") or None,
+                "etf",
+            )
+            for page in self._pages("ka10099", "/api/dostk/stkinfo", {"mrkt_tp": "8"}, "list")
+            for r in page
+            if "_" not in r["code"]
+        ]
+        self._etf_codes = {r.code for r in rows}
+        self._etf_list_at = now_utc()
+        return rows
+
+    def _is_etf(self, code):
+        # 독립 스냅샷 명령·시세 조회도 ETF를 구분한다. 식별 목록만 하루 동안 재사용한다.
+        if self._etf_codes is None or now_utc() - self._etf_list_at >= timedelta(days=1):
+            self.list_etfs()
+        return code in self._etf_codes
+
+    @parsed_response
+    def _etf_price(self, code):
+        # 위 공식 명세 ka40004: POST /api/dostk/etf, etfall_mrpr의 stk_cd,
+        # close_pric(원), pre_rt(%), pred_pre(원), trde_qty(주). 거래대금·시총은 없다.
+        # 전체 ETF 시세를 30초 재사용하며 실패·누락을 주식 API로 추측하지 않는다.
+        if self._etf_prices_at is None or now_utc() - self._etf_prices_at >= timedelta(seconds=30):
+            rows = {
+                r["stk_cd"]: r
+                for page in self._pages(
+                    "ka40004",
+                    "/api/dostk/etf",
+                    {
+                        "txon_type": "0",
+                        "navpre": "0",
+                        "mngmcomp": "0000",
+                        "txon_yn": "0",
+                        "trace_idex": "0",
+                        "stex_tp": "1",
+                    },
+                    "etfall_mrpr",
+                )
+                for r in page
+            }
+            self._etf_prices = rows
+            self._etf_prices_at = now_utc()
+        if code not in self._etf_prices:
+            raise BrokerError("BROKER_UNAVAILABLE")
+        return self._etf_prices[code]
+
     def _basic(self, code):
         return next(self._pages("ka10001", "/api/dostk/stkinfo", {"stk_cd": code}, None))
 
     @parsed_response
     def get_fundamentals(self, code):
+        if self._is_etf(code):
+            r = self._etf_price(code)
+            return Fundamentals(
+                code=code,
+                price=dec(r["close_pric"], absolute=True),
+                change_rate=dec(r.get("pre_rt")),
+                volume=integer(r.get("trde_qty")),
+                trading_value=None,
+                market_cap=None,
+                per=None,
+                pbr=None,
+                roe=None,
+                eps=None,
+                bps=None,
+                foreign_ratio=None,
+                high_52w=None,
+                low_52w=None,
+            )
         # ka10001: mac 단위 억원, 250hgst/250lwst 단위 원. 거래대금은 제공하지 않는다.
         r = self._basic(code)
         return Fundamentals(
@@ -196,13 +291,14 @@ class KiwoomBroker(UnsupportedBroker):
     def get_quotes(self, codes):
         result = []
         for code in codes:
-            r = self._basic(code)
+            etf = self._is_etf(code)
+            r = self._etf_price(code) if etf else self._basic(code)
             result.append(
                 Quote(
                     code,
-                    dec(r["cur_prc"], absolute=True),
+                    dec(r["close_pric" if etf else "cur_prc"], absolute=True),
                     dec(r.get("pred_pre")),
-                    dec(r.get("flu_rt")),
+                    dec(r.get("pre_rt" if etf else "flu_rt")),
                     integer(r.get("trde_qty")),
                     now_utc(),
                 )
@@ -261,7 +357,7 @@ class KiwoomBroker(UnsupportedBroker):
     @parsed_response
     def get_executions(self, start: date, end: date):
         # 공식 kiwoom_api_spec.json의 kt00009(계좌별주문체결현황) 조회만 사용한다.
-        # 수수료·세금 미제공이라 fee/tax는 0이다(코디네이터 합의).
+        # 수수료·세금 미제공이라 fee/tax는 None이다(08b 계약).
         # 매도수 구분은 요청 필터 1/2로 확정하며 응답 문자열로 추측하지 않는다.
         result = {}
         day = start
@@ -302,8 +398,8 @@ class KiwoomBroker(UnsupportedBroker):
                             side,
                             quantity,
                             price,
-                            Decimal(0),
-                            Decimal(0),
+                            None,
+                            None,
                             "KRW",
                         )
             day += timedelta(days=1)

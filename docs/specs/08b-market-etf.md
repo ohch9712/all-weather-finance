@@ -95,3 +95,38 @@ class BrokerClient(Protocol):
 4. 키움 ETF 목록·지표 매핑이 공식 명세 근거와 맞고, 확인하지 못한 기능은 `BROKER_NOT_SUPPORTED`다.
 5. 기존 08 계약(경로·필드·상태코드)이 바뀌지 않았다(바뀐 것은 `kind` 추가와 `Execution.fee`·`tax`의 None 허용뿐이다).
 6. 키움 체결의 수수료·세금이 0이 아니라 None이다.
+
+## 구현 결과
+
+- `market_0002`에서 `stocks.kind varchar(5) NOT NULL DEFAULT 'stock'`와 CHECK를 추가했다. 검색·상세·스냅샷 공개 타입에 `kind`를 추가했고, `search_stocks`와 API의 선택 `kind` 필터를 구현했다. 기존 호출과 응답 필드는 유지한다.
+- 주식 80개에 국내 ETF 10개를 더해 `seed-mock`이 종목·스냅샷 각각 90행을 만든다. 종류 구성과 코드·현재 상품명 출처는 `backend/app/integrations/brokers/fixtures/README.md`에 기록했다. ETF 재무지표 6개는 NULL이다.
+- `refresh-stocks`는 이번 실행에서 수집한 종류만 비상장 여부를 판단한다. ETF capability가 없거나 ETF 목록 수집에 실패한 실행은 기존 ETF를 비상장으로 바꾸지 않는다. ETF 목록 수집 실패 시 해당 갱신은 쓰기 전에 중단한다.
+- 키움 체결 `fee`·`tax`는 미제공을 뜻하는 None으로 바꿨으며 Mock의 명시적 비용 값은 유지했다. `get_user_broker_client`, `list_connections`, `get_holdings`, `HoldingsSnapshot`, `BrokerHolding`의 시그니처·동작은 바꾸지 않았다.
+
+### 공식 명세 대조 결과
+
+| 공급자·기능 | 확인한 API·필드 | 구현 |
+| --- | --- | --- |
+| 키움 ETF 목록 | [공식 저장소 명세 953e5db](https://github.com/Kiwoom-Securities/Kiwoom-REST-API/blob/953e5db/kiwoom/_data/kiwoom_api_spec.json)의 `ka10099`, `POST /api/dostk/stkinfo`, `mrkt_tp=8`, `list.code/name/upName/marketCode/marketName` | `ETF_LIST`, `list_etfs()` 구현. 시장 코드·이름이 있으면 사용하고 없으면 KOSPI. 연속 조회 지원 |
+| 키움 ETF 지표·시세 | 같은 명세의 `ka40004`, `POST /api/dostk/etf`, 전체 필터 `txon_type=0, navpre=0, mngmcomp=0000, txon_yn=0, trace_idex=0, stex_tp=1`; `etfall_mrpr.stk_cd/close_pric/pre_rt/pred_pre/trde_qty` | 가격(원)·등락률(%)·거래량(주), 시세 전일대비(원)를 파싱. 미제공인 거래대금·시가총액·PER·PBR·ROE·EPS·BPS·외국인 비율·52주 고저는 NULL. `ka10001`의 ETF 지원을 추측하지 않고 ETF 전용 API 사용 |
+| 키움 조회 비용 | 같은 명세의 `kt00009`, `acnt_ord_cntr_prst_array`에 수수료·세금 없음 | `Execution.fee/tax=None` |
+| 토스 ETF 목록 | [공식 OpenAPI 1.2.24](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json), `listStocks`, `GET /api/v1/stocks/all`, `securityType=ETF`, `ListedStock.symbol/name` | `ETF_LIST`, `list_etfs()` 구현. KOSPI·KOSDAQ만 조회하며 주식 목록에는 `securityType=STOCK` 필터 사용 |
+| 토스 지표 | 기존 공식 `getPrices`의 `lastPrice/timestamp` | 기존 가격 조회 유지, 미제공 지표는 NULL |
+
+키움은 독립 `refresh-snapshot`이나 시세 조회에서도 ETF를 식별하도록 목록을 최대 하루 재사용하며, ETF 전체시세는 30초 재사용한다. 확인되지 않은 조회는 기존 `BROKER_NOT_SUPPORTED` 처리를 유지하고 주문 관련 기능은 추가하지 않았다.
+
+### 검증 결과
+
+| 항목 | 실행한 명령·방법 | 결과 |
+| --- | --- | --- |
+| 워크트리 준비 | `scripts/worktree-setup.sh` | 슬롯 08, DB `finance_08` 준비 성공 |
+| 백엔드 | `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest` | 모두 통과, 1,037개 테스트 성공(시장 테스트 35개 포함) |
+| 마이그레이션 | 별도 빈 DB `finance_08_etf_migration`에서 `uv run alembic upgrade heads` → `uv run alembic downgrade base` → `uv run alembic upgrade heads` | 순환 성공. `market_0001` 단계에서 넣은 기존 주식이 업그레이드 뒤 `kind=stock`인 것과 varchar(5)·NOT NULL·CHECK 확인, 검증 DB 삭제 |
+| 프론트 | `npm run lint`, `npx tsc --noEmit`, `npm run test`, `npm run build` | 모두 통과, 35개 파일·350개 테스트 성공 |
+| 실제 API | `seed-mock` 후 격리된 테스트 사용자로 실제 HTTP 요청 | ETF 10개 검색, 주식 필터 제외, ETF 상세 재무지표 NULL, 잘못된 kind 422·필드 상세, 상태 count=90 확인 |
+| 모바일·고지 | Orca isolated 프로필에서 가입·로그인 후 `/settings/connections`, 360px 뷰포트와 스크린샷 확인 | `innerWidth=scrollWidth=360`, 샘플·투자 고지 표시, 시장 데이터 90개 표시 |
+| 사용자 격리·외부 호출 | 기존 연결 CRUD의 다른 사용자 404 테스트 포함, HTTP 차단 픽스처와 MockBroker·respx 사용 | 통과, 테스트에서 실제 외부 API·LLM 호출 없음 |
+| 소유 경로·비밀값 | `git diff --name-only develop...HEAD`, `git diff --check`, 커밋 전 hook | 소유 경로만 변경, diff 검사·hook 통과 |
+
+- 스펙과 다른 점: 없음. 기존 프론트 시장 타입에는 종목 타입이 없어 `StockSummary`를 추가했고 `kind: "stock" | "etf"`를 포함했다. 화면은 스펙대로 변경하지 않았다.
+- 남은 일: 구현상 남은 일 없음. 별도 검증 워커의 확인과 병합은 코디네이터가 진행한다. 실제 키를 사용하는 증권사 통신 검증은 수행하지 않았다.

@@ -22,7 +22,16 @@ AS_OF = datetime(2026, 10, 16, 6, 30, tzinfo=UTC)
 class MockBroker:
     provider = "mock"
     capabilities = frozenset(
-        {"STOCK_LIST", "FUNDAMENTALS", "QUOTES", "CANDLES", "HOLDINGS", "EXECUTIONS", "CONDITIONS"}
+        {
+            "STOCK_LIST",
+            "ETF_LIST",
+            "FUNDAMENTALS",
+            "QUOTES",
+            "CANDLES",
+            "HOLDINGS",
+            "EXECUTIONS",
+            "CONDITIONS",
+        }
     )
 
     def __init__(self):
@@ -33,7 +42,14 @@ class MockBroker:
         return [
             StockInfo(r["code"], r["name"], r["market"], r["sector"])
             for r in self.rows
-            if r["market"] == market
+            if r["market"] == market and r.get("kind", "stock") == "stock"
+        ]
+
+    def list_etfs(self) -> list[StockInfo]:
+        return [
+            StockInfo(r["code"], r["name"], r["market"], r["sector"], "etf")
+            for r in self.rows
+            if r.get("kind") == "etf"
         ]
 
     def get_fundamentals(self, code: str) -> Fundamentals:
@@ -42,7 +58,9 @@ class MockBroker:
         r = self.by_code[code]
         return Fundamentals(
             **{
-                k: r[k] if k in {"code", "volume", "trading_value", "market_cap"} else Decimal(r[k])
+                k: r[k]
+                if r[k] is None or k in {"code", "volume", "trading_value", "market_cap"}
+                else Decimal(r[k])
                 for k in Fundamentals.__dataclass_fields__
             }
         )
@@ -108,7 +126,7 @@ class MockBroker:
         if seq not in {"0", "1"}:
             return []
         return (
-            [r["code"] for r in self.rows if Decimal(r["per"]) < 10]
+            [r["code"] for r in self.rows if r["per"] is not None and Decimal(r["per"]) < 10]
             if seq == "0"
             else [r["code"] for r in self.rows if r["market_cap"] >= 2000000000000]
         )
