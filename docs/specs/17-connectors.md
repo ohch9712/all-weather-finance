@@ -239,3 +239,22 @@ UNIQUE `(user_id, provider, kind, organization)`.
 ### 남은 일
 
 - 코디네이터의 별도 검증과 PR 병합. 키가 제공된 환경에서의 CODEF 실제 샌드박스·데모 및 기관별 아이디 로그인 확인은 이 작업에서 실행하지 않았다.
+
+### 웨이브 4 통합 검증 수정
+
+- **F1(경미)**: 계정 삭제 성공 뒤 `["connectors"]` 전체를 무효화해, 아직 마운트된 삭제 계정 카드가 `GET /api/connectors/syncs?accountId=<삭제 계정>&page=1`을 다시 불러 404 콘솔 오류가 났다.
+- **고친 내용**(`frontend/src/features/connectors/hooks.ts`): 8절 규칙대로 삭제 성공 시 ① 진행 중인 계정 목록 요청을 취소하고 계정 목록 캐시에서 그 계정을 `setQueryData`로 먼저 뺀다. ② 그 계정의 이력 쿼리를 `cancelQueries`·`removeQueries`한다. ③ `["connectors"]`(계정 목록·제공자·다른 계정 이력)와 `ledger`·`allocation`·`dashboard`를 무효화하되, 삭제한 계정의 이력 키는 `predicate`로 무효화 대상에서 뺀다. 등록(`create`)과 동기화(`sync`)의 갱신 흐름은 그대로다.
+- **스펙에 없던 보강**: `useConnectorSyncs`에 `enabled` 가드를 더했다. 계정 목록 캐시에 없는 계정이면 이력을 부르지 않고, 그때만 `gcTime: 0`을 준다. 삭제 mutation의 `pending` 알림이 늦게 도착하는 등의 이유로 사라질 카드가 `removeQueries` 뒤에 한 번 더 렌더링되면, TanStack Query가 같은 키로 빈 쿼리를 새로 만들어 다시 요청하기 때문이다. 테스트(MSW가 DELETE를 마이크로태스크 안에서 끝냄)에서는 ①~③만으로 이 경합이 매번 재현됐다. 가드가 있으면 렌더 순서와 상관없이 요청이 나가지 않고, 다시 생긴 빈 항목도 카드가 사라지면 바로 지워진다.
+- **회귀 테스트**(`frontend/tests/connectors/connections.test.tsx`): 카드·은행 계정 두 개 중 카드를 삭제한다. 삭제 뒤 그 계정의 이력 요청 0회, 그 계정의 이력 캐시 없음, 남은 계정의 이력 재요청과 결과 표시, 계정 목록 재요청, `ledger`·`allocation`·`dashboard` 무효화를 확인한다. develop 원본 훅에서는 이 테스트가 실패(삭제 계정 이력 재요청)함을 확인했다.
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 17·8017/3017·finance_17 준비 성공 |
+| `cd frontend && npm run lint` | 통과 |
+| `cd frontend && npx tsc --noEmit` | 통과 |
+| `cd frontend && npm run test` | 47개 파일·467개 테스트 통과(커넥터 7개, 새 회귀 테스트 1개 포함) |
+| `cd frontend && npm run build` | 통과(종료 코드 0) |
+| `scripts/start.sh` 뒤 독립 헤드리스 Chrome 컨텍스트(Playwright)에서 로그인해 `/settings/connections`에서 카드 계정 삭제 | 수정본: `DELETE` 204, 삭제 계정 이력 요청 0회, 남은 계정 이력 재요청 1회, 400 이상 응답·콘솔 오류 0건, 남은 은행 카드와 결과 표시. 같은 절차로 develop 원본 훅에서는 `404 /api/connectors/syncs?accountId=<삭제 계정>&page=1`과 콘솔 오류 1건이 재현됐다 |
+
+- 화면 확인용 사용자는 API로 가입했고, 계정과 동기화 이력은 `$TMPDIR` 임시 스크립트로 가짜 connectedId(`app.core.crypto` 암호화)를 써서 finance_17에 직접 넣었다. 키가 없는 서버의 삭제는 CODEF 요청 전에 409로 끝나 로컬 행만 지우므로 실제 CODEF 호출은 없다. `/api/market/connections/egress-ip`는 브라우저에서 가로채 가짜 응답으로 바꿨다. 띄운 서버는 `scripts/stop.sh`로 멈췄다.
+- 백엔드는 바꾸지 않았다. 남은 일은 코디네이터 검증과 병합이다.
