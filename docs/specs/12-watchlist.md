@@ -138,3 +138,42 @@ def add_item(db, user_id, code: str, *, group_name: str = "기본", memo: str | 
 3. 용어 링크 slug가 07 시드와 일치한다.
 4. 서비스 함수 시그니처가 6절과 같다.
 5. 사용자 격리 404.
+
+## 구현 결과
+
+### 구현한 것
+
+- 백엔드 `app/modules/watchlist`(models·schemas·repository·service·router), revision `watchlist_0001`(`branch_labels=("watchlist",)`, `down_revision="foundation_0001"`). 테이블·UNIQUE `(user_id, stock_code)`·인덱스 `(user_id, group_name, sort_order)`는 4절 그대로이고, 제약 이름은 `uq_watchlist_items_user_code`, `ix_watchlist_items_user_group_order`다.
+- API 5개(5절 경로·필드·상태코드·에러 코드 그대로). 상태를 바꾸는 요청은 `require_json`을 쓴다. 공개 서비스 함수 `list_items`, `add_item`의 시그니처는 6절과 같고 테스트로 고정했다.
+- 08은 `market.service`의 `get_quotes`, `get_stock_detail`만 쓴다. 목록은 `get_quotes(codes)`를 한 번 부른 뒤 항목마다 `get_stock_detail`로 이름·시장·업종·`kind`·스냅샷을 읽는다. 같은 운영자 클라이언트의 30초 캐시가 맞아 증권사 시세 호출은 목록당 한 번이다(`CountingBroker` 테스트로 확인: 4종목 → 호출 1회, 30초 안 재조회 → 0회).
+- 화면 `/stocks/watchlist`(`features/watchlist`), `/stocks/[code]`(`features/stocks`). 종목 검색 콤보박스(300ms 디바운스, 시장·업종 표시, ETF 배지, 키보드 선택), 그룹 탭(전체 + 그룹, 개수 표시), 그룹 관리(이름 변경 = 그 그룹 항목들을 순서대로 PATCH), 메모·그룹 편집 다이얼로그, 위·아래 이동(PUT `/order`, 낙관적 갱신), 삭제(확인 다이얼로그), 30초 `refetchInterval`(`refetchIntervalInBackground: false`), 빈 상태의 `/stocks/screener` 링크, `SampleDataBadge`, `Disclaimer variant="investment"`.
+- 상세: 머리(종목명·코드·시장·업종·ETF 배지·현재가와 등락·담기/빼기 토글·샘플 배지), 기간 버튼 차트(1개월·3개월·6개월·1년, `LineChart`, 데이터 없음 안내), 지표 격자 10개(null은 "—", PER·PBR·ROE·EPS·시가총액 "?" → `/learn/per|pbr|roe|eps|market-cap`, 07 시드 slug 확인), ETF는 "ETF란?"(`/learn/etf`), "내 매매 기록 보기"(`/journal?tab=records&symbol=<code>`), 없는 코드는 404 화면.
+
+### 스펙에 없어서 정한 것(소유 범위 안)
+
+- 정렬: 그룹 이름 오름차순(가나다, Python 문자열 순서) → `sort_order` → `created_at` → `id`. `groups`도 같은 순서이고, `?group=`으로 걸러도 `groups`는 내 그룹 전체다. `?group=`(빈 값)은 전체다.
+- 새 항목과 다른 그룹으로 옮긴 항목은 그 그룹의 맨 뒤(`max(sort_order)+1`)에 놓는다.
+- 입력 검증(필드별 422는 `field_error`): `groupName`은 앞뒤 공백을 지우고 1~20자(`groupName`), `memo`는 공백을 지우고 200자 이하·빈 문자열은 null(`memo`), `code`가 공백뿐이면 `code`. PATCH의 `groupName: null`은 422다. `PUT /order`는 중복 id도 422(`ids`)이고 실패하면 순서를 바꾸지 않는다.
+- 남의 항목·없는 항목은 `404 NOT_FOUND`("관심종목을 찾을 수 없습니다."). 동시에 같은 종목을 담아 UNIQUE에 걸리면 409 "이미 관심종목에 있습니다."로 바꾼다. 404(없는 종목) → 409(중복) → 409(100개) 순서로 검사한다.
+- `metrics.per`·`pbr`는 소수 둘째 자리로 맞춘 문자열(`"31.86"`), `marketCap`은 정수다. `quote`는 `get_quotes` 결과만 쓴다(`price`·`change` 문자열, `changeRate` 숫자, `asOf`).
+- `source`: 항목은 08 `StockDetail.source`, 응답 최상위는 `MARKET_DATA_PROVIDER`(08 목록 API의 `source`와 같은 값). 프론트는 둘 중 하나라도 `mock`이면 샘플 배지를 붙인다.
+- 08 종목 마스터에서 빠진(상장폐지 등) 코드는 목록에 남겨 지울 수 있게 했다. 이때 `name`은 코드, `market`·`sector`·`metrics`는 null, `kind`는 `stock`이다(그래서 `market` 타입이 `string | null`이다).
+- 화면: 목록은 한 번에 받아 그룹 탭을 클라이언트에서 거른다. 그룹 탭을 고른 채 검색해 담으면 그 그룹에 담고, 전체 탭이면 "기본"에 담는다. 위·아래 이동은 같은 그룹 안에서만 된다. 메모 아이콘은 메모와 그룹(옮기기)을 함께 고치는 다이얼로그를 연다.
+- 콤보박스는 shadcn `Command` 대신 ARIA combobox를 직접 만들었다(서버 검색 결과를 그대로 보여 주기 위해). 입력 blur 뒤 150ms 동안은 목록을 열어 둬, 터치처럼 결과를 누르기 전에 blur가 먼저 와도 고를 수 있다.
+- 차트 기본 기간은 3개월이다. 1·3·6개월은 달력 기준(오늘이 그 달에 없는 날이면 그 달 마지막 날), 1년은 365일 전이다. 날짜는 KST 오늘 기준이다.
+- 가격은 국내 시장이면 원 단위 정수로, 변동 금액이 null이거나 0이면 등락률만 보여 준다(Mock 시세의 `change`는 항상 0이다).
+- ETF는 PER·PBR·ROE·EPS의 "?"만 빼고 시가총액 "?"는 남겼다(ETF에도 시가총액 값이 있다).
+- 404는 07 학습 상세와 같이 화면 안의 `EmptyState`로 보여 준다(데이터를 클라이언트에서 불러오므로 `notFound()`를 쓰지 않는다).
+
+### 확인 결과
+
+- 백엔드: `uv run ruff check .` 통과, `uv run ruff format --check .` 통과(241 files), `uv run pytest` 1049 passed(watchlist 12개 포함).
+- 마이그레이션: 빈 DB(`finance_12_cycle`, 확인 뒤 삭제)에서 `upgrade heads` → `downgrade base` → `upgrade heads` 성공, `alembic check` "No new upgrade operations detected."
+- 프론트: `npm run lint` 통과, `npx tsc --noEmit` 통과, `npm run test` 38 files·377 tests 통과(`tests/watchlist` 26개), `npm run build` 성공.
+- 실제 서버(슬롯 12, `seed-mock` 후, Orca isolated 프로필): 검색 → 담기(주식·ETF) → 목록(ETF 배지, PER·PBR "—", 등락 색) → 상세 → 차트(3개월) → 담기 토글 → ETF 상세("ETF란?") → 없는 코드 404 확인. 360px에서 `/stocks/watchlist`, `/stocks/005930`, `/stocks/069500` 모두 `scrollWidth` 360(가로 스크롤 없음).
+
+### 남은 일
+
+- 시세를 받지 못한 코드는 `get_stock_detail`이 내부에서 그 코드의 시세를 한 번 더 조회한다(08 동작). 정상 경로의 호출 수는 목록당 1회지만, 증권사 장애 때는 실패한 코드마다 추가 호출이 생길 수 있다. 줄이려면 08에 시세 없이 상세를 읽는 공개 함수가 필요하다.
+- `/journal?tab=records&symbol=`의 초기 종목 필터는 05b가 만든다. 12는 링크 주소만 테스트했다.
+- 실제 키움·토스 시세로는 확인하지 않았다(테스트와 화면 확인은 Mock).
