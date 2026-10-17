@@ -1,14 +1,21 @@
 import inspect
+import threading
+import time
 from datetime import date
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import delete as sql_delete
+from sqlalchemy import func, select, text
+from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.integrations.brokers.errors import BrokerError
 from app.integrations.brokers.mock import MockBroker
+from app.modules.auth.models import User
 from app.modules.market import service as market_service
+from app.modules.watchlist import repository as watchlist_repo
 from app.modules.watchlist import service
 from app.modules.watchlist.models import WatchlistItem
 
@@ -44,9 +51,18 @@ class CountingBroker(MockBroker):
         return super().get_quotes(codes)
 
 
-class FailingBroker(MockBroker):
+class FailingBroker(CountingBroker):
     def get_quotes(self, codes):
+        self.quote_calls.append(list(codes))
         raise BrokerError("BROKER_UNAVAILABLE")
+
+
+class EmptyBroker(CountingBroker):
+    """시세를 하나도 돌려주지 않는다(제공자 미지원·상장폐지 등)."""
+
+    def get_quotes(self, codes):
+        self.quote_calls.append(list(codes))
+        return []
 
 
 @pytest.fixture
@@ -65,6 +81,25 @@ def broker(monkeypatch):
     instance = CountingBroker()
     monkeypatch.setattr(market_service, "get_market_data_client", lambda: instance)
     return instance
+
+
+@pytest.fixture
+def market_calls(monkeypatch):
+    """watchlist가 부르는 08 공개 함수 호출을 기록한다. 목록·담기는 상세 조회를 부르지 않는다."""
+    calls = {"get_quotes": [], "get_stock_detail": []}
+    real_get_quotes = market_service.get_quotes
+
+    def get_quotes(codes):
+        calls["get_quotes"].append(list(codes))
+        return real_get_quotes(codes)
+
+    def get_stock_detail(db, code):
+        calls["get_stock_detail"].append(code)
+        return None
+
+    monkeypatch.setattr(market_service, "get_quotes", get_quotes)
+    monkeypatch.setattr(market_service, "get_stock_detail", get_stock_detail)
+    return calls
 
 
 def user_id(client) -> UUID:
@@ -137,16 +172,20 @@ def test_list_orders_by_group_sort_order_and_filters(auth_client, seeded, broker
     assert empty["items"] == [] and empty["source"] == "mock"
 
 
-def test_list_fetches_quotes_once_for_all_items(auth_client, seeded, broker, monkeypatch):
+def test_list_fetches_quotes_once_for_all_items(
+    auth_client, seeded, broker, monkeypatch, market_calls
+):
     codes = ["005930", "000660", "035420", "069500"]
     for code in codes:
         assert add(auth_client, code).status_code == 201
 
     fresh = CountingBroker()
     monkeypatch.setattr(market_service, "get_market_data_client", lambda: fresh)
+    market_calls["get_quotes"].clear()
     r = auth_client.get("/api/watchlist")
     assert r.status_code == 200
-    # 종목마다 따로 부르지 않고 한 번에 가져온다. 상세 조회는 같은 클라이언트 캐시를 쓴다.
+    # 종목마다 따로 부르지 않고 한 번에 가져온다. 종목 정보·지표는 스냅샷에서 읽는다.
+    assert market_calls == {"get_quotes": [codes], "get_stock_detail": []}
     assert fresh.quote_calls == [codes]
     assert all(item["quote"] for item in r.json()["items"])
     # 30초 캐시 안에서는 증권사를 다시 부르지 않는다.
@@ -154,17 +193,68 @@ def test_list_fetches_quotes_once_for_all_items(auth_client, seeded, broker, mon
     assert fresh.quote_calls == [codes]
 
 
-def test_quote_failure_returns_null_quote(auth_client, seeded, broker, monkeypatch):
-    assert add(auth_client, "005930").status_code == 201
-    assert add(auth_client, "069500").status_code == 201
-    failing = FailingBroker()
-    monkeypatch.setattr(market_service, "get_market_data_client", lambda: failing)
+def test_empty_quotes_do_not_trigger_per_stock_calls(
+    auth_client, seeded, monkeypatch, market_calls
+):
+    empty = EmptyBroker()
+    monkeypatch.setattr(market_service, "get_market_data_client", lambda: empty)
+    codes = ["005930", "000660", "035420", "069500"]
+    for code in codes:
+        assert add(auth_client, code).status_code == 201
+    market_calls["get_quotes"].clear()
+    empty.quote_calls.clear()
+
     r = auth_client.get("/api/watchlist")
     assert r.status_code == 200
+    # 시세가 비어도 목록 한 번에 get_quotes 1회, 증권사 호출 1회, 상세 조회 0회다.
+    assert market_calls == {"get_quotes": [codes], "get_stock_detail": []}
+    assert empty.quote_calls == [codes]
+    items = r.json()["items"]
+    assert [i["quote"] for i in items] == [None] * 4
+    assert items[0]["name"] == "삼성전자" and items[0]["metrics"]["per"] == "31.86"
+    assert items[3]["kind"] == "etf" and items[3]["metrics"]["per"] is None
+
+
+def test_broker_error_returns_null_quote_without_detail_calls(
+    auth_client, seeded, monkeypatch, market_calls
+):
+    failing = FailingBroker()
+    monkeypatch.setattr(market_service, "get_market_data_client", lambda: failing)
+    codes = ["005930", "069500"]
+    for code in codes:
+        assert add(auth_client, code).status_code == 201
+    market_calls["get_quotes"].clear()
+    failing.quote_calls.clear()
+
+    r = auth_client.get("/api/watchlist")
+    assert r.status_code == 200
+    assert market_calls == {"get_quotes": [codes], "get_stock_detail": []}
+    # 08 get_quotes가 일괄 실패를 잡아 코드별로 다시 조회하는 것은 08 설계다.
+    # watchlist는 그 위에 더 부르지 않는다.
+    assert failing.quote_calls[0] == codes
+    assert all(len(call) == 1 for call in failing.quote_calls[1:])
+    assert len(failing.quote_calls) <= 1 + len(codes)
     items = r.json()["items"]
     assert [i["quote"] for i in items] == [None, None]
-    assert items[0]["metrics"]["per"] == "31.86"
-    assert items[0]["name"] == "삼성전자"
+    assert items[0]["metrics"]["per"] == "31.86" and items[0]["name"] == "삼성전자"
+
+
+def test_get_quotes_raising_broker_error_returns_null_quote(
+    auth_client, seeded, broker, monkeypatch
+):
+    assert add(auth_client, "005930").status_code == 201
+    calls = []
+
+    def failing_get_quotes(codes):
+        calls.append(list(codes))
+        raise BrokerError("BROKER_UNAVAILABLE")
+
+    monkeypatch.setattr(market_service, "get_quotes", failing_get_quotes)
+    r = auth_client.get("/api/watchlist")
+    assert r.status_code == 200
+    assert calls == [["005930"]]
+    assert r.json()["items"][0]["quote"] is None
+    assert r.json()["items"][0]["metrics"]["pbr"] == "0.74"
 
 
 def test_add_errors(auth_client, seeded, broker, db):
@@ -317,15 +407,32 @@ def test_requires_authentication(client):
     assert delete(client, uuid4()).status_code == 401
 
 
-def test_delisted_stock_stays_listed_with_code_as_name(auth_client, seeded, broker, db):
-    item = add(auth_client, "005930").json()
+def test_stock_without_snapshot_uses_master_or_code(auth_client, seeded, broker, db):
+    gone = add(auth_client, "005930").json()
+    plain = add(auth_client, "000660").json()
+    # 000660은 최신 스냅샷이 없어 종목 마스터(search_stocks 정확 일치)로 채우고 지표는 null이다.
+    db.execute(text("DELETE FROM stock_snapshots WHERE code IN ('005930', '000660')"))
+    # 005930은 스냅샷도 없고 마스터에서도 빠져(상장폐지) 코드를 이름으로 쓴다.
     db.execute(text("UPDATE stocks SET listed = false WHERE code = '005930'"))
     db.commit()
-    rows = auth_client.get("/api/watchlist").json()["items"]
-    assert [(r["id"], r["name"], r["market"], r["metrics"]) for r in rows] == [
-        (item["id"], "005930", None, None)
-    ]
-    assert delete(auth_client, item["id"]).status_code == 204
+    rows = {r["id"]: r for r in auth_client.get("/api/watchlist").json()["items"]}
+    assert (rows[gone["id"]]["name"], rows[gone["id"]]["market"], rows[gone["id"]]["metrics"]) == (
+        "005930",
+        None,
+        None,
+    )
+    assert rows[gone["id"]]["kind"] == "stock" and rows[gone["id"]]["source"] == "mock"
+    sk = rows[plain["id"]]
+    assert (sk["name"], sk["market"], sk["kind"], sk["metrics"]) == (
+        "SK하이닉스",
+        "KOSPI",
+        "stock",
+        None,
+    )
+    assert sk["quote"]["price"]
+    assert delete(auth_client, gone["id"]).status_code == 204
+    # 마스터에서 빠진 종목은 새로 담을 수 없다.
+    assert add(auth_client, "005930").status_code == 404
 
 
 def test_service_functions_match_contract(auth_client, other_auth_client, seeded, broker, db):
@@ -351,3 +458,78 @@ def test_service_functions_match_contract(auth_client, other_auth_client, seeded
     with pytest.raises(AppError) as missing:
         service.add_item(db, owner, "nope")
     assert (missing.value.status_code, missing.value.code) == (404, "NOT_FOUND")
+
+
+def test_concurrent_adds_never_exceed_limit(test_engine, monkeypatch):
+    """99개인 사용자가 서로 다른 종목을 동시에 담아도 정확히 100개에서 멈춘다.
+
+    별도 연결·스레드에서 실제로 커밋해야 하므로 테스트 트랜잭션(db 픽스처)을 쓰지 않고,
+    끝나면 만든 사용자를 지운다(관심종목은 CASCADE로 함께 지워진다).
+    08 종목 데이터는 DB에 커밋하지 않도록 공개 함수를 가짜로 바꾼다.
+    """
+
+    def search_stocks(db, query, *, limit=20, kind=None):
+        return [
+            SimpleNamespace(
+                code=query, name=f"종목{query}", market="KOSPI", sector=None, kind="stock"
+            )
+        ]
+
+    monkeypatch.setattr(market_service, "search_stocks", search_stocks)
+    monkeypatch.setattr(
+        market_service, "list_snapshot_rows", lambda db, as_of=None: SimpleNamespace(rows=[])
+    )
+    monkeypatch.setattr(market_service, "get_quotes", lambda codes: [])
+    real_count = watchlist_repo.count_items
+
+    def slow_count(db, user_id):
+        # 개수 확인과 삽입 사이를 넓혀, 잠금이 없으면 경합이 반드시 드러나게 한다.
+        value = real_count(db, user_id)
+        time.sleep(0.2)
+        return value
+
+    monkeypatch.setattr(watchlist_repo, "count_items", slow_count)
+
+    with Session(test_engine) as setup:
+        user = User(email=f"watchlist-race-{uuid4()}@example.com", password_hash="unused")
+        setup.add(user)
+        setup.flush()
+        owner = user.id
+        setup.add_all(
+            WatchlistItem(user_id=owner, stock_code=f"F{n:04}", sort_order=n) for n in range(99)
+        )
+        setup.commit()
+
+    codes = [f"R{n:04}" for n in range(8)]
+    barrier = threading.Barrier(len(codes))
+    results: dict[str, object] = {}
+
+    def worker(code):
+        with Session(test_engine) as session:
+            barrier.wait()
+            try:
+                service.add_item(session, owner, code)
+                results[code] = "created"
+            except AppError as exc:
+                results[code] = (exc.status_code, exc.code)
+
+    try:
+        threads = [threading.Thread(target=worker, args=(code,)) for code in codes]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+        assert sorted(results) == sorted(codes)
+        assert list(results.values()).count("created") == 1
+        assert sorted(v for v in results.values() if v != "created") == [(409, "CONFLICT")] * 7
+        with Session(test_engine) as check:
+            total = check.scalar(
+                select(func.count())
+                .select_from(WatchlistItem)
+                .where(WatchlistItem.user_id == owner)
+            )
+        assert total == 100
+    finally:
+        with Session(test_engine) as cleanup:
+            cleanup.execute(sql_delete(User).where(User.id == owner))
+            cleanup.commit()

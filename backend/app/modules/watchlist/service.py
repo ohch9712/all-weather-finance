@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
@@ -5,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.errors import AppError, field_error
+from app.integrations.brokers.errors import BrokerError
 from app.modules.market import service as market_service
 from app.modules.watchlist import repository as repo
 from app.modules.watchlist.schemas import (
@@ -34,26 +36,70 @@ def _ratio(value: Decimal | None) -> Decimal | None:
     return None if value is None else value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
+@dataclass(frozen=True)
+class _StockInfo:
+    name: str
+    market: str
+    sector: str | None
+    kind: str
+    # 최신 스냅샷 행(08 SnapshotRow). 스냅샷이 없으면 None이고 metrics가 null이다.
+    snapshot: object | None
+    source: str | None
+
+
+def _stock_infos(db, codes: list[str]) -> dict[str, _StockInfo]:
+    """코드별 종목 정보와 지표. DB만 읽고 시세(증권사)는 부르지 않는다."""
+    wanted = set(codes)
+    rows = {
+        row.code: row for row in market_service.list_snapshot_rows(db).rows if row.code in wanted
+    }
+    infos = {}
+    for code in codes:
+        row = rows.get(code)
+        if row is not None:
+            infos[code] = _StockInfo(row.name, row.market, row.sector, row.kind, row, row.source)
+            continue
+        # 최신 스냅샷에 없는 코드만 종목 마스터에서 정확히 같은 코드를 찾는다.
+        match = _find_stock(db, code)
+        if match is not None:
+            infos[code] = _StockInfo(match.name, match.market, match.sector, match.kind, None, None)
+    return infos
+
+
+def _find_stock(db, code: str):
+    matches = market_service.search_stocks(db, code, limit=1)
+    return matches[0] if matches and matches[0].code == code else None
+
+
+def _quotes(codes: list[str]) -> dict:
+    """목록 전체 시세를 08 get_quotes 한 번으로 받는다(30초 캐시). 받지 못한 코드는 빠진다."""
+    if not codes:
+        return {}
+    try:
+        quotes = market_service.get_quotes(codes)
+    except BrokerError:
+        return {}
+    return {quote.code: quote for quote in quotes}
+
+
 def _views(db, items) -> list[WatchlistItemView]:
     codes = list(dict.fromkeys(item.stock_code for item in items))
-    # 시세는 08 get_quotes로 한 번에 받는다(30초 캐시). 받지 못한 코드는 quote가 null이다.
-    quotes = {quote.code: quote for quote in market_service.get_quotes(codes)} if codes else {}
-    # get_quotes가 같은 운영자 클라이언트 캐시를 채웠으므로 상세 조회가 증권사를 다시 부르지 않는다.
-    details = {code: market_service.get_stock_detail(db, code) for code in codes}
+    infos = _stock_infos(db, codes)
+    quotes = _quotes(codes)
     fallback_source = market_source()
     views = []
     for item in items:
-        detail = details[item.stock_code]
+        info = infos.get(item.stock_code)
         quote = quotes.get(item.stock_code)
-        snapshot = detail.snapshot if detail else None
+        snapshot = info.snapshot if info else None
         views.append(
             WatchlistItemView(
                 id=item.id,
                 code=item.stock_code,
-                name=detail.name if detail else item.stock_code,
-                market=detail.market if detail else None,
-                sector=detail.sector if detail else None,
-                kind=detail.kind if detail else "stock",
+                name=info.name if info else item.stock_code,
+                market=info.market if info else None,
+                sector=info.sector if info else None,
+                kind=info.kind if info else "stock",
                 group_name=item.group_name,
                 memo=item.memo,
                 sort_order=item.sort_order,
@@ -72,7 +118,7 @@ def _views(db, items) -> list[WatchlistItemView]:
                 )
                 if snapshot
                 else None,
-                source=detail.source if detail else fallback_source,
+                source=(info.source if info else None) or fallback_source,
                 created_at=item.created_at,
             )
         )
@@ -113,6 +159,12 @@ def list_groups(db, user_id) -> list[str]:
     return sorted(repo.group_names(db, user_id))
 
 
+def _conflict(db, message: str) -> AppError:
+    # 사용자 잠금을 잡은 뒤의 실패는 트랜잭션을 끝내 잠금을 바로 푼다(성공도 커밋으로 끝난다).
+    repo.end_transaction(db)
+    return AppError(409, "CONFLICT", message)
+
+
 def add_item(
     db, user_id, code: str, *, group_name: str = DEFAULT_GROUP, memo: str | None = None
 ) -> WatchlistItemView:
@@ -121,12 +173,15 @@ def add_item(
         raise field_error("code", "종목 코드를 입력해 주세요.")
     group = _group_name(group_name)
     memo = _memo(memo)
-    if market_service.get_stock_detail(db, code) is None:
+    # 08 종목 마스터에서 코드가 정확히 같은 종목만 담는다(DB만 읽고 시세는 부르지 않는다).
+    if _find_stock(db, code) is None:
         raise AppError(404, "NOT_FOUND", "종목을 찾을 수 없습니다.")
+    # 같은 사용자의 담기를 직렬화해 동시 요청에서도 100개 상한과 정렬 순서를 지킨다.
+    repo.lock_user(db, user_id)
     if repo.item_by_code(db, user_id, code) is not None:
-        raise AppError(409, "CONFLICT", "이미 관심종목에 있습니다.")
+        raise _conflict(db, "이미 관심종목에 있습니다.")
     if repo.count_items(db, user_id) >= MAX_ITEMS:
-        raise AppError(409, "CONFLICT", f"관심종목은 {MAX_ITEMS}개까지 담을 수 있습니다.")
+        raise _conflict(db, f"관심종목은 {MAX_ITEMS}개까지 담을 수 있습니다.")
     try:
         item = repo.create(
             db,
@@ -139,7 +194,7 @@ def add_item(
             ),
         )
     except IntegrityError:
-        # 동시에 같은 종목을 담은 경우
+        # 잠금 밖에서 같은 종목이 먼저 들어간 경우(UNIQUE)
         db.rollback()
         raise AppError(409, "CONFLICT", "이미 관심종목에 있습니다.") from None
     return _views(db, [item])[0]
@@ -147,14 +202,14 @@ def add_item(
 
 def update_item(db, user_id, item_id: UUID, changes: dict) -> WatchlistItemView:
     item = _require_item(db, user_id, item_id)
-    if "group_name" in changes:
-        group = _group_name(changes["group_name"])
-        if group != item.group_name:
-            # 옮긴 그룹의 맨 뒤에 둔다.
-            item.sort_order = repo.next_sort_order(db, user_id, group)
-            item.group_name = group
-    if "memo" in changes:
-        item.memo = _memo(changes["memo"])
+    group = _group_name(changes["group_name"]) if "group_name" in changes else item.group_name
+    memo = _memo(changes["memo"]) if "memo" in changes else item.memo
+    if group != item.group_name:
+        # 옮긴 그룹의 맨 뒤에 둔다. 동시에 옮겨도 순서가 겹치지 않게 사용자 잠금 안에서 센다.
+        repo.lock_user(db, user_id)
+        item.sort_order = repo.next_sort_order(db, user_id, group)
+        item.group_name = group
+    item.memo = memo
     repo.save(db, item)
     return _views(db, [item])[0]
 
