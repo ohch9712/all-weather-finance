@@ -3,6 +3,15 @@
 > 웨이브 3 · 브랜치 `feature/14-holdings-sync` · 구현 codex · 검증 codex `gpt-6.1-sol` / `xhigh`
 > 선행: 02(자산배분), 08(증권사 게이트웨이)이 develop에 병합된 상태.
 > **착수 직전 갱신**: 코디네이터는 02의 `holdings` 실제 코드와 08 `## 구현 결과`의 `HOLDINGS` 구현 여부를 확인한다. 실제 어댑터가 하나도 잔고를 지원하지 않으면 Mock 전용으로 진행하고 그 사실을 적는다.
+> **갱신함(2026-10-17, develop `8a5d8f4` 기준)**: 08은 세 공급자 모두 `HOLDINGS`를 구현했다.
+>
+> | 공급자 | 잔고 | 예수금(`cash_krw`) | 비고 |
+> | --- | --- | --- | --- |
+> | 키움 | `kt00018`, 국내 잔고 | `None` | `market=OTHER` |
+> | 토스 | `getHoldings` | `None` | 원화 환산값 없는 USD 보유는 `eval_amount=None` |
+> | Mock | 5종목(각 10주) | `5000000` | |
+>
+> 02의 `holdings.source` CHECK가 `mock`을 허용하지 않아서, 개발용 Mock 연결(`provider="mock"`)로 동기화할 수 있게 4·6절에 `mock`을 더했다. 연결 별칭·공급자는 08의 `market.service.list_connections`로 읽는다(6.1).
 
 ## 1. 목표
 
@@ -37,6 +46,7 @@
 
 - `holdings`에 컬럼 추가: `external_ref varchar(64) NULL`, `connection_id uuid NULL`(FK 없음), `synced_at timestamptz NULL`, `class_override boolean NOT NULL DEFAULT false`.
 - 부분 유일 인덱스 `(user_id, connection_id, external_ref) WHERE external_ref IS NOT NULL`.
+- `holdings.source` CHECK를 `source in ('manual','kiwoom','toss','codef','mock')`로 바꾼다(02의 `SOURCE_CHECK` 상수도 같이 고친다). downgrade는 `mock` 행을 지운 뒤 예전 CHECK로 되돌린다.
 
 ## 5. 자산군 자동 분류 (`allocation/classify.py`)
 
@@ -56,7 +66,9 @@
 ### 6.1 `POST /api/allocation/holdings/sync`
 
 - 요청 `{"connectionId": "…"}`
-- `market.service.get_user_broker_client(db, user_id, connection_id).get_holdings()` → `upsert_synced_holdings(...)`
+- `market.service.get_user_broker_client(db, user_id, connection_id).get_holdings()` → `upsert_synced_holdings(...)` → commit
+- 연결의 공급자(`provider`: `kiwoom`·`toss`·`mock`)와 별칭(`label`)은 `market.service.list_connections(db, user_id)`(08, `list[Connection]`)에서 같은 `id`를 찾아 쓴다. 공급자 값이 그대로 `source`다.
+- `BrokerHolding` → `SyncedHolding`: `external_ref=code`, `name=name`(50자를 넘으면 자른다), `amount=eval_amount`. `eval_amount`가 `None`이면 `skipped`.
 - 응답 `200 HoldingSyncResult`
 
 ```json
@@ -77,16 +89,18 @@ class SyncedHolding:
     amount: int              # 원화 평가금액
     asset_class: AssetClass | None = None   # None이면 5절 분류
 
-def upsert_synced_holdings(db, user_id, *, source: Literal["kiwoom", "toss", "codef"], connection_id: UUID,
+def upsert_synced_holdings(db, user_id, *, source: Literal["kiwoom", "toss", "codef", "mock"], connection_id: UUID,
                            items: list[SyncedHolding]) -> HoldingSyncResult
 ```
+
+- flush와 점수 스냅샷 갱신까지 하고 commit하지 않는다. 14의 동기화 API와 17이 트랜잭션을 끝낸다(10의 `import_entries`와 같은 규칙).
 
 - `(connection_id, external_ref)`가 같은 행이 있으면 이름·금액·`synced_at`을 갱신한다. `class_override=false`일 때만 자산군을 다시 분류한다.
 - 없으면 새로 만든다(`source`, `include_in_allocation=true`).
 - 이번 목록에 없는 같은 연결의 기존 행은 삭제한다(`removed`).
-- 08 결과의 예수금(`cash_krw`)은 `external_ref="__cash__"`, 이름 "예수금(<연결 별칭>)", `cash`.
+- 08 결과의 예수금(`cash_krw`)은 `external_ref="__cash__"`, 이름 "예수금(<연결 별칭>)", `cash`. `cash_krw`가 `None`이면(키움·토스) 예수금 행을 만들지 않는다.
 - 금액은 0 이상 정수. 외화이고 원화 평가금액이 없으면 `skipped`.
-- 끝나면 02의 점수 스냅샷 갱신을 호출한다.
+- 끝나면 02의 점수 스냅샷 갱신(`service._refresh_snapshot`)을 호출한다.
 
 ### 6.3 02 코드 수정
 
@@ -96,8 +110,9 @@ def upsert_synced_holdings(db, user_id, *, source: Literal["kiwoom", "toss", "co
 
 ## 7. 화면 명세 (`/allocation/assets`)
 
-- "증권사 잔고 불러오기" 버튼 → 다이얼로그: 활성 연결 선택(없으면 `/settings/connections` 안내) → 실행 → 결과 요약(추가·갱신·삭제·건너뜀 목록).
+- "증권사 잔고 불러오기" 버튼 → 다이얼로그: 활성 연결 선택(없으면 `/settings/connections` 안내) → 실행 → 결과 요약(추가·갱신·삭제·건너뜀 목록). 연결 목록은 08의 `GET /api/market/connections`를 `features/allocation/api.ts`에서 부른다(`status=active`만 선택 가능).
 - 동기화 자산 행: 증권사 배지, 마지막 동기화 시각, 자동 분류 근거 툴팁, 분류를 바꿨으면 "직접 지정" 표시, 금액 수정 비활성.
+- Mock 연결(`source=mock`)로 불러온 행에는 "샘플" 배지를 달고, 그런 행이 하나라도 있으면 목록에 `Disclaimer variant="sample"`을 붙인다.
 - 연결별 "다시 동기화" 버튼.
 
 ## 8. 테스트

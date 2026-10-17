@@ -3,6 +3,7 @@
 > 웨이브 3 · 브랜치 `feature/10-ledger-import` · 구현 codex · 검증 codex `gpt-6.1-sol` / `xhigh`
 > 선행: 03(가계부), 04(임포트 엔진)가 develop에 병합된 상태.
 > **착수 직전 갱신**: 코디네이터는 디스패치 전에 03·04의 실제 코드(`ledger/service.py`, `imports/registry.py`, `imports/service.py`)와 이 문서를 대조하고, 다른 점을 고친 뒤 디스패치한다.
+> **갱신함(2026-10-17, develop `8a5d8f4` 기준)**: 04의 `ImportKind.normalize_row(values)`는 `user_id`를 받지 않고 `commit(db, user_id, rows, CommitContext(job_id, file_name))`은 flush까지만 한다(commit·rollback은 엔진). 03의 기본 지출 카테고리 16개(`ledger_0001`)에 6절 표의 이름이 모두 있다. 이에 맞춰 5·6·7·9절에 중복 키 계산 위치, 같은 파일 안 같은 거래, LLM 얻는 방법, 짧은 영문 키워드, 순액 경계 규칙을 더했다.
 
 ## 1. 목표
 
@@ -70,9 +71,10 @@ UNIQUE `(user_id, merchant_key)`.
 | `installment` | 할부 | text | 아니오 | 할부, 할부개월, 할부기간, 이용구분 |
 | `merchantCategory` | 업종 | text | 아니오 | 업종, 가맹점업종, 업종명 |
 
-- `normalize_row`: 금액이 음수이거나 `status=cancelled`면 `is_cancellation=True`, 금액은 절댓값. 금액 0은 오류("금액이 0입니다."). `kind`는 항상 `expense`.
-- `dedup_hash` = `sha256("{user_id}|{occurred_on}|{merchant_key}|{amount}|{approval_no or ''}|{is_cancellation}")` 16진수.
-- `commit`: 분류(6절) → 삽입(`source='import'`, `import_batch_id=job_id`) → 같은 `dedup_hash`가 있으면 `skipped_duplicates`. 한 트랜잭션.
+- `normalize_row`: 금액이 음수이거나 `status=cancelled`면 `is_cancellation=True`, 금액은 절댓값. 금액 0은 오류("금액이 0입니다."). `kind`는 항상 `expense`. 결과는 `LedgerImportRow`(9절)다.
+- `dedup_hash` = `sha256("{user_id}|{occurred_on}|{merchant_key}|{amount}|{approval_no or ''}|{is_cancellation}")` 16진수. `normalize_row`에는 `user_id`가 없으므로 `import_entries`(9절)가 계산한다.
+  - 같은 호출(한 파일) 안에 위 문자열이 같은 행이 여러 개면, 두 번째부터 문자열 끝에 `|{n}`을 붙인다(n은 1, 2, …, 파일 안 순서대로). 승인번호 없는 파일의 같은 날 같은 금액 거래 두 건(커피 두 잔)을 둘 다 저장하면서, 같은 파일이나 기간이 겹치는 파일을 다시 올리면 같은 키가 나와 중복으로 걸러진다.
+- `commit`: `import_entries(db, user_id, rows, source="import", batch_id=ctx.job_id)`를 부른다. 분류(6절) → 삽입(`source='import'`, `payment_method='card'`, `import_batch_id=job_id`) → 같은 `dedup_hash`가 이미 있으면 `skipped_duplicates`. flush까지만 하고 commit·rollback은 04 엔진이 한다(한 트랜잭션).
 - `llm_hint`: "한국 신용·체크카드 이용내역 표다. 결제일·결제예정금액 열은 이용일·이용금액이 아니다."
 
 ## 6. 카테고리 자동 분류 (`ledger/categorize.py`)
@@ -97,15 +99,19 @@ UNIQUE `(user_id, merchant_key)`.
 | 생활용품 | 다이소, 올리브영, 이마트, 홈플러스, 롯데마트, 코스트코, 편의점, GS25, CU, 세븐일레븐, 이마트24 |
 | 쇼핑 | 쿠팡, 11번가, G마켓, 지마켓, 옥션, 무신사, SSG, 네이버페이, 카카오페이, 위메프, 티몬, 29CM |
 
+- 영문·숫자로만 된 3자 이하 키워드(`KT`, `CU`, `SKT`, `SRT`, `CGV`, `SSG` 등)는 앞뒤가 영문·숫자가 아닐 때만 일치로 본다(`CU 강남점`은 일치, `CUCKOO`는 불일치). 나머지 키워드는 포함 여부로 본다.
+
 3. LLM 일괄 분류: 1·2로 정하지 못한 **서로 다른 가맹점**을 최대 200개씩 묶어 `llm.generate(task="ledger.categorize", system=…, content=JSON, output=CategorizeOutput)`(personal 등급, effort·max_tokens는 작업 등록부). `content` = `{"categories": [지출 카테고리 이름들], "merchants": [{"merchant": "…", "merchantCategory": "업종" | null}]}`(금액·카드번호·승인번호는 보내지 않는다). 출력 `{"items": [{"merchant": "…", "category": "식비" | null}]}`. 모르는 이름·null은 4로.
 4. "기타 지출".
 
 - LLM이 꺼져 있거나 오류면 3을 건너뛴다. 저장은 실패시키지 않는다.
+- 04의 `commit` 콜백과 `import_entries`에는 LLM 인자가 없다. 분류 모듈이 `app.integrations.llm.deps.get_structured_llm()`을 직접 불러 얻는다(04의 `create_job_from_table`과 같은 방식). 테스트는 이 호출을 monkeypatch로 `FakeStructuredLLM`으로 바꾼다.
 
 ### 6.1 규칙 학습
 
-- `PATCH /api/ledger/entries/{id}`로 `source`가 `import`·`codef`인 내역의 카테고리를 바꾸면 그 가맹점의 내 규칙을 upsert한다.
-- `POST /api/ledger/merchant-rules` `{"merchant": "김밥천국 강남점", "categoryId": "…", "applyToExisting": true}` → 규칙 upsert, `applyToExisting`이면 같은 `merchant_key`의 내 임포트 내역을 모두 그 카테고리로 바꾸고 바뀐 개수를 돌려준다. `GET /api/ledger/merchant-rules`, `DELETE /api/ledger/merchant-rules/{id}`.
+- `PATCH /api/ledger/entries/{id}`로 `source`가 `import`·`codef`인 내역의 카테고리를 바꾸면 그 가맹점의 내 규칙을 upsert한다(가맹점이 비어 있으면 건너뛴다). 규칙의 카테고리는 지출 카테고리만 된다(아니면 03과 같은 `categoryId` `422`).
+- `POST /api/ledger/merchant-rules` `{"merchant": "김밥천국 강남점", "categoryId": "…", "applyToExisting": true}` → 규칙 upsert, `applyToExisting`이면 같은 `merchant_key`의 내 내역 중 `source`가 `import`·`codef`인 것을 모두 그 카테고리로 바꾸고 바뀐 개수를 돌려준다(수동 입력 내역은 바꾸지 않는다).
+- 규칙의 카테고리가 지워지면(03의 내 카테고리 삭제) 규칙도 함께 지워진다(FK `ON DELETE CASCADE`). `GET /api/ledger/merchant-rules`, `DELETE /api/ledger/merchant-rules/{id}`.
 
 ### 6.2 가져오기 묶음 조회
 
@@ -115,8 +121,12 @@ UNIQUE `(user_id, merchant_key)`.
 
 ## 7. 요약 계산 변경
 
-- 지출 합계·카테고리별·일별·상위 사용처는 `is_cancellation=false` 금액 합에서 `is_cancellation=true` 금액 합을 뺀 순액이다. 수입은 영향 없다.
-- 03의 테스트는 그대로 통과해야 하고, 취소 거래 테스트를 더한다.
+- 지출 합계·카테고리별·일별·상위 사용처는 `is_cancellation=false` 금액 합에서 `is_cancellation=true` 금액 합을 뺀 순액이다. 수입은 영향 없다. 추이(`GET /api/ledger/trend`)의 월 지출도 같은 순액이다.
+- 지난달 결제를 이번 달에 취소하면 순액이 음수가 될 수 있다. 경계 규칙:
+  - 지출 합계와 일별 지출은 0 미만이면 0으로 둔다.
+  - 카테고리별·상위 사용처에는 순액이 0보다 큰 항목만 넣는다. 카테고리 비율의 분모는 표에 넣은 지출 카테고리 금액의 합이다(0으로 나누지 않는다).
+  - 상위 사용처의 `count`는 취소가 아닌 내역의 건수다.
+- 03의 테스트는 그대로 통과해야 하고, 취소 거래 테스트(같은 달 취소, 지난달 결제의 이번 달 취소)를 더한다.
 
 ## 8. PDF·이미지 추출
 
@@ -143,7 +153,8 @@ class LedgerImportRow:
 def import_entries(db, user_id, rows: list[LedgerImportRow], *, source: Literal["import", "codef"], batch_id: UUID | None = None) -> ImportResult
 ```
 
-- 분류·중복 제거·삽입을 한다. `ImportResult`는 04의 타입이다. 17이 CODEF 승인내역 저장에 쓴다.
+- 분류·중복 제거·삽입을 한다. `ImportResult`는 04의 타입(`app.modules.imports.registry`)이고, `errors`의 `row_number`는 `rows`의 1부터 센 순서다. 17이 CODEF 승인내역 저장에 쓴다.
+- flush까지만 하고 commit하지 않는다. 04 엔진의 `commit` 콜백(5절)과 17의 동기화가 트랜잭션을 끝낸다.
 
 ## 10. 화면 명세
 

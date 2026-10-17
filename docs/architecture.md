@@ -248,13 +248,13 @@ features/<module>/
 | foundation | `sessions` | id, user_id, token_hash(unique), expires_at, created_at | 01a |
 | foundation | `user_profiles` | user_id(PK), birth_year, nickname, created_at, updated_at | 01a |
 | allocation | `risk_assessments` | id, user_id, survey_version, answers(JSONB), score, risk_profile, created_at | 02 |
-| allocation | `holdings` | id, user_id, name, asset_class, amount, include_in_allocation, source, memo, created_at, updated_at (+14: external_ref, connection_id, synced_at, class_override) | 02, 14 |
+| allocation | `holdings` | id, user_id, name, asset_class, amount, include_in_allocation, source(`manual`/`kiwoom`/`toss`/`codef`, +14: `mock`), memo, created_at, updated_at (+14: external_ref, connection_id, synced_at, class_override) | 02, 14 |
 | allocation | `allocation_scores` | id, user_id, scored_on(사용자·날짜 unique), score, grade, total_amount, actual_weights(JSONB), target_weights(JSONB, 목표 반영 권장 비중), age_band, risk_profile, created_at, updated_at | 02 |
 | allocation | `allocation_situations` | user_id(PK), monthly_expense, dependents, consumer_debt, created_at, updated_at | 02 |
 | allocation | `financial_goals` | id, user_id, goal_type, title, target_amount, target_date, created_at, updated_at | 02 |
 | ledger | `ledger_categories` | id, user_id(null=기본), kind(`income`/`expense`), name, sort_order | 03 |
 | ledger | `ledger_entries` | id, user_id, kind, occurred_on, amount, category_id, merchant, payment_method, memo, source, dedup_hash, created_at, updated_at (+10: card_name, approval_no, is_cancellation, import_batch_id) | 03, 10 |
-| ledger | `ledger_merchant_rules` | id, user_id, merchant_pattern, category_id, created_at | 10 |
+| ledger | `ledger_merchant_rules` | id, user_id, merchant_key, category_id, created_at, updated_at | 10 |
 | imports | `import_jobs` | id, user_id, kind, status, file_name, sheet_names, header_row, columns(JSONB), rows(JSONB), mapping(JSONB), mapping_source, expires_at, created_at | 04 |
 | journal | `trades` | id, user_id, traded_at, market, symbol_code, symbol_name, side, quantity, price, currency, fee, tax, broker, source, dedup_hash, created_at, updated_at (+05b: cost_estimated, +11: connection_id, external_id, synced_at) | 05, 05b, 11 |
 | journal | `trade_cost_settings` | user_id(PK), krx_commission_rate, krx_sell_tax_rate, us_commission_rate, updated_at | 05b |
@@ -320,7 +320,7 @@ features/<module>/
 | `journal_0003` | journal | 11 | trades 컬럼 추가 |
 | `watchlist_0001` | watchlist | 12 | watchlist_items |
 | `screener_0001` | screener | 13 | saved_screens |
-| `allocation_0002` | allocation | 14 | holdings 컬럼 추가 |
+| `allocation_0002` | allocation | 14 | holdings 컬럼 추가, source CHECK에 `mock` 추가 |
 | `connectors_0001` | connectors | 17 | connector_accounts, connector_syncs |
 
 ## 8. 모듈 간 서비스 함수 (공개 인터페이스)
@@ -339,11 +339,11 @@ def get_target_allocation(db, user_id) -> TargetAllocation        # 나이대·�
 def get_recommendation(db, user_id) -> Recommendation             # 목표 반영 권장 배분·관리 방향·추천 이유(02 7.10). 부수 효과 없음
 def get_allocation_report(db, user_id) -> AllocationReport        # 보유·실제 비중·목표 반영 권장 비중·점수·등급·리밸런싱
 def get_asset_breakdown(db, user_id) -> AssetBreakdown            # 배분 대상 자산의 자산군별 합계와 제외 자산 합계(원)
-def upsert_synced_holdings(db, user_id, *, source: str, connection_id: UUID, items: list[SyncedHolding]) -> HoldingSyncResult   # 14가 추가
+def upsert_synced_holdings(db, user_id, *, source: str, connection_id: UUID, items: list[SyncedHolding]) -> HoldingSyncResult   # 14가 추가. flush까지(commit은 호출자)
 
 # app/modules/ledger/service.py  (03, 10)
 def get_monthly_summary(db, user_id, month: date) -> MonthlySummary   # month는 그 달 1일
-def import_entries(db, user_id, rows: list[LedgerImportRow], *, source: str, batch_id: UUID | None = None) -> ImportResult   # 10이 추가, 17이 사용
+def import_entries(db, user_id, rows: list[LedgerImportRow], *, source: str, batch_id: UUID | None = None) -> ImportResult   # 10이 추가, 17이 사용. flush까지(commit은 호출자)
 
 # app/modules/imports/registry.py  (04)
 def register_import_kind(kind: ImportKind) -> None
@@ -376,6 +376,7 @@ def get_progress(db, user_id) -> LearnProgress
 # app/modules/market/service.py  (08)
 def get_market_data_client() -> BrokerClient                     # MARKET_DATA_PROVIDER 기준 운영자 클라이언트
 def get_user_broker_client(db, user_id, connection_id: UUID) -> BrokerClient   # BROKER_NOT_CONNECTED
+def list_connections(db, user_id) -> list[Connection]            # 내 증권사 연결(공급자·별칭·상태, 비밀값 없음). 14가 사용
 def search_stocks(db, query: str, *, limit: int = 20) -> list[StockSummary]
 def get_stock_detail(db, code: str) -> StockDetail | None
 def get_quotes(codes: list[str]) -> list[Quote]                   # 30초 메모리 캐시
