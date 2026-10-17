@@ -158,3 +158,26 @@ def import_trades(db, user_id, rows: list[TradeImportRow], *, source: str, batch
 4. 05의 기존 API·테스트가 깨지지 않았다.
 5. `import_trades` 시그니처가 8절과 같다.
 6. 사용자 격리 404.
+
+## 구현 결과
+
+- `journal_0003`에 연결 ID·체결 ID·동기화 시각, 부분 유일 인덱스와 Mock 원천 CHECK를 추가했다. downgrade는 Mock 거래를 삭제하고 이전 CHECK와 컬럼으로 되돌린다.
+- `journal_trades`를 기존 임포트 엔진에 등록했다. 5절 필드·동의어, 금액÷수량 단가 계산, 종목명 정확 일치 검색, 누락 비용 추정, 같은 파일의 동일 행 `|n` 구분과 재업로드 중복 제외를 구현했다. 실제 증권사 샘플이 없어 프리셋은 만들지 않았다.
+- `TradeImportRow`·`import_trades` 공개 계약을 추가했다. 소비 함수는 flush만 하며 커밋·롤백은 임포트 엔진이 담당한다. 기존 수동 입력의 비용 추정과 `dedup_hash=NULL` 동작은 유지한다.
+- 체결 동기화와 연결별 상태 API를 구현했다. 체결 ID 우선 갱신·변화 없음 판정, 시각 없는 수동·파일 거래와 일대일 중복 비교, 시장 변환, 키움 미제공 비용 추정과 국내 ETF 거래세 0을 적용했다. 같은 사용자의 파일 저장·동기화는 트랜잭션 advisory lock으로 직렬화한다.
+- 보유 현황에 KRX 현재가·평가금액·평가손익·수익률·시세 원천을 추가했다. 공개 서비스의 `with_quotes` 기본값은 false, API의 `withQuotes` 기본값은 true다. 시세 실패·미제공·미지원 해외 종목의 평가 값은 null이다.
+- `/journal/import`에 파일 위저드와 활성 연결 선택·최근 30일 기본 기간·최대 90일 검증·결과 요약·마지막 동기화 시각·토스 미지원 안내·비용 설정 링크를 추가했다. 파일 저장과 동기화 완료 시 `journal` 전체 쿼리를 무효화한다. 보유 평가 항목과 기록·상세의 Mock 샘플 배지를 추가했다.
+- 임포트 엔진에 행별 경고 확장 없이 종목코드 없는 파일의 저장 시 검색 안내를 가져오기 화면 상단에 항상 표시한다. 동기화가 정상 완료된 기존 체결도 `synced_at`을 갱신하되 업무 값이 같으면 `unchanged`로 집계한다. 별도 상태 테이블 없이 연결에 저장된 거래의 최대 동기화 시각과 건수를 조회한다.
+
+검증 결과:
+
+- `scripts/worktree-setup.sh --skip-install`: 슬롯 11·8011/3011·`finance_11` 준비 성공. 의존성 추가·재설치 없음.
+- 백엔드 `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`: 통과, 1,144개 테스트. 기존 05·05b 회귀와 신규 파일·동기화·평가손익 테스트 포함.
+- 별도 빈 DB `finance_11_impl_verify`에서 `uv run alembic upgrade heads` → `uv run alembic downgrade base` → `uv run alembic upgrade heads`: 통과, DB 삭제 완료.
+- 프론트 `npm run lint`, `npx tsc --noEmit`, `npm run test -- --maxWorkers=2`, `npm run build`: 통과, 39개 파일·378개 테스트. 첫 기본 병렬 실행은 기존 가계부 테스트 1건이 5초 제한을 초과했고, 동시 실행 수를 줄인 전체 재검사에서 통과했다.
+- Playwright의 독립 Chrome context에서 실제 로컬 API·화면으로 파일 업로드→매핑→미리보기→저장, Mock 첫 동기화 20건·재조회 `unchanged=20`, 기록 샘플 배지와 보유 평가손익을 확인했다. 360px·1280px에서 문서 너비가 뷰포트를 넘지 않으며 브라우저 오류는 없었다. 확인용 사용자는 삭제했고 `scripts/stop.sh`로 서버를 종료했다.
+- 테스트는 FakeStructuredLLM·MockBroker·respx 고정 응답만 사용했다. 실제 증권사 키·Gemini·Ollama 호출은 하지 않았다. 실키 수동 검증은 수행하지 않았다.
+
+스펙과 다른 점: 없음. 위 행 경고 안내 위치와 마지막 동기화 시각 계산은 소유 범위에서 정한 구현 세부 사항이다.
+
+남은 일: 코디네이터의 별도 검증 및 PR 병합. 실제 증권사 파일 프리셋과 실키 검증은 개인정보 제거 샘플·별도 지시가 있을 때 진행한다.

@@ -11,7 +11,7 @@ export type TradePatch = Partial<TradeInput>;
 export type TradeCreate = Omit<TradeInput, "fee" | "tax"> & Partial<Pick<TradeInput, "fee" | "tax">>;
 export type SaveTradeRequest = { id?: undefined; data: TradeCreate } | { id: string; data: TradePatch };
 export interface Trade extends TradeInput {
-  id: string; tradedAt: string; timeKnown: boolean; source: "manual" | "import" | "kiwoom" | "toss";
+  id: string; tradedAt: string; timeKnown: boolean; source: "manual" | "import" | "kiwoom" | "toss" | "mock";
   createdAt: string; updatedAt: string; costEstimated: boolean;
 }
 export interface NoteInput { tradeId: string | null; symbolCode: string | null; notedOn: string; kind: Kind; content: string; tags: string[]; emotion: Emotion | null }
@@ -19,6 +19,7 @@ export interface Note extends NoteInput { id: string; createdAt: string; updated
 export interface TradeDetail { trade: Trade; realizedPnl: string | null; oversold: boolean; notes: Note[] }
 export interface Position {
   market: Market; symbolCode: string; symbolName: string; currency: Currency; quantity: string; avgCost: string;
+  currentPrice?: string | null; evalAmount?: string | null; unrealizedPnl?: string | null; unrealizedPnlRate?: number | null; quoteSource?: string | null;
   costBasis: string; realizedPnl: string; firstTradedOn: string; lastTradedOn: string; tradeCount: number; hasOversold: boolean;
 }
 export interface Performance { tradeId: string; symbolName: string; realizedPnl: string; tradedOn: string }
@@ -39,3 +40,8 @@ export interface CostRates { krxCommissionRate: string; krxSellTaxRate: string; 
 export interface CostSettings extends CostRates { isDefault: boolean; updatedAt: string | null }
 export interface CostEstimateInput { market: "KRX" | "US"; side: "buy" | "sell"; quantity: string; price: string; symbolCode?: string }
 export interface CostEstimate { fee: string; tax: string; isEtf: boolean; rates: CostSettings }
+
+export interface BrokerConnection { id: string; label: string; provider: "mock" | "kiwoom" | "toss"; status: string }
+export interface SyncInput { connectionId: string; from: string; to: string }
+export interface SyncResult { inserted: number; updated: number; unchanged: number; skippedDuplicates: number; from: string; to: string; syncedAt: string }
+export interface SyncStatusItem { connectionId: string; label: string; provider: string; lastSyncedAt: string | null; tradeCount: number }
