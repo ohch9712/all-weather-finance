@@ -337,3 +337,27 @@ UNIQUE `(user_id, provider, kind, organization)`.
 
 - 실제 서버 확인: CODEF 키가 없어 `$TMPDIR` 임시 실행 스크립트가 이 프로세스에서 만든 가짜 키·RSA 키로 설정을 채우고, CODEF 토큰·계정 등록·카드 승인내역을 respx 고정 응답(`assert_all_mocked`, LLM 꺼 둠)으로 바꾼 채 백엔드를 8017에 띄웠다. 프론트는 `scripts/start.sh frontend`(3017)로 띄웠다. 독립 헤드리스 Chrome 컨텍스트(Playwright)에서 API로 가입·출생연도를 넣고 카드 계정 세 개를 등록한 뒤 쿠키를 지우고 로그인 화면에서 로그인했다. `/settings/connections`에서 신한카드 계정(샌드박스와 같은 객체 한 건·가려진 값 응답)과 KB국민카드 계정(거절 1·저장 2·실패 7건 응답)의 "가져오기"를 눌렀다. 결과는 `POST /api/connectors/sync` 200 `succeeded`, summary `failed 1`·`errors [{rowNumber 1, field "resUsedDate", 가림 문구}]`와 `inserted 2`·`failed 7`·errors 7건(순번 3~9, 가계부 검사 실패 4번은 `field null`)이었다. 삼성카드 계정에는 이 수정 전 형태(`failed 1`, `errors []`)의 이력을 임시 스크립트로 finance_17에 직접 넣어 이전 이력 문구를 확인했다. `/api/market/connections/egress-ip`는 브라우저에서 가로채 가짜 응답으로 바꿨고, localhost 밖으로 나간 브라우저 요청은 0건이었다. 400 이상 응답은 로그인 전 `/api/auth/me` 401 두 건뿐이었고, 서버 로그에 가짜 키·로그인 값·500 오류가 없었다. 띄운 백엔드는 종료했고 프론트는 `scripts/stop.sh`로 멈췄다.
 - 남은 일: 코디네이터 검증과 병합. 데모 키로 실제 값이 오는 승인내역의 가계부 반영 확인은 이 수정 범위 밖이다.
+
+### 로그인 정보 안내와 삭제 실패 처리 수정
+
+- **발견과 바뀐 구현 결과**: 앞선 구현 결과의 "일회 전송 동의 폼"과 "CODEF 호출이 실패해도 행은 지운다"는 동작을 이 수정으로 바꿨다. 앱이 로그인 정보를 저장하지 않는다는 사실과 CODEF가 로그인 정보를 암호화해 보관한다는 사실을 구분하고, CODEF에서 삭제하지 못했을 때 연결이 조용히 사라지던 문제를 해결했다.
+- **백엔드**: 기본 삭제는 CODEF 성공 뒤에만 계정과 은행 현금 자산을 같은 트랜잭션에서 지운다. CODEF 결과 실패·비어 있지 않은 `data.errorList`·네트워크 오류는 고정 메시지의 502, 키 없음은 CODEF 미호출 409이며 계정·이력·현금 자산을 유지한다. `localOnly=true`는 CODEF를 호출하지 않고 로컬 연결과 은행 현금 자산을 삭제하며 스펙의 고정 경고 로그를 남긴다. 두 삭제 방식 모두 다른 사용자는 404이고, 로그에는 connectedId·응답 메시지를 넣지 않는다. 등록 동의가 없거나 false인 422 상세 메시지도 7절대로 바꿨다.
+- **프론트**: 8절의 안내 박스 제목·다섯 항목·보안 정책 링크 속성·동의 및 오류·상태 카드·카드와 은행 삭제 확인 문구를 그대로 적용했다. 삭제가 502 CONNECTOR_FAILED 또는 409 CONFLICT이면 서버 메시지 아래에 "이 앱에서만 삭제" 버튼과 경고 확인 창을 제공한다. 확인 뒤 `localOnly=true`로 요청하며 일반 삭제와 같은 캐시 정리 순서를 사용한다. 다른 오류에는 이 버튼을 표시하지 않는다.
+- **회귀 테스트**: respx로 삭제 성공, 실패 코드·errorList·네트워크 오류의 자원 보존, 키 없음과 로컬 삭제의 CODEF 미호출, 두 방식의 사용자 격리, 민감값 비노출과 등록 동의 메시지를 확인했다. MSW로 모든 안내 문자열·링크 속성, 두 종류의 확인 문구, 502·409 후 로컬 삭제 요청, 다른 상태·코드·네트워크 오류에서 버튼 숨김을 확인했다. 기존 삭제 캐시 회귀 테스트는 일반 삭제와 로컬 삭제 모두에 적용했다.
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 17·8017/3017·finance_17 준비 성공 |
+| `cd backend && uv run ruff check .` | 통과 |
+| `cd backend && uv run ruff format --check .` | 300개 파일 통과 |
+| `cd backend && uv run pytest -q` | 1,393개 통과(커넥터 28개), 기존 Starlette/httpx 사용 중단 경고 1개 |
+| `cd frontend && npm run lint` | 통과 |
+| `cd frontend && npx tsc --noEmit` | 통과 |
+| `cd frontend && npm run test` | 47개 파일·480개 테스트 통과(커넥터 18개) |
+| `cd frontend && npm run build` | Next.js 프로덕션 빌드 통과 |
+| 실제 서버·독립 Playwright 컨텍스트 | 키 없음 409 뒤 은행 연결 유지와 로컬 삭제 204, CODEF errorList 실패 502 뒤 카드 연결 유지와 확인 후 로컬 삭제, 안내 박스 5개 항목 표시 확인 |
+| 화면 360×800·1280×1000 | 페이지 `scrollWidth == innerWidth`, 다이얼로그 가로 넘침 없음, 안내 목록·동의·버튼을 스크린샷으로 확인 |
+| `git diff --check`, 변경 경로 대조 | 공백 오류 없음, 지정 소유 경로만 변경 |
+
+- 실제 서버 확인은 API로 가입한 확인용 사용자와 DB에 직접 넣은 가짜 연결·현금 자산으로 진행했다. 첫 실행은 키가 없는 일반 서버였고, 두 번째는 저장소 밖 임시 스크립트가 프로세스 메모리에 가짜 키를 넣고 respx의 `assert_all_mocked=True`로 CODEF 토큰·삭제 응답을 고정한 서버였다. CODEF 실서비스·LLM은 호출하지 않았고 `/api/market/connections/egress-ip`도 브라우저에서 가짜 응답으로 가로챘다. 브라우저 컨텍스트와 임시 서버를 종료하고 `scripts/stop.sh`로 이 워크트리의 서버를 정리했다.
+- 스펙과 다르게 구현한 사항, 의존성·마이그레이션 변경은 없다. 남은 일은 코디네이터의 별도 검증과 병합이다.

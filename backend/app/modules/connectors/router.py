@@ -47,8 +47,13 @@ def register_account(data: AccountInput, db: DBSession, user: CurrentUser):
 
 
 @router.delete("/accounts/{account_id}", status_code=204, dependencies=[Depends(require_json)])
-def delete_account(account_id: UUID, db: DBSession, user: CurrentUser):
-    service.delete_account(db, user.id, account_id)
+def delete_account(
+    account_id: UUID,
+    db: DBSession,
+    user: CurrentUser,
+    local_only: Annotated[bool, Query(alias="localOnly")] = False,
+):
+    service.delete_account(db, user.id, account_id, local_only=local_only)
     return Response(status_code=204)
 
 

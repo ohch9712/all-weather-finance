@@ -153,7 +153,10 @@ def test_provider_consent_keys_organizations_and_mydata(auth_client, monkeypatch
             payload["consent"] = consent
         result = auth_client.post(ROOT + "/accounts", json=payload)
         assert result.status_code == 422
-        assert result.json()["error"]["details"][0]["field"] == "consent"
+        assert result.json()["error"]["details"][0] == {
+            "field": "consent",
+            "message": "금융사 로그인 정보를 CODEF에 등록하는 데 동의해 주세요.",
+        }
     unsupported = auth_client.post(ROOT + "/accounts", json=account_payload(organization="0302"))
     assert unsupported.status_code == 422
     assert unsupported.json()["error"]["details"][0]["field"] == "organization"
@@ -397,7 +400,7 @@ def test_bank_end_to_end_filters_dedup_and_delete(auth_client, db, codef_http, c
     sent = json.loads(unquote(route.calls[0].request.content.decode()))
     assert sent == {"organization": "0004", "connectedId": "test-connected"}
     codef_http.post("https://sandbox.codef.io/v1/account/delete").mock(
-        return_value=response(code="CF-03002", message="sensitive-remote-message")
+        return_value=response({"errorList": []})
     )
     assert (
         auth_client.delete(
@@ -407,6 +410,7 @@ def test_bank_end_to_end_filters_dedup_and_delete(auth_client, db, codef_http, c
     )
     assert auth_client.get("/api/allocation/holdings").json()["items"] == []
     assert db.scalars(select(ConnectorSync)).all() == []
+    assert auth_client.get(ROOT + "/accounts").json()["items"] == []
     assert "sensitive-remote-message" not in caplog.text
 
 
@@ -524,3 +528,74 @@ def test_auth_required(client, method, path):
         ).status_code
         == 401
     )
+
+
+@pytest.mark.parametrize("failure", ["result", "errors", "network", "missing_keys"])
+def test_delete_failure_preserves_account_and_cash(
+    auth_client, db, codef_http, monkeypatch, caplog, failure
+):
+    account_id = register(auth_client, kind="bank", organization="0004")
+    codef_http.post(BANK_PATH).mock(return_value=response({"resDepositTrust": [bank_row()]}))
+    assert sync(auth_client, account_id).status_code == 200
+    route = codef_http.post("https://sandbox.codef.io/v1/account/delete")
+    if failure == "result":
+        route.mock(return_value=response(code="CF-03002", message="sensitive-remote-message"))
+    elif failure == "errors":
+        route.mock(
+            return_value=response(
+                {"errorList": [{"code": "test-connected", "message": "sensitive-remote-message"}]}
+            )
+        )
+    elif failure == "network":
+        route.mock(side_effect=httpx.ConnectError("test-connected sensitive-remote-message"))
+    else:
+        monkeypatch.setattr(get_codef_connector().client.settings, "codef_client_id", "")
+    result = auth_client.delete(
+        ROOT + "/accounts/" + account_id, headers={"Content-Type": "application/json"}
+    )
+    missing = failure == "missing_keys"
+    assert result.status_code == (409 if missing else 502)
+    assert result.json()["error"]["code"] == ("CONFLICT" if missing else "CONNECTOR_FAILED")
+    assert result.json()["error"]["message"] == (
+        "CODEF 키가 설정되지 않아 CODEF에 등록된 로그인 정보를 지울 수 없습니다."
+        if missing
+        else "CODEF에서 로그인 정보를 지우지 못했습니다. 잠시 후 다시 시도해 주세요."
+    )
+    assert len(auth_client.get(ROOT + "/accounts").json()["items"]) == 1
+    assert len(auth_client.get("/api/allocation/holdings").json()["items"]) == 1
+    assert len(db.scalars(select(ConnectorSync)).all()) == 1
+    assert route.call_count == (0 if missing else 1)
+    for value in ["test-connected", "sensitive-remote-message"]:
+        assert value not in caplog.text + result.text
+
+
+@pytest.mark.parametrize("kind,organization", [("card", "0306"), ("bank", "0004")])
+def test_local_delete_skips_codef_and_isolates_user(
+    auth_client, other_auth_client, codef_http, monkeypatch, caplog, kind, organization
+):
+    account_id = register(auth_client, kind=kind, organization=organization)
+    if kind == "bank":
+        codef_http.post(BANK_PATH).mock(return_value=response({"resDepositTrust": [bank_row()]}))
+        assert sync(auth_client, account_id).status_code == 200
+    monkeypatch.setattr(get_codef_connector().client.settings, "codef_client_id", "")
+    for local_only in [False, True]:
+        assert (
+            other_auth_client.delete(
+                ROOT + "/accounts/" + account_id,
+                params={"localOnly": local_only},
+                headers={"Content-Type": "application/json"},
+            ).status_code
+            == 404
+        )
+    before = sum(call.request.url.host != "testserver" for call in codef_http.calls)
+    result = auth_client.delete(
+        ROOT + "/accounts/" + account_id,
+        params={"localOnly": True},
+        headers={"Content-Type": "application/json"},
+    )
+    assert result.status_code == 204
+    assert sum(call.request.url.host != "testserver" for call in codef_http.calls) == before
+    assert auth_client.get(ROOT + "/accounts").json()["items"] == []
+    assert auth_client.get("/api/allocation/holdings").json()["items"] == []
+    assert "CODEF 삭제 없이 로컬 연결을 삭제했습니다." in caplog.text
+    assert "test-connected" not in caplog.text
