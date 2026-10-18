@@ -156,6 +156,14 @@ class KiwoomBroker(UnsupportedBroker):
                 },
                 json=body,
             )
+            if api_id == "kt00009" and response.status_code == 200:
+                data = response.json()
+                # 공식 kiwoom_api_spec.json 미기재: 2026-10-19 운영 서버 실제 응답 관찰.
+                # 해당 날짜·매도수 구분에 체결이 없으므로 연속조회도 종료한다.
+                if str(data.get("return_code")) == "20" and "관련자료가없습니다" in str(
+                    data.get("return_msg", "")
+                ):
+                    break
             data = self._read(response)
             yield data if array_key is None else data.get(array_key, [])
             if response.headers.get("cont-yn") != "Y":

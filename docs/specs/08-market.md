@@ -119,6 +119,7 @@ class BrokerClient(Protocol):
 - 같은 종목도 거래소별 코드가 다르다(NXT `039490_NX`, SOR `039490_AL`). 이 프로젝트는 KRX 코드(접미사 없음)만 쓴다.
 - 토큰은 만료 시각(`expires_dt`)까지 메모리에 캐시하고 만료 5분 전에 새로 받는다.
 - IP 미등록·키 오류는 `return_code`/HTTP 상태를 보고 `BROKER_IP_NOT_ALLOWED`·`BROKER_AUTH_FAILED`로 바꾼다(정확한 코드값은 공식 문서에서 확인).
+- **체결 없는 날의 `kt00009` 응답(운영 서버 실제 응답, 2026-10-19 코디네이터 확인. 공식 명세에는 없다)**: 그날 체결이 없으면 HTTP 200, `return_code: 20`, `return_msg`에 `[2000]`과 `관련자료가없습니다`가 들어 있고 `acnt_ord_cntr_prst_array`가 없다. 지금 어댑터는 이것을 `BROKER_UNAVAILABLE`로 바꿔, 체결이 없는 날이 하루라도 낀 기간의 체결 조회(11 매매일지 동기화)가 통째로 실패한다. `kt00009`에서만 이 조합(`return_code` 20 + 메시지에 `관련자료가없습니다`)을 그날 그 매도·매수 구분의 빈 결과로 처리하고 연속조회를 멈춘다. 다른 `return_code`, 다른 api-id, 메시지가 다른 20은 지금처럼 오류다. 코드 주석에 이 근거(공식 명세 미기재, 실제 응답 관찰일)를 남긴다.
 
 ### 4.4 TossBroker (`toss.py`)
 
@@ -396,3 +397,25 @@ class SnapshotSet:
 | 실제 서버(슬롯 08) + 독립 Playwright Chrome context, egress-ip는 브라우저에서 가로채 가짜 응답 | 1280·360·768px 모두 진입 시 요청 0회·"버튼을 누르면 확인합니다", 클릭 시 "확인 중…"·버튼 비활성 → 1회 요청 후 `203.0.113.7`(null 응답은 "확인할 수 없음") 표시, 재클릭 시 추가 요청 없음, `scrollWidth`가 viewport 너비 이하, 브라우저 오류 0 |
 | 백엔드 로그 | 확인 동안 egress-ip 요청 0건(외부 IP 조회 서비스 미호출) |
 | `scripts/stop.sh` | 기동한 frontend·backend 종료, 확인용 사용자 삭제 |
+
+### 키움 체결 없음 응답 처리
+
+- 발견 사항: `kt00009`가 체결 없는 날에 HTTP 200, `return_code: 20`, `return_msg`에 `관련자료가없습니다`를 반환하면 공통 오류 변환이 `BROKER_UNAVAILABLE`을 발생시켜 기간 전체의 매매일지 동기화가 실패했다.
+- 고친 내용: `_pages`에서 `kt00009`의 HTTP 200·코드 20·해당 메시지 조합만 그 날짜·매도수 구분의 빈 결과로 처리하고 연속조회를 종료한다. 다른 날짜·매도수 구분은 계속 조회하며 앞서 받은 체결은 유지한다. 다른 api-id·코드·메시지와 HTTP 오류는 기존 오류 처리를 유지한다.
+- 근거: 공식 `kiwoom_api_spec.json`에는 없는 응답이며, 2026-10-19 코디네이터가 운영 서버에서 관찰한 응답 조합을 따른다. 같은 근거를 코드 주석에 남겼다.
+- 회귀 테스트: 30일 전체 no-data(정수·문자열 코드 20), 일부 날짜·매수 구분만 체결 있음, 체결 페이지 뒤 no-data와 연속조회 헤더 종료, 메시지가 다른 20·다른 코드·HTTP 오류, 다른 api-id(`kt00018`)의 오류 유지를 확인한다. 매매일지에는 테스트 함수 하나를 추가하고 0건·체결 1건 저장을 매개변수로 확인한다.
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 08(8008·3008·finance_08) 준비 성공 |
+| `uv run ruff check .` / `uv run ruff format --check .` | 통과, 307개 파일 포맷 확인 |
+| `uv run pytest tests/market/test_brokers.py tests/journal/test_sync.py -q` | 42개 통과 |
+| `uv run pytest` | 전체 1,435개 통과, 기존 Starlette TestClient 사용 중단 안내 1건 |
+| 수정 전 `522e27c`의 `_pages`로 새 전체 no-data 테스트 실행(저장소 밖 임시 플러그인) | 두 매개변수 모두 `BROKER_UNAVAILABLE`로 실패하여 회귀 재현 확인 |
+| 실제 슬롯 08 uvicorn 서버, 30일 `POST /api/journal/sync` | 전체 no-data: HTTP 200·0건, 일부 날짜만 체결: HTTP 200·1건 저장, 메시지가 다른 코드 20: HTTP 502·`BROKER_UNAVAILABLE` |
+| 서버 확인의 외부 호출 | 저장소 밖 임시 실행 설정에서 키움 HTTP를 `MockTransport`로 대체하고 실제 외부 HTTP 전송을 차단. 실서비스 키·LLM·외부 IP 조회 미사용 |
+| 프론트·마이그레이션 검사 | 변경이 없어 생략. API·화면·DB 계약 변경 없음 |
+| 정리 | 서버 확인용 사용자 삭제, `scripts/stop.sh`로 기동한 백엔드 종료 |
+
+- 스펙과 다른 점: 없음. 의존성을 추가하지 않았다.
+- 남은 일: 수정 범위의 구현은 완료했다. 별도 검증·PR 검토·병합은 코디네이터가 진행한다.
