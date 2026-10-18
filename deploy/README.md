@@ -60,6 +60,26 @@ docker version
 docker compose version
 ```
 
+### 2.1 스왑(메모리 4GB 이하 서버)
+
+메모리 4GB 이하 서버는 4절 첫 빌드 전에 2GB 스왑 파일을 만든다. 프론트·Caddy 이미지 빌드에 메모리 여유가 생긴다. 다음 명령은 이미 켜진 스왑이 있으면(`swapon --show` 출력이 있으면) 아무것도 만들지 않고 건너뛴다. `/etc/fstab`에 한 줄을 더해 재부팅 뒤에도 켜지며 디스크를 2GB 더 쓴다.
+
+```bash
+free -h
+swapon --show
+if [ -z "$(swapon --show --noheadings)" ]; then
+  sudo fallocate -l 2G /swapfile
+  sudo chmod 600 /swapfile
+  sudo mkswap /swapfile
+  sudo swapon /swapfile
+  grep -qE '^/swapfile[[:space:]]' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab > /dev/null
+fi
+swapon --show
+free -h
+```
+
+마지막 `swapon --show`에 스왑 한 줄이 보이고 `free -h`의 Swap 합계가 0이 아니면 된다.
+
 ## 3. 저장소·시크릿 준비
 
 ```bash
@@ -99,7 +119,7 @@ nano deploy/.env.production
 
 편집기에서 `DOMAIN`(스킴·경로 없는 도메인), `ACME_EMAIL`, **결제가 연결된 프로젝트의 `GEMINI_API_KEY`**를 넣는다. `LLM_GENERAL_PROVIDER=gemini`, `LLM_PERSONAL_PROVIDER=gemini`, `GEMINI_BILLING_ENABLED=true`가 운영 결정값이다. 결제를 실제 연결한 뒤에만 true로 둔다. 미연결 키로 개인 금융 데이터를 보내지 않는다. 결제 여부는 설정의 운영자 선언이며 서버가 Google 청구 상태를 조회하지 않는다. 개인 데이터가 Google로 전송되고, 모든 Gemini 호출은 앱의 기존 `store=False` 경로를 쓴다. Ollama 서비스는 없다.
 
-시장 데이터 키가 없으면 `MARKET_DATA_PROVIDER=mock`을 유지한다. 키를 준비했을 때만 `kiwoom`과 `KIWOOM_ENV=real`·`KIWOOM_APP_KEY`·`KIWOOM_APP_SECRET`, 또는 `toss`와 `TOSS_CLIENT_ID`·`TOSS_CLIENT_SECRET`을 넣는다. CODEF는 `CODEF_ENV=production`과 세 키를 넣으면 활성화되며, 비우면 화면에서 키 설정 필요로 표시된다. 실제 키·계좌번호·쿠키를 문서·로그·PR에 붙이지 않는다. `.env.production`과 `APP_ENCRYPTION_KEY`는 별도 접근 통제된 비밀 보관소에도 보관한다. 키를 잃으면 백업 DB의 암호화된 연결 정보를 해독할 수 없다. 기존 운영 볼륨에서 위 생성 명령을 다시 실행하지 않는다(비밀번호는 DB 역할에서도 따로 변경해야 한다).
+시장 데이터 키가 없으면 `MARKET_DATA_PROVIDER=mock`을 유지한다. 키를 준비했을 때만 `kiwoom`과 `KIWOOM_ENV=real`·`KIWOOM_APP_KEY`·`KIWOOM_APP_SECRET`, 또는 `toss`와 `TOSS_CLIENT_ID`·`TOSS_CLIENT_SECRET`을 넣는다. CODEF는 `CODEF_ENV`와 세 키(`CODEF_CLIENT_ID`·`CODEF_CLIENT_SECRET`·`CODEF_PUBLIC_KEY`)를 넣으면 활성화되며, 비우면 화면에서 키 설정 필요로 표시된다. 키 종류마다 쓰는 도메인이 다르므로 `CODEF_ENV`는 넣은 키와 짝을 맞춘다. 샌드박스 키는 `sandbox`(`sandbox.codef.io`), 데모 키(신청 후 승인, 일 100회)는 `development`(`development.codef.io`), 정식 키는 `production`(`api.codef.io`)이다(스펙 17 4절). 예시 파일의 기본값은 `production`이므로 데모 키를 넣을 때는 `CODEF_ENV=development`로 바꾼다. 실제 키·계좌번호·쿠키를 문서·로그·PR에 붙이지 않는다. `.env.production`과 `APP_ENCRYPTION_KEY`는 별도 접근 통제된 비밀 보관소에도 보관한다. 키를 잃으면 백업 DB의 암호화된 연결 정보를 해독할 수 없다. 기존 운영 볼륨에서 위 생성 명령을 다시 실행하지 않는다(비밀번호는 DB 역할에서도 따로 변경해야 한다).
 
 ### 3.1 개인정보 처리방침 운영자 정보
 
@@ -116,6 +136,13 @@ nano deploy/.env.production
 하나라도 비어 있으면 `/privacy` 위에 "운영자 정보가 아직 설정되지 않았습니다. 이 처리방침은 공개 전 초안입니다." 경고가 나오고 빈 자리는 "(미설정)"으로 보인다. 값을 바꾼 뒤에는 `dc up -d frontend`로 frontend 컨테이너만 다시 만든다(`dc`는 4절에서 정의한다). 실제 이름·연락처를 문서·PR·로그에 붙이지 않는다.
 
 ## 4. 첫 배포
+
+빌드 전에 3절의 필수 값(`DOMAIN`·`ACME_EMAIL`·`GEMINI_API_KEY`와 생성 스크립트가 채운 DB 값·`APP_ENCRYPTION_KEY`)을 `deploy/.env.production`에 모두 넣는다. `DOMAIN`·`ACME_EMAIL`과 DB 값은 Compose 필수 보간(`${...:?}`)이라 하나라도 비어 있으면 `dc config`·`dc build`부터 오류로 멈춘다. `GEMINI_API_KEY`는 보간 검사에 걸리지 않지만 비어 있으면 5절 AI 상태가 `reason=missing_api_key`로 꺼진다. 다음 명령은 값이 빈 필수 키의 이름만 보여 주며 값은 출력하지 않는다. 출력이 없어야 한다.
+
+```bash
+cd /opt/finance
+grep -E '^(DOMAIN|ACME_EMAIL|GEMINI_API_KEY|POSTGRES_PASSWORD|POSTGRES_APP_PASSWORD|DATABASE_URL|MIGRATION_DATABASE_URL|APP_ENCRYPTION_KEY)=$' deploy/.env.production | cut -d= -f1
+```
 
 이하 편의를 위해 매 SSH 세션에 함수를 정의한다. `config`는 시크릿을 펼칠 수 있으므로 `--quiet` 없이 출력하지 않는다.
 
@@ -205,6 +232,14 @@ install -m 600 /dev/null /var/backups/finance/backup.log
 
 ```cron
 30 3 * * * /opt/finance/deploy/backup.sh >> /var/backups/finance/backup.log 2>&1
+```
+
+편집기 대신 다음 비대화형 명령으로 같은 줄을 더할 수 있다. crontab을 처음 쓰는 계정은 `crontab -l`이 "no crontab" 오류로 실패하므로 오류 출력을 버리고 빈 목록으로 시작한다. 이 백업 줄과 똑같은 줄만 빼고 다시 더하므로 다른 작업·주석은 그대로 두고 여러 번 실행해도 한 줄만 남는다. 남길 줄이 없어 `grep`이 실패해도(빈 crontab, 백업 줄만 있는 경우) `|| true`로 이어 가므로 `set -e`·`set -o pipefail` 셸에서도 백업 줄이 빠지지 않는다. 등록 뒤 `crontab -l`로 백업 줄이 한 번만 있는지 확인한다(손으로 고쳐 글자가 다른 백업 줄은 지워지지 않는다).
+
+```bash
+L='30 3 * * * /opt/finance/deploy/backup.sh >> /var/backups/finance/backup.log 2>&1'
+(crontab -l 2>/dev/null | grep -vxF "$L" || true; echo "$L") | crontab -
+crontab -l
 ```
 
 정기적으로 **새 DB 복구**를 실제 수행해 덤프를 검증한다. 먼저 백업 파일 경로를 지정하고, 대상 DB를 만든 뒤 복구한다. 같은 Postgres 클러스터의 역할을 사용하므로 덤프의 앱 권한도 복원된다.
