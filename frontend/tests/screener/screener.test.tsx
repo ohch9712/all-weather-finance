@@ -393,9 +393,152 @@ describe("조건검색 화면", () => {
       ).not.toBeInTheDocument(),
     );
   });
-  it("키움 탭에서 운영자 조건식을 실행하고 연결 변경 오류를 안내한다", async () => {
+  it("active 키움 연결만 보여 주고 첫 연결로 조회·실행한 뒤 변경 오류를 안내한다", async () => {
+    let selection: unknown;
+    const requests: (string | null)[] = [];
+    let release: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(apiUrl("/api/market/connections"), async () => {
+        await ready;
+        return HttpResponse.json({
+          items: [
+            {
+              id: "inactive",
+              provider: "kiwoom",
+              status: "error",
+              label: "만료 키움",
+            },
+            {
+              id: "mock",
+              provider: "mock",
+              status: "active",
+              label: "샘플 연결",
+            },
+            {
+              id: "toss",
+              provider: "toss",
+              status: "active",
+              label: "내 토스",
+            },
+            {
+              id: "conn",
+              provider: "kiwoom",
+              status: "active",
+              label: "첫 키움",
+            },
+            {
+              id: "second",
+              provider: "kiwoom",
+              status: "active",
+              label: "둘째 키움",
+            },
+          ],
+        });
+      }),
+      http.post(
+        apiUrl("/api/screener/broker-conditions/run"),
+        async ({ request }) => {
+          selection = await request.json();
+          return HttpResponse.json({ ...results, source: "kiwoom_condition" });
+        },
+      ),
+      http.get(apiUrl("/api/screener/broker-conditions"), ({ request }) => {
+        const id = new URL(request.url).searchParams.get("connectionId");
+        requests.push(id);
+        return id === "second"
+          ? errorResponse(
+              501,
+              "BROKER_NOT_SUPPORTED",
+              "지원하지 않는 기능입니다.",
+            )
+          : HttpResponse.json({
+              items: [{ seq: "0", name: "내 저PER" }],
+              source: "kiwoom",
+            });
+      }),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />);
+    await user.click(screen.getByRole("tab", { name: "내 키움 조건식" }));
+    expect(
+      screen.getByText("증권사 연결을 확인하고 있어요."),
+    ).toBeInTheDocument();
+    expect(requests).toEqual([]);
+    release?.();
+    await user.click(
+      await screen.findByRole("button", { name: "내 저PER 실행" }),
+    );
+    await screen.findByRole("table");
+    expect(selection).toEqual({ seq: "0", connectionId: "conn" });
+    expect(requests).toEqual(["conn"]);
+    expect(screen.getByLabelText("연결 선택")).toHaveValue("conn");
+    expect(
+      within(screen.getByLabelText("연결 선택"))
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["첫 키움 (연결됨)", "둘째 키움 (연결됨)"]);
+    expect(screen.queryByText("운영자 데이터")).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("연결 선택"), "second");
+    expect(
+      await screen.findByText("지원하지 않는 기능입니다."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+  it("연결이 없고 목록이 422이면 내 키움 연결 안내와 설정 링크를 보여 준다", async () => {
+    const requests: (string | null)[] = [];
+    server.use(
+      http.get(apiUrl("/api/market/connections"), () =>
+        HttpResponse.json({ items: [] }),
+      ),
+      http.get(apiUrl("/api/screener/broker-conditions"), ({ request }) => {
+        requests.push(new URL(request.url).searchParams.get("connectionId"));
+        return errorResponse(
+          422,
+          "VALIDATION_ERROR",
+          "입력값을 확인해 주세요.",
+          [
+            {
+              field: "connectionId",
+              message: "내 키움 증권사 연결을 선택해 주세요.",
+            },
+          ],
+        );
+      }),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />);
+    await user.click(screen.getByRole("tab", { name: "내 키움 조건식" }));
+    expect(
+      await screen.findByText(
+        "내 키움 증권사 연결이 필요합니다. 키움 HTS에서 만든 내 조건식만 실행할 수 있습니다.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "증권사 연결 설정" }),
+    ).toHaveAttribute("href", "/settings/connections");
+    expect(requests).toEqual([null]);
+    expect(screen.queryByLabelText("연결 선택")).not.toBeInTheDocument();
+    expect(screen.queryByText("운영자 데이터")).not.toBeInTheDocument();
+    expect(screen.queryByText("샘플 조건식")).not.toBeInTheDocument();
+  });
+  it("연결이 없고 Mock 목록이 200이면 샘플 조건식 2개를 표시하고 실행한다", async () => {
+    const requests: (string | null)[] = [];
     let selection: unknown;
     server.use(
+      http.get(apiUrl("/api/market/connections"), () =>
+        HttpResponse.json({ items: [] }),
+      ),
+      http.get(apiUrl("/api/screener/broker-conditions"), ({ request }) => {
+        requests.push(new URL(request.url).searchParams.get("connectionId"));
+        return HttpResponse.json({
+          items: [
+            { seq: "0", name: "샘플 저PER" },
+            { seq: "1", name: "샘플 대형주" },
+          ],
+          source: "mock",
+        });
+      }),
       http.post(
         apiUrl("/api/screener/broker-conditions/run"),
         async ({ request }) => {
@@ -403,31 +546,19 @@ describe("조건검색 화면", () => {
           return HttpResponse.json(results);
         },
       ),
-      http.get(apiUrl("/api/screener/broker-conditions"), ({ request }) =>
-        new URL(request.url).searchParams.has("connectionId")
-          ? errorResponse(
-              501,
-              "BROKER_NOT_SUPPORTED",
-              "지원하지 않는 기능입니다.",
-            )
-          : HttpResponse.json({
-              items: [{ seq: "0", name: "샘플 저PER" }],
-              source: "mock",
-            }),
-      ),
     );
     const { user } = renderWithProviders(<ScreenerPage />);
     await user.click(screen.getByRole("tab", { name: "내 키움 조건식" }));
-    await user.click(
-      await screen.findByRole("button", { name: "샘플 저PER 실행" }),
-    );
+    expect(await screen.findByText("샘플 조건식")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "샘플 대형주 실행" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "샘플 저PER 실행" }));
     await screen.findByRole("table");
     expect(selection).toEqual({ seq: "0", connectionId: null });
-    await user.selectOptions(screen.getByLabelText("연결 선택"), "conn");
-    expect(
-      await screen.findByText("지원하지 않는 기능입니다."),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(requests).toEqual([null]);
+    expect(screen.queryByText("운영자 데이터")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("연결 선택")).not.toBeInTheDocument();
   });
   it("미수집 데이터와 LLM 오류를 안내한다", async () => {
     server.use(
