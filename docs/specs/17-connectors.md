@@ -366,3 +366,21 @@ UNIQUE `(user_id, provider, kind, organization)`.
 
 - 실제 서버 확인은 API로 가입한 확인용 사용자와 DB에 직접 넣은 가짜 연결·현금 자산으로 진행했다. 첫 실행은 키가 없는 일반 서버였고, 두 번째는 저장소 밖 임시 스크립트가 프로세스 메모리에 가짜 키를 넣고 respx의 `assert_all_mocked=True`로 CODEF 토큰·삭제 응답을 고정한 서버였다. CODEF 실서비스·LLM은 호출하지 않았고 `/api/market/connections/egress-ip`도 브라우저에서 가짜 응답으로 가로챘다. 브라우저 컨텍스트와 임시 서버를 종료하고 `scripts/stop.sh`로 이 워크트리의 서버를 정리했다.
 - 스펙과 다르게 구현한 사항, 의존성·마이그레이션 변경은 없다. 남은 일은 코디네이터의 별도 검증과 병합이다.
+
+### 로그인 정보 안내 박스 스크롤
+
+- **발견(사용자 요청)**: 계정 추가 다이얼로그의 "로그인 정보 처리 방식" 안내 박스(제목·다섯 항목·보안 정책 링크)가 화면을 너무 길게 차지했다. 360px 폭에서 다섯 항목 목록만 396px였다.
+- **프론트**(`features/connectors/components/AccountForm.tsx`): 다섯 항목 목록을 같은 파일 안의 `LoginInfoList`로 옮겨 최대 높이 `9rem`(`max-h-[9rem]`)의 세로 스크롤 영역(`overflow-y-auto overflow-x-hidden`)에 넣었다. 제목과 `CODEF 보안 정책 보기` 링크는 이 영역 밖에 그대로 두어 항상 보인다. 영역에는 `role="region"`, `aria-label="로그인 정보 처리 방식 내용"`, `tabIndex={0}`, 입력창과 같은 포커스 테두리(`focus-visible:ring-3 focus-visible:ring-ring/50`)를 줬다. 아래에 내용이 더 있으면 영역 아래쪽에 `bg-muted`로 사라지는 높이 `2rem`의 그라데이션(`pointer-events-none`, `aria-hidden`, `data-testid="login-info-fade"`)을 겹쳐 보인다. 마운트 시와 `scroll` 이벤트, `ResizeObserver`(영역과 목록 모두 관찰)로 `scrollHeight - (scrollTop + clientHeight) > 1`을 다시 계산해 끝까지 스크롤하면 없앤다(1px 반올림 오차 허용). 문구·순서·링크 속성·동의 체크·zod 메시지·다이얼로그 자체 스크롤은 바꾸지 않았고, 새 공용 컴포넌트나 색 토큰은 만들지 않았다.
+- **테스트**(`frontend/tests/connectors/connections.test.tsx`, 2개 추가): 안내 박스(`complementary`) 안의 region 이름·`tabindex="0"`·다섯 항목이 region 안, 제목과 링크가 region 밖, 레이아웃이 없는 jsdom 기본값에서 흐림 처리 없음을 확인한다. `Element.prototype`의 `scrollHeight`(300)·`clientHeight`(144) getter를 목록 영역에만 바꿔 마운트 시 흐림 처리가 보이고(`aria-hidden`, `pointer-events-none`, region 밖), 인스턴스의 `scrollTop`을 바꿔 `scroll` 이벤트를 보내면 100에서는 남고 155(1px 오차)·156에서는 사라지며 20으로 돌아가면 다시 보임을 확인한다. 기존 문구·링크·동의 테스트는 바꾸지 않고 통과한다.
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 17·8017/3017·finance_17 준비 성공 |
+| `cd frontend && npm run lint` | 통과 |
+| `cd frontend && npx tsc --noEmit` | 통과 |
+| `cd frontend && npm run test` | 47개 파일·482개 테스트 통과(커넥터 20개, 새 테스트 2개 포함) |
+| `cd frontend && npm run build` | 통과(종료 코드 0), `/settings/connections` 생성 |
+| 실제 서버·독립 Playwright 컨텍스트(360×800, 1280×1000) | 목록 영역 `max-height 144px`·`clientHeight 144`(내용 360px에서 396px, 1280px에서 351px), 안내 박스 높이 230px, 제목은 영역 위·링크는 영역 아래, 흐림 처리 표시와 `pointer-events: none`(흐림 처리 위 지점의 `elementFromPoint`가 목록 영역이고 휠로 40px 스크롤됨), 비밀번호 입력에서 Tab으로 영역 포커스·`:focus-visible` 테두리 표시, End로 끝까지 내리면 흐림 처리 없음·Home으로 올리면 다시 표시, 영역·다이얼로그 가로 넘침 0, 페이지 `scrollWidth == innerWidth`, 다이얼로그 `overflow-y: auto` 유지 |
+
+- 실제 서버 확인: `scripts/start.sh`로 이 워크트리의 백엔드(8017)·프론트(3017)를 띄우고, 독립 헤드리스 Chrome 컨텍스트에서 API로 확인용 사용자를 가입·출생연도 입력한 뒤 쿠키를 지우고 로그인 화면에서 로그인했다. 이 서버에는 CODEF 키가 없어 "수집 계정 추가" 버튼이 꺼져 있으므로, 브라우저에서 `/api/connectors/providers` 응답의 codef `available`만 `true`로 바꿔 다이얼로그를 열었고 계정 등록은 제출하지 않았다. `/api/market/connections/egress-ip`도 브라우저에서 가짜 응답으로 가로챘다. localhost 밖으로 나간 브라우저 요청은 0건, 400 이상 응답은 로그인 전 `/api/auth/me` 401 두 건뿐이었다. 띄운 서버는 `scripts/stop.sh`로 멈췄다.
+- 백엔드는 바꾸지 않아 백엔드 검사는 실행하지 않았다. 의존성·마이그레이션 변경과 스펙과 다르게 한 점은 없다. 남은 일은 코디네이터 검증과 병합이다.
