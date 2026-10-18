@@ -102,3 +102,24 @@
 - 조정: 기존 AI 상태 API에는 billing 필드가 없어 코디네이터 승인으로 personal.enabled=true·provider=gemini·reason=null과 운영 결제 설정을 함께 확인하도록 문서화했다. API 계약과 실제 외부 호출은 추가하지 않았다.
 - 실제 서버에서 사용자·코디네이터가 할 일: VPS·고정 IP·도메인·DNS·공개 인증서 준비, 결제 연결 Gemini·시장·CODEF 키 입력, 증권사 허용 IP 등록, 실제 키 동작·amd64 서버 확인, 개인정보처리방침·Google 개인 데이터 처리/국외 이전 안내 제공, 암호화 키·백업의 서버 밖 보관과 호스트 crontab 설정.
 - 리허설 브라우저·컨테이너·볼륨·이미지와 이번 생성 빌드 캐시를 정리했고 기존 개발 서버·공용 Postgres는 건드리지 않았다.
+
+### 실제 서버 배포 (코디네이터, 2026-10-19)
+
+- 환경: AWS Lightsail 서울 리전 Ubuntu 24.04.4 LTS(x86_64, 2 vCPU, 메모리 3.7GB, 디스크 77GB), 고정 공인 IPv4, 업체 방화벽 22·80·443. `main` `82e986b`를 `/opt/finance`에 받아 `deploy/README.md` 순서대로 진행했다. 도메인·이메일·키 값은 이 문서에 적지 않는다.
+- 서버 준비: 패키지 업데이트 뒤 커널 업데이트로 한 번 재부팅, `ufw` 22·80·443, 시간대 Asia/Seoul. README에 없는 단계로 첫 빌드 전에 2GB 스왑을 만들었다(4GB 서버에서 프론트·Caddy 빌드 메모리 여유). Docker 29.9.1, Compose v5.6.0.
+- 시크릿: `.env.production`은 예시를 복사한 뒤 README 3절 스크립트로 DB 비밀번호 두 개·`APP_ENCRYPTION_KEY`·두 DB URL을 만들고(출력 없음), 사용자가 도메인·ACME 이메일·결제 연결 Gemini 키·CODEF 데모 키(`CODEF_ENV=development`)·`PRIVACY_*`를 직접 넣었다. 코디네이터는 키 이름별 채움 여부와 형식만 확인했다.
+- 빌드·기동: 이미지 빌드는 `DOMAIN`·`ACME_EMAIL`이 필수 보간이라 빌드 때만 임시 값을 넣어 먼저 빌드했다(이미지에 도메인이 들어가지 않는다). `up -d` 후 postgres healthy → migrate Exit 0 → backend·frontend healthy → caddy. Let's Encrypt 인증서 자동 발급, HTTP → HTTPS 308.
+- 확인: `/api/health` 200, 보안 헤더(HSTS, nosniff, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy, CSP), 외부에서 열린 포트 22·80·443뿐(3000·8000·5432·2019 닫힘), backend·frontend·caddy uid 10001, `supercronic -test` 통과, AI 상태 general·personal 모두 `enabled=true, provider=gemini, reason=null`, 호스트·backend·cron의 나가는 IP가 고정 IP와 같음, `/privacy` 운영자 정보 표시(초안 경고 없음), 학습 시드 35개, 사용자 가입·온보딩 후 `make-admin`.
+- 백업: `/var/backups/finance`(700)에 첫 덤프 생성, 호스트 crontab 매일 03:30 `backup.sh` 등록(기존 crontab이 없던 계정이라 `crontab -l`이 실패한다). 사용자가 Lightsail 인스턴스 자동 스냅샷을 켰다.
+- 남은 일: 키움·토스 앱키 발급과 허용 IP 등록 후 `MARKET_DATA_PROVIDER` 전환, README 보완(데모 키 `CODEF_ENV=development`, 스왑, 첫 crontab 등록), 다른 사용자에게 가입을 열기 전 처리방침 법률 검토, 백업의 새 DB 복구 정기 점검.
+
+### README 실제 서버 반영
+
+- 대상: 위 '실제 서버 배포'의 남은 일 중 README 보완. `deploy/README.md`만 고쳤고 다른 절·기존 명령은 그대로 두었다.
+- 3절: CODEF 문장을 `CODEF_ENV`와 세 키 이름으로 바꾸고, 키와 환경의 짝(샌드박스 `sandbox`, 데모 키(일 100회) `development`, 정식 키 `production`, 도메인은 스펙 17 4절)과 예시 기본값 `production`을 데모 키에서는 `development`로 바꾼다는 문장을 더했다.
+- 2.1절(새 소절): 메모리 4GB 이하 서버는 첫 빌드 전에 2GB 스왑 파일을 만든다. `swapon --show --noheadings` 출력이 있으면 건너뛰고, 없을 때만 `fallocate`·`chmod 600`·`mkswap`·`swapon`과 `/etc/fstab` 한 줄(이미 있으면 더하지 않음)을 실행한 뒤 `swapon --show`·`free -h`로 확인한다.
+- 4절: 빌드 전에 `DOMAIN`·`ACME_EMAIL`·`GEMINI_API_KEY`와 DB 값·`APP_ENCRYPTION_KEY`를 먼저 넣는다는 문장을 더했다. `DOMAIN`·`ACME_EMAIL`·DB 값은 Compose 필수 보간이라 비면 `dc config`·`dc build`가 멈추고, `GEMINI_API_KEY`는 보간 검사 대상이 아니지만 비면 AI 상태가 `missing_api_key`가 된다. 값이 빈 필수 키의 이름만 보여 주는 `grep`·`cut` 확인 명령을 더했다(값은 출력하지 않는다).
+- 8절: `crontab -e` 안내 뒤에 비대화형 등록 명령 `(crontab -l 2>/dev/null | grep -vF '/opt/finance/deploy/backup.sh'; echo '<백업 줄>') | crontab -`과 `crontab -l` 확인을 더했다. 처음 쓰는 계정의 `crontab -l` 실패를 무시하고, 기존 줄은 유지하며 같은 경로의 백업 줄만 바꿔 넣는다. `grep -vF`는 지시의 `backup.sh` 대신 전체 경로로 걸러 다른 프로젝트의 `backup.sh` 줄을 지우지 않게 했다.
+- 검사: 문서만 바뀌어 코드 검사(ruff·pytest·lint·tsc·test·build)는 생략했다. 바꾼 bash 블록 3개를 README에서 추출해 `bash -n`을 통과했다. 서버 명령은 실행하지 않았고, 로컬에서 `crontab`·`sudo`·`swapon`·`free`를 가짜 함수로 바꾸고 임시 파일만 쓰는 모의 실행으로 동작을 확인했다. crontab은 없는 계정·재실행·기존 줄 유지·다른 경로 `backup.sh` 유지에서 백업 줄이 한 줄만 남았다. 스왑은 없음·이미 켜짐·fstab 줄이 이미 있음에서 생성 건너뛰기와 fstab 중복 방지가 맞았다. 필수 값 확인은 빈 키 이름만 출력하고 모두 채우면 출력이 없었다(가짜 값만 쓴 임시 env).
+- 남은 일: 다음 서버 작업(새 서버·재설치) 때 실제 Ubuntu에서 2.1절 스왑 명령과 8절 비대화형 crontab 명령을 한 번 확인한다.
+- 수정(PR #48 검증 '중요'): 8절 필터 `grep -vF '<경로>'`가 그 경로를 언급하는 감시 작업·주석까지 지워, 백업 줄을 변수 `L`에 두고 한 줄 전체가 같은 줄만 빼는 `(crontab -l 2>/dev/null | grep -vxF "$L" || true; echo "$L") | crontab -`로 바꾸고 설명을 맞췄다. `|| true`는 남길 줄이 없어 `grep`이 1로 끝날 때 `set -e` 셸에서 `echo` 전에 서브셸이 멈춰 빈 crontab이 설치되는 문제를 막는다(기존 명령에도 있던 문제). README에서 추출한 블록이 `bash -n`을 통과했고, 가짜 `crontab` 함수로 crontab 없음·빈 crontab·백업 줄만·백업 줄+같은 경로 감시 작업+주석+다른 작업과 각 두 번 실행을 기본·`pipefail`·`set -euo pipefail`에서 macOS(BSD grep, bash 3.2)와 로컬 `ubuntu:24.04` 컨테이너(GNU grep 3.11, bash 5.2)로 모의 실행해 21개 경우 모두 백업 줄 하나만 남고 나머지 줄이 그대로였다.
