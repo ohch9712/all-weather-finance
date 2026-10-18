@@ -26,7 +26,7 @@
 | 마이데이터 | 본인신용정보관리업 허가 사업자만 API 접근 가능 | 직접 연동 불가. `DataConnector` 인터페이스 + CODEF 데모(일 100회) 커넥터 + 마이데이터 스텁 |
 | 증여·상속 세법 (2026-10 현재) | 증여재산공제(10년 합산) 배우자 6억, 직계존속→성년 5천만, 미성년 2천만, 기타친족 1천만. 혼인·출산 공제 1억(합산 한도). 세율 10~50% 누진. 유산취득세 전환안은 국회 미통과 | 세법 수치를 시행일이 붙은 **규칙 버전 파일**로 분리. 계산 결과는 참고용 고지 |
 | 투자성향 등급 | 금융투자협회 표준 5등급, 점수 구간 20/40/60/80 | 설문 점수 → 5등급 매핑 |
-| 배포 | 두 증권사 모두 허용 IP 등록이 필요해 **고정 아웃바운드 IP**가 필요하다(VPS 또는 Vercel Static IPs) | 호스팅 결정은 마지막 작업(18)으로 미룬다. 개발은 로컬 IP 등록으로 진행 |
+| 배포 | 두 증권사 모두 허용 IP 등록이 필요해 **고정 아웃바운드 IP**가 필요하다(VPS 또는 Vercel Static IPs) | 호스팅 결정은 마지막 작업(18)으로 미룬다. 개발은 로컬 IP 등록으로 진행. **사용자 결정(2026-10-18): 서울 리전 VPS 한 대 + Docker Compose, 운영의 personal 등급 LLM은 결제 연결 Gemini**(Vercel Static IPs는 월 100달러·공유 IP·함수 800초·요청 4.5MB 제한으로 제외) |
 | Gemini API (2026-10 확인, 변경 기록 참고) | 권장 API는 Interactions API(2026-06 GA, `generateContent`는 레거시지만 계속 지원). 기본으로 대화를 서버에 저장한다(`store=true`, 유료 55일·무료 1일). `store=false`로 끌 수 있다. **무료 등급은 입력·응답이 Google 제품 개선에 쓰이고 사람이 검토할 수 있으며, 약관이 민감·개인정보를 보내지 말라고 한다.** `gemini-3.8-flash`는 안정 버전이고 무료 등급이 있으며 구조화 출력·함수 호출·thinking(low/medium/high)을 지원한다. 안전 차단은 HTTP 400 + `code: "safety"`, 출력 한도는 `status: "incomplete"`. Python SDK는 `google-genai`(2.31) | 개인 데이터가 없는 작업만 Gemini로 보낸다. 항상 `store=False`. 개인 데이터 작업은 결제가 연결된 키(`GEMINI_BILLING_ENABLED=true`)일 때만 Gemini를 허용 |
 | Ollama (로컬 LLM) | Python `ollama` 0.6.3: `chat`의 `tools`·`format`(JSON 스키마)·`think`·`stream`·`images`. 공식 `gemma4` 모델(e2b·e4b·12b·26b·31b)이 도구·이미지·사고를 지원하고 12b는 약 8GB다. PDF는 직접 받지 않는다 | 개인 금융 데이터 작업(챗봇, 카드·증권 파일 처리)의 기본 공급자. PDF는 `pypdfium2`로 쪽을 PNG로 바꿔 이미지로 넣는다 |
 
