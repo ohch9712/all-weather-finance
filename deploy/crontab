@@ -1,0 +1,5 @@
+# TZ=Asia/Seoul은 compose에서 설정한다. 각 작업의 실패·출력은 supercronic 로그에 남는다.
+30 16 * * 1-5 cd /app && python -m app.modules.market.jobs refresh-snapshot --resume
+0 8 * * 1 cd /app && python -m app.modules.market.jobs refresh-stocks
+0 4 * * * cd /app && python -m app.modules.market.jobs prune-snapshots --keep-days 30
+5 * * * * cd /app && python -m app.modules.imports.jobs purge-expired

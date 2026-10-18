@@ -91,3 +91,14 @@
 8. `.env.production.example`의 LLM 값이 2절과 같고(personal Gemini, 결제 연결), Ollama 서비스가 없다.
 9. 열린 포트가 80·443뿐이다.
 10. README만 보고 빈 서버에 배포할 수 있을 만큼 순서·명령이 빠짐없고, 나가는 IP 확인과 증권사 IP 등록, 공개 전 확인이 있다.
+
+## 구현 결과
+
+- 서울 VPS용 backend·frontend standalone·Caddy 이미지를 만들었다. 앱 이미지는 비루트이며 env·앱 테스트를 넣지 않는다. supercronic v0.2.50·xcaddy v0.4.7·caddy-ratelimit 커밋과 SHA-256을 고정하고 Caddy v2.11.7을 빌드한다. amd64·arm64 다운로드를 지원한다.
+- 운영 Compose의 6개 서비스, migrate 성공 뒤 backend·cron 기동, Caddy 동일 출처 라우팅·보안 헤더·CSP·인증 시도 제한, KST 배치 일정, 앱·마이그레이션 DB 계정 분리, 7일 보관 백업·새 DB 복구 스크립트와 빈 Ubuntu 서버부터의 한국어 README를 추가했다.
+- imports의 전체 만료 작업 삭제 함수·CLI와 테스트 3개를 추가했다. 전체 백엔드 1,396개, 프론트 482개 테스트 및 ruff·lint·tsc·build, Compose build를 통과했다.
+- `localhost` 내부 인증서·독립 프로젝트·신규 임시 비밀값·LLM disabled·외부 키 없음·시장 Mock으로 리허설했다. 가입·로그인·온보딩·추천·가계부 입력·학습·영상, 쿠키 속성, 11번째 로그인 429, 배치 4종, 새 DB 복구 뒤 기존 사용자 로그인, 이미지 시크릿 검사, Caddy 80·443만 게시됨을 확인했다. 자세한 명령과 판정은 `deploy/REHEARSAL.md`에 적었다.
+- 조정: Zod 4 JIT 탐지의 CSP eval 차단 이벤트를 없애기 위해 코디네이터가 승인하고 5절에 추가한 providers.tsx의 `z.config({ jitless: true })`만 반영했다. 이후 360·1280px 핵심 화면·영상 10회 검사에서 CSP 이벤트 0건·가로 스크롤 없음, 폼 검증·저장 정상과 프론트 전체 재검사 통과를 확인했다.
+- 조정: 기존 AI 상태 API에는 billing 필드가 없어 코디네이터 승인으로 personal.enabled=true·provider=gemini·reason=null과 운영 결제 설정을 함께 확인하도록 문서화했다. API 계약과 실제 외부 호출은 추가하지 않았다.
+- 실제 서버에서 사용자·코디네이터가 할 일: VPS·고정 IP·도메인·DNS·공개 인증서 준비, 결제 연결 Gemini·시장·CODEF 키 입력, 증권사 허용 IP 등록, 실제 키 동작·amd64 서버 확인, 개인정보처리방침·Google 개인 데이터 처리/국외 이전 안내 제공, 암호화 키·백업의 서버 밖 보관과 호스트 crontab 설정.
+- 리허설 브라우저·컨테이너·볼륨·이미지와 이번 생성 빌드 캐시를 정리했고 기존 개발 서버·공용 Postgres는 건드리지 않았다.

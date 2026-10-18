@@ -1,0 +1,10 @@
+node_modules
+.next
+.env*
+tests
+coverage
+*.tsbuildinfo
+.git
+AGENTS.md
+Dockerfile
+README.md

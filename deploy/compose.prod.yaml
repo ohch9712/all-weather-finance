@@ -1,0 +1,133 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-app-environment: &app-environment
+  APP_ENV: production
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL을 설정하세요}
+  APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY를 설정하세요}
+  FRONTEND_ORIGIN: https://${DOMAIN:?DOMAIN을 설정하세요}
+  COOKIE_SECURE: "true"
+  TZ: Asia/Seoul
+  LLM_GENERAL_PROVIDER: ${LLM_GENERAL_PROVIDER:-gemini}
+  LLM_PERSONAL_PROVIDER: ${LLM_PERSONAL_PROVIDER:-gemini}
+  GEMINI_BILLING_ENABLED: ${GEMINI_BILLING_ENABLED:-true}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
+  GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-60}
+  MARKET_DATA_PROVIDER: ${MARKET_DATA_PROVIDER:-mock}
+  KIWOOM_ENV: ${KIWOOM_ENV:-real}
+  KIWOOM_APP_KEY: ${KIWOOM_APP_KEY:-}
+  KIWOOM_APP_SECRET: ${KIWOOM_APP_SECRET:-}
+  TOSS_CLIENT_ID: ${TOSS_CLIENT_ID:-}
+  TOSS_CLIENT_SECRET: ${TOSS_CLIENT_SECRET:-}
+  CODEF_ENV: ${CODEF_ENV:-production}
+  CODEF_CLIENT_ID: ${CODEF_CLIENT_ID:-}
+  CODEF_CLIENT_SECRET: ${CODEF_CLIENT_SECRET:-}
+  CODEF_PUBLIC_KEY: ${CODEF_PUBLIC_KEY:-}
+  CHAT_DAILY_MESSAGE_LIMIT: ${CHAT_DAILY_MESSAGE_LIMIT:-100}
+  IMPORT_MAX_FILE_MB: ${IMPORT_MAX_FILE_MB:-10}
+
+x-backend: &backend
+  image: ${COMPOSE_PROJECT_NAME:-finance}-backend:local
+  build:
+    context: ../backend
+  environment: *app-environment
+  logging: *logging
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB를 설정하세요}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER를 설정하세요}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD를 설정하세요}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:?POSTGRES_APP_USER를 설정하세요}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD를 설정하세요}
+      TZ: Asia/Seoul
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init-app.sh:/docker-entrypoint-initdb.d/10-app.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *logging
+
+  migrate:
+    <<: *backend
+    restart: "no"
+    environment:
+      <<: *app-environment
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?MIGRATION_DATABASE_URL을 설정하세요}
+    command: ["uv", "run", "alembic", "upgrade", "heads"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    <<: *backend
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  cron:
+    <<: *backend
+    restart: unless-stopped
+    command: ["supercronic", "/app/deploy/crontab"]
+    volumes:
+      - ./crontab:/app/deploy/crontab:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    image: ${COMPOSE_PROJECT_NAME:-finance}-frontend:local
+    build:
+      context: ../frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ""
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
+  caddy:
+    image: ${COMPOSE_PROJECT_NAME:-finance}-caddy:local
+    build:
+      context: ./caddy
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN을 설정하세요}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL을 설정하세요}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    logging: *logging
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

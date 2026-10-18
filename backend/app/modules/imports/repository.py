@@ -26,3 +26,9 @@ def add(db: Session, job: ImportJob) -> ImportJob:
 
 def remove(db: Session, job: ImportJob) -> None:
     db.delete(job)
+
+
+def remove_all_expired(db: Session, now: datetime) -> int:
+    """배치 전용: 모든 사용자의 만료 작업을 삭제하고 건수를 반환한다."""
+    result = db.execute(delete(ImportJob).where(ImportJob.expires_at <= now))
+    return result.rowcount
