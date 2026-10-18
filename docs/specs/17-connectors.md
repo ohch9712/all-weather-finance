@@ -74,6 +74,22 @@
   - `amount` = `resAccountBalance` 정수, `asset_class="cash"`
   - `resAccountCurrency != "KRW"`, 마이너스 통장(`resOverdraftAcctYN == "1"`), 잔액이 음수인 계좌는 넣지 않는다. 외화·펀드·대출·보험 목록은 쓰지 않는다.
 - 응답·로그·`summary`·예외 메시지에 계좌번호 원문, 카드번호, connectedId 원문을 남기지 않는다.
+- 카드 동기화의 실패 이유(`summary.errors`): 읽지 못한 행마다 `{"rowNumber", "field", "message"}` 하나를 남긴다(`ImportResult`의 `RowError`와 같은 키, camelCase).
+  - `rowNumber`는 CODEF 응답 목록에서 1부터 센 순번이다(거절로 건너뛴 행도 순번에 넣는다). `ledger.import_entries`가 돌려준 실패(`RowError.row_number`는 넘긴 목록의 순번)도 그 행의 응답 순번으로 바꿔 합친다.
+  - `field`는 원인이 된 CODEF 필드 이름이고, 가계부 입력 검사에서 실패한 행은 `null`이다.
+  - `message`는 아래 고정 문구만 쓴다. 응답 원문 값(이용일·가맹점명·금액·카드번호·승인번호)은 넣지 않는다.
+  - 한 행에 원인이 여럿이면 표 순서(이용일 → 가맹점명 → 금액 → 취소금액)로 처음 걸린 하나만 남긴다. 검사하는 필드 값이 `*`로만 이뤄졌으면(가려진 값) 그 필드 이름과 "값이 가려져 있어 읽을 수 없습니다."를 남긴다.
+  - `errors`는 응답 순번 순서로 최대 20건만 저장한다. `failed`는 전체 실패 건수를 그대로 센다. 거절(`"3"`)로 건너뛴 행은 실패가 아니므로 넣지 않는다.
+
+| 원인 | `field` | `message` |
+| --- | --- | --- |
+| 검사하는 필드 값이 `*`로만 이뤄짐 | 그 필드 | `값이 가려져 있어 읽을 수 없습니다.` |
+| 이용일이 없거나 `YYYYMMDD` 날짜가 아님 | `resUsedDate` | `이용일을 읽을 수 없습니다.` |
+| 가맹점명이 비어 있음 | `resMemberStoreName` | `가맹점명이 비어 있습니다.` |
+| 국내 이용금액을 정수로 읽을 수 없음 | `resUsedAmount` | `이용금액을 읽을 수 없습니다.` |
+| 해외 이용인데 원화 금액이 없거나 읽을 수 없음 | `resKRWAmt` | `해외 이용 건의 원화 금액이 없습니다.` |
+| 취소 행의 취소금액을 읽을 수 없음 | `resCancelAmount` | `취소금액을 읽을 수 없습니다.` |
+| `ledger.import_entries` 입력 검사 실패 | `null` | 그 함수의 메시지 그대로(고정 문구) |
 
 ### 4.2 구현 메모
 
@@ -161,6 +177,7 @@ UNIQUE `(user_id, provider, kind, organization)`.
 - 계정 목록: 기관·별칭·종류, "가져오기"(카드는 기간 선택), 최근 동기화 결과(저장·중복·실패 또는 추가·갱신), 삭제.
 - 계정을 삭제하면 그 계정의 동기화 이력 쿼리는 다시 요청하지 않고 캐시에서 지운다. 계정 목록에서 먼저 빼서 카드가 사라진 뒤 나머지(계정 목록·가계부·자산배분·홈)를 갱신한다. 삭제 뒤 `GET /api/connectors/syncs?accountId=<삭제한 계정>` 요청이 나가지 않아야 한다(웨이브 4 통합 검증 F1).
 - 카드 가져오기 완료 후 "가계부에서 보기"(`/ledger/import/review?batch=<syncId>`) 링크.
+- 카드 동기화 결과에 실패가 있으면 결과 아래에 "실패 이유" 목록을 보여 준다. 항목은 `"{rowNumber}번째 승인 내역: {message}"`로 최대 5건이고, 더 있으면 `"외 N건"`(N = `failed` − 보여 준 건수)을 붙인다. `failed`가 1 이상인데 `errors`가 비어 있으면(이 규칙 전에 저장된 이력) "실패 이유가 기록되지 않은 이전 가져오기입니다."를 보여 준다. 360px에서 줄바꿈되어 가로로 넘치지 않아야 한다.
 
 ## 9. 테스트
 
@@ -169,6 +186,7 @@ UNIQUE `(user_id, provider, kind, organization)`.
 - 비밀번호·아이디가 DB·로그·예외 메시지·응답에 남지 않음(로그 캡처 검사)
 - 카드 동기화가 `ledger.import_entries`로, 은행 동기화가 `allocation.upsert_synced_holdings`로 들어감(두 번 실행 시 중복 없음)
 - 마이데이터 스텁 501, 키 없음 409, 동의 없음 422, 실패 시 동기화 행 `failed`, 사용자 격리 404
+- 실패 이유: 4.1 표의 원인마다 `summary.errors`에 응답 순번·필드·고정 문구가 남고 원문 값이 없음, 가계부 검사 실패의 순번 변환, 거절 행 제외, 20건 상한과 `failed` 전체 건수
 - 실제 외부 호출 없음(`assert_all_mocked`)
 
 ## 10. 완료 기준
@@ -268,3 +286,31 @@ UNIQUE `(user_id, provider, kind, organization)`.
 - 계정 삭제(`/v1/account/delete`) 두 건 모두 204, 은행 계정 삭제 뒤 codef 자산 0건.
 - 로그에 로그인 아이디·비밀번호·clientId·clientSecret이 남지 않음을 확인했다.
 - 남은 일: 실패 행의 `summary.errors`가 비어 있어 화면에 실패 이유가 나오지 않는다(경미). 데모 키로 실제 승인내역 반영을 확인한다.
+
+### 실패 이유 기록 수정
+
+- **발견(코디네이터의 CODEF 샌드박스 실제 호출 확인 후속, 경미)**: 샌드박스 카드 승인내역 한 건의 이용일·가맹점명·금액이 `********`로 가려져 summary가 `inserted 0, failed 1`이 됐지만 `summary.errors`가 빈 배열이라 화면에는 "실패 1건"만 나오고 이유가 없었다. `fetch_card_approvals`가 실패 행을 숫자로만 세고, 카드 동기화가 `errors`를 항상 `[]`로 저장하며 `ledger.import_entries`가 돌려준 `errors`도 버렸기 때문이다.
+- **바뀐 구현 결과**: 앞의 "스펙의 미정 세부 사항에 대한 구현 선택"에 적은 "개인정보 비노출을 위해 `errors`는 빈 배열로 보관한다"는 이 수정으로 바뀌었다. 이제 카드 summary의 `errors`에 4.1 표의 고정 문구로 실패 이유를 남긴다(응답 원문 값은 여전히 넣지 않는다).
+- **백엔드**(`connectors/codef.py`, `connectors/service.py`)
+  - `fetch_card_approvals`는 응답 목록을 1부터 세면서(거절 `"3"` 행도 순번에 넣고 건너뜀) 행마다 이용일 → 가맹점명 → 금액(국내 `resUsedAmount`, 해외 `resKRWAmt`) → 취소금액(취소 행이고 값이 있을 때) 순서로 검사해 처음 걸린 원인 하나를 4.1 표의 필드 이름과 고정 문구로 남긴다. 검사하는 값이 `*`로만 이뤄졌으면 그 필드와 "값이 가려져 있어 읽을 수 없습니다."를 남긴다. 이용일은 숫자 8자리 `YYYYMMDD`만 받는다(이전에는 `strptime`이 `2026910` 같은 자릿수 부족 값도 받았다).
+  - `ApprovalRows`는 공개 `list[LedgerImportRow]` 계약을 그대로 두고 `numbers`(넘긴 각 행의 응답 순번), `failures`(`RowFailure(row_number, field, message)`), `failed`(= `len(failures)`)를 함께 전달한다.
+  - 카드 동기화의 `card_summary`가 `ledger.import_entries` 결과의 `RowError.row_number`(넘긴 목록 순번)를 `numbers`로 응답 순번으로 바꿔 `field: null`로 커넥터 실패와 합치고, 응답 순번 순으로 정렬해 앞 20건만 `{"rowNumber", "field", "message"}`로 저장한다. `failed`는 두 실패의 전체 건수다. imports·ledger 모듈 코드는 고치지 않았고 `import_entries` 반환값만 쓴다. 은행 동기화와 API 계약의 다른 부분은 그대로다.
+- **프론트**(`features/connectors/types.ts`, `components/AccountCard.tsx`): `ImportSummary.errors`를 `ImportRowError[]`(`{rowNumber, field, message}`)로 바꿨다. 카드 결과의 `failed`가 1 이상이면 결과 줄 아래에 "실패 이유" 제목과 `"{rowNumber}번째 승인 내역: {message}"` 목록(최대 5건)을 보여 주고, `failed − 보여 준 건수`가 남으면 "외 N건"을 붙인다. `errors`가 비어 있으면 "실패 이유가 기록되지 않은 이전 가져오기입니다."를 보여 준다. 실패가 0건이면 아무것도 보여 주지 않는다. 긴 문구는 `break-words`로 줄바꿈한다.
+- **테스트**
+  - `backend/tests/connectors/test_connectors.py`: 샌드박스 재현(객체 한 건, 세 필드 가림 → `rowNumber 1`, `resUsedDate`, 가림 문구), 4.1 표의 원인마다(가려진 이용일·가맹점명·국내 금액·원화 금액·취소금액, 이용일 없음·형식 오류, 빈 가맹점, 국내 금액 읽기 실패, 해외 원화 없음·읽기 실패, 취소금액 읽기 실패, 가맹점명이 금액보다 먼저인 검사 순서), 가계부 검사 실패 두 건의 순번 변환(넘긴 목록 2·3번째 → 응답 4·16번째, `field: null`), 거절 행 제외와 순번 포함, errors·로그에 이용일·가맹점명·금액·카드명·승인번호 원문 없음, 커넥터·가계부 실패 30건이 섞인 응답의 20건 상한·정렬·`failed` 30, 이력 API의 summary가 응답과 같음을 확인한다. 기존 카드 종단 테스트의 기대값도 새 errors로 바꿨다.
+  - `frontend/tests/connectors/connections.test.tsx`: 실패 9건·이유 7건이면 이유 5건과 "외 4건", 이유를 모두 보여 주면 "외 N건" 없음, `failed 1`·`errors []`면 이전 이력 문구, 실패 0건이면 "실패 이유" 없음을 확인한다.
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 17·8017/3017·finance_17 준비 성공 |
+| `cd backend && uv run ruff check .` | 통과 |
+| `cd backend && uv run ruff format --check .` | 300개 파일 통과 |
+| `cd backend && uv run pytest` | 1,387개 통과(커넥터 22개, 새 테스트 3개 포함). 기존 Starlette/httpx 사용 중단 경고 1개 |
+| `cd frontend && npm run lint` | 통과 |
+| `cd frontend && npx tsc --noEmit` | 통과 |
+| `cd frontend && npm run test` | 47개 파일·472개 테스트 통과(커넥터 10개, 새 테스트 3개 포함) |
+| `cd frontend && npm run build` | 통과(종료 코드 0), `/settings/connections` 생성 |
+| 실제 서버 재현 확인(아래) | 샌드박스 재현 카드 "1번째 승인 내역: 값이 가려져 있어 읽을 수 없습니다.", 여러 실패 카드 이유 5건과 "외 2건", 이전 이력 카드 안내 문구. 360·1280px 모두 `scrollWidth == innerWidth` |
+
+- 실제 서버 확인: CODEF 키가 없어 `$TMPDIR` 임시 실행 스크립트가 이 프로세스에서 만든 가짜 키·RSA 키로 설정을 채우고, CODEF 토큰·계정 등록·카드 승인내역을 respx 고정 응답(`assert_all_mocked`, LLM 꺼 둠)으로 바꾼 채 백엔드를 8017에 띄웠다. 프론트는 `scripts/start.sh frontend`(3017)로 띄웠다. 독립 헤드리스 Chrome 컨텍스트(Playwright)에서 API로 가입·출생연도를 넣고 카드 계정 세 개를 등록한 뒤 쿠키를 지우고 로그인 화면에서 로그인했다. `/settings/connections`에서 신한카드 계정(샌드박스와 같은 객체 한 건·가려진 값 응답)과 KB국민카드 계정(거절 1·저장 2·실패 7건 응답)의 "가져오기"를 눌렀다. 결과는 `POST /api/connectors/sync` 200 `succeeded`, summary `failed 1`·`errors [{rowNumber 1, field "resUsedDate", 가림 문구}]`와 `inserted 2`·`failed 7`·errors 7건(순번 3~9, 가계부 검사 실패 4번은 `field null`)이었다. 삼성카드 계정에는 이 수정 전 형태(`failed 1`, `errors []`)의 이력을 임시 스크립트로 finance_17에 직접 넣어 이전 이력 문구를 확인했다. `/api/market/connections/egress-ip`는 브라우저에서 가로채 가짜 응답으로 바꿨고, localhost 밖으로 나간 브라우저 요청은 0건이었다. 400 이상 응답은 로그인 전 `/api/auth/me` 401 두 건뿐이었고, 서버 로그에 가짜 키·로그인 값·500 오류가 없었다. 띄운 백엔드는 종료했고 프론트는 `scripts/stop.sh`로 멈췄다.
+- 남은 일: 코디네이터 검증과 병합. 데모 키로 실제 값이 오는 승인내역의 가계부 반영 확인은 이 수정 범위 밖이다.

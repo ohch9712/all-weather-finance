@@ -20,6 +20,9 @@ from app.modules.ledger import service as ledger
 
 logger = logging.getLogger(__name__)
 
+# 카드 동기화 summary.errors에 남기는 실패 이유 최대 건수(스펙 17 4.1)
+MAX_SUMMARY_ERRORS = 20
+
 
 @lru_cache
 def get_codef_connector() -> CodefConnector:
@@ -126,6 +129,27 @@ def delete_account(db, user_id, account_id):
     db.commit()
 
 
+def card_summary(rows, result):
+    # 외부 원문·행 데이터는 summary에 넣지 않는다. 공용 ImportResult의 키는 camelCase다.
+    # 가계부 검사 실패의 row_number는 넘긴 목록 순번이라 그 행의 CODEF 응답 순번으로 바꾼다.
+    numbers = getattr(rows, "numbers", None) or range(1, len(rows) + 1)
+    failures = [(numbers[error.row_number - 1], None, error.message) for error in result.errors]
+    failures += [
+        (failure.row_number, failure.field, failure.message)
+        for failure in getattr(rows, "failures", [])
+    ]
+    failures.sort(key=lambda failure: failure[0])
+    return {
+        "inserted": result.inserted,
+        "skippedDuplicates": result.skipped_duplicates,
+        "failed": result.failed + getattr(rows, "failed", 0),
+        "errors": [
+            {"rowNumber": number, "field": field, "message": message}
+            for number, field, message in failures[:MAX_SUMMARY_ERRORS]
+        ],
+    }
+
+
 def sync_account(db, user_id, data):
     account = require_account(db, user_id, data.account_id)
     connector = get_connector(account.provider)
@@ -156,13 +180,7 @@ def sync_account(db, user_id, data):
                     connected_id, account.organization, data.range_start, data.range_end
                 )
                 result = ledger.import_entries(db, user_id, rows, source="codef", batch_id=row.id)
-                # 외부 원문·행 데이터는 이력에 넣지 않는다. 공용 ImportResult의 키는 camelCase다.
-                row.summary = {
-                    "inserted": result.inserted,
-                    "skippedDuplicates": result.skipped_duplicates,
-                    "failed": result.failed + getattr(rows, "failed", 0),
-                    "errors": [],
-                }
+                row.summary = card_summary(rows, result)
             else:
                 items = connector.fetch_bank_balances(connected_id, account.organization)
                 result = allocation.upsert_synced_holdings(

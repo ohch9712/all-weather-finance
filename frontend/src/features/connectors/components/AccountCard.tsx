@@ -12,11 +12,24 @@ import { Label } from "@/components/ui/label";
 import { getErrorMessage } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/format";
 import { useConnectorActions, useConnectorSyncs } from "../hooks";
-import type { ConnectorAccount } from "../types";
+import type { ConnectorAccount, ImportSummary } from "../types";
 
 function dateDefaults() {
   const to = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
   return { from: to.slice(0, 8) + "01", to };
+}
+const MAX_REASONS = 5;
+function FailureReasons({ summary }: { summary: ImportSummary }) {
+  if (summary.failed < 1) return null;
+  const shown = (summary.errors ?? []).slice(0, MAX_REASONS);
+  const rest = summary.failed - shown.length;
+  return <div className="min-w-0 space-y-1">
+    <p className="font-medium">실패 이유</p>
+    {shown.length === 0 ? <p className="break-words text-muted-foreground">실패 이유가 기록되지 않은 이전 가져오기입니다.</p> : <>
+      <ul className="list-disc space-y-1 break-words pl-5">{shown.map(error => <li key={error.rowNumber}>{error.rowNumber}번째 승인 내역: {error.message}</li>)}</ul>
+      {rest > 0 && <p className="text-muted-foreground">외 {rest}건</p>}
+    </>}
+  </div>;
 }
 export function AccountCard({ account, available }: { account: ConnectorAccount; available: boolean }) {
   const [range, setRange] = useState(dateDefaults);
@@ -48,7 +61,7 @@ export function AccountCard({ account, available }: { account: ConnectorAccount;
       {syncs.isPending ? <LoadingState rows={1} /> : syncs.error ? <ErrorState error={syncs.error} onRetry={() => void syncs.refetch()} /> : latest ? <div className="space-y-2 rounded-lg bg-muted p-3" role="status">
         <p>최근 가져오기 · {formatDateTime(latest.startedAt)}</p>
         {latest.status === "running" ? <p>데이터를 가져오는 중입니다.</p> : latest.status === "failed" ? <p className="text-destructive">가져오지 못했습니다. 로그인 방법과 기관 상태를 확인해 다시 시도해 주세요.{latest.errorCode && <span className="ml-1">({latest.errorCode})</span>}</p> : latest.summary && <>
-          {"inserted" in latest.summary ? <p>저장 {latest.summary.inserted}건 · 중복 {latest.summary.skippedDuplicates}건 · 실패 {latest.summary.failed}건</p> : <p>추가 {latest.summary.created}건 · 갱신 {latest.summary.updated}건 · 삭제 {latest.summary.removed}건</p>}
+          {"inserted" in latest.summary ? <><p>저장 {latest.summary.inserted}건 · 중복 {latest.summary.skippedDuplicates}건 · 실패 {latest.summary.failed}건</p><FailureReasons summary={latest.summary} /></> : <p>추가 {latest.summary.created}건 · 갱신 {latest.summary.updated}건 · 삭제 {latest.summary.removed}건</p>}
           {latest.kind === "card_approvals" && <Link className="inline-block underline underline-offset-4" href={`/ledger/import/review?batch=${latest.id}`}>가계부에서 보기</Link>}
         </>}
       </div> : <p className="text-muted-foreground">아직 가져온 내역이 없어요.</p>}
