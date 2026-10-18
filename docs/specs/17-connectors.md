@@ -158,23 +158,42 @@ UNIQUE `(user_id, provider, kind, organization)`.
 | `GET /api/connectors/organizations?kind=card` | `200 {"items": [{"code": "…", "name": "신한카드"}]}`(가이드 표) |
 | `GET /api/connectors/accounts` | `200 {"items": [Account...]}` |
 | `POST /api/connectors/accounts` | `201 Account` |
-| `DELETE /api/connectors/accounts/{id}` | `204`(CODEF 계정 삭제 호출 후 행 삭제. CODEF 호출이 실패해도 행은 지우고 경고를 로그에 남긴다) |
+| `DELETE /api/connectors/accounts/{id}?localOnly=` | `204`(CODEF 계정 삭제가 성공한 뒤에만 행 삭제. 아래 "계정 삭제" 규칙) |
 | `POST /api/connectors/sync` | `200 Sync` |
 | `GET /api/connectors/syncs?accountId=&page=` | `200 Page<Sync>` |
 
-- `POST /accounts` 요청: `{"provider": "codef", "kind": "card", "organization": "…", "label": "신한카드", "loginId": "…", "password": "…", "consent": true}`. `consent`가 없으면 `422`("카드사 로그인 정보가 CODEF로 전송되는 데 동의해 주세요."). 제공자가 쓸 수 없으면 `409 CONFLICT`("CODEF 키가 설정되지 않았습니다."). `organization`이 4절 지원 기관(그 `kind`의 목록)에 없으면 `422 VALIDATION_ERROR`("지원하지 않는 기관입니다."). 같은 기관을 다시 등록하면 `409 CONFLICT`.
+- `POST /accounts` 요청: `{"provider": "codef", "kind": "card", "organization": "…", "label": "신한카드", "loginId": "…", "password": "…", "consent": true}`. `consent`가 없으면 `422`("금융사 로그인 정보를 CODEF에 등록하는 데 동의해 주세요."). 제공자가 쓸 수 없으면 `409 CONFLICT`("CODEF 키가 설정되지 않았습니다."). `organization`이 4절 지원 기관(그 `kind`의 목록)에 없으면 `422 VALIDATION_ERROR`("지원하지 않는 기관입니다."). 같은 기관을 다시 등록하면 `409 CONFLICT`.
 - `Account`: `{"id", "provider", "kind", "organization", "organizationName", "label", "createdAt"}`(connectedId 원문 없음)
 - `POST /sync` 요청: `{"accountId": "…", "from": "2026-09-01", "to": "2026-10-16"}`(카드만 기간 사용, 최대 92일)
   - 카드: `fetch_card_approvals` → `ledger.import_entries(db, user_id, rows, source="codef", batch_id=sync_id)`
   - 은행: `fetch_bank_balances` → `allocation.upsert_synced_holdings(db, user_id, source="codef", connection_id=account_id, items=…)`
   - 동기화 행을 `running`으로 만들고 끝나면 `succeeded`/`failed`. 응답 `Sync`: `{"id", "accountId", "kind", "status", "rangeStart", "rangeEnd", "startedAt", "finishedAt", "summary", "errorCode"}`
 - 남의 계정 404. 실패는 `502 CONNECTOR_FAILED`(동기화 행은 `failed`로 남는다), 미지원 `501 CONNECTOR_NOT_SUPPORTED`.
+- 계정 삭제(`DELETE /accounts/{id}`). 화면이 "연결을 삭제하면 CODEF에 등록된 로그인 정보도 즉시 삭제됩니다"라고 안내하므로, CODEF에서 지우지 못했는데 이 앱의 연결만 조용히 지우지 않는다.
+  - 기본(`localOnly` 없음 또는 `false`): CODEF `/v1/account/delete`가 성공해야(`result.code == "CF-00000"`이고 `data.errorList`가 비어 있음) 행을 지운다(은행이면 4.2대로 현금 자산도 같은 트랜잭션에서). `CodefConnector.delete_account`가 `errorList`를 검사해 비어 있지 않으면 실패로 올린다.
+  - CODEF 호출이 실패하거나 `errorList`가 있으면 행과 현금 자산을 그대로 두고 `502 CONNECTOR_FAILED`("CODEF에서 로그인 정보를 지우지 못했습니다. 잠시 후 다시 시도해 주세요.")를 돌려준다. 키가 없으면 CODEF를 부르지 않고 행을 그대로 두며 `409 CONFLICT`("CODEF 키가 설정되지 않아 CODEF에 등록된 로그인 정보를 지울 수 없습니다.")다. 로그에는 고정 문구와 형식이 검증된 CODEF 결과 코드만 남긴다(connectedId 원문·응답 메시지 없음).
+  - `localOnly=true`: CODEF를 부르지 않고 이 앱의 연결(은행이면 현금 자산도)만 지운다. `204`. 키를 바꿔 CODEF가 그 connectedId를 모르게 된 경우처럼 기본 삭제가 계속 실패할 때 쓰는 탈출구다. 경고 로그 "CODEF 삭제 없이 로컬 연결을 삭제했습니다."를 남긴다.
+  - 남의 계정은 두 경우 모두 404.
 
 ## 8. 화면 명세 (`/settings/connections`의 "데이터 자동 수집" 섹션)
 
 - 마이데이터 안내 카드(왜 연동할 수 없는지), CODEF 상태(사용 가능 여부, 환경 배지 "샌드박스"·"데모").
-- 계정 추가 다이얼로그: 종류(카드·은행), 기관 선택, 별칭, 아이디, 비밀번호, 경고 문구("입력한 로그인 정보는 저장하지 않고 CODEF로 한 번만 전송합니다. CODEF는 이 정보로 금융사에 로그인해 데이터를 가져옵니다."), 동의 체크.
+- 계정 추가 다이얼로그: 종류(카드·은행), 기관 선택, 별칭, 아이디, 비밀번호, 아래 "로그인 정보 처리 방식" 안내 박스, 동의 체크.
+- 로그인 정보 문구는 아래를 글자 그대로 쓴다. 근거는 CODEF 보안 정책(https://codef.io/legal/security "5. 서비스(DB, 데이터) 보안": 인증정보를 AES-256·RSA 등으로 암호화해 저장), CODEF 이용약관(https://codef.io/legal/terms: 커넥티드 아이디는 로그인 정보를 식별하는 값), 개발 가이드 계정 삭제(즉시 삭제·복구 불가), CODEF가 이용기관에 주는 개인정보 위탁 안내(https://codef.io/privacy-pop: 품질향상·업무 대응을 위한 요청/응답 데이터 저장, 위탁 계약 종료 시 일괄 삭제)다(코디네이터 2026-10-18 확인).
+  - 안내 박스 제목: `로그인 정보 처리 방식`
+  - 안내 박스 목록(순서대로 다섯 항목):
+    1. `이 앱은 아이디·비밀번호를 저장하지 않습니다. 비밀번호는 암호화해 CODEF로 보냅니다.`
+    2. `로그인 정보는 CODEF에 등록되고, CODEF는 이를 AES-256 등으로 암호화해 보관합니다. 연결할 때와 '가져오기'를 누를 때만 이 정보로 금융사에 로그인합니다.`
+    3. `이 앱은 카드 승인내역과 계좌 잔액 조회만 요청합니다. 결제·이체 기능은 없습니다.`
+    4. `연결을 삭제하면 CODEF에 등록된 로그인 정보도 즉시 삭제됩니다. 금융사 비밀번호를 바꿔도 등록된 정보로는 더 이상 로그인할 수 없습니다.`
+    5. `CODEF는 서비스 품질 관리와 문의 대응을 위해 조회 요청·응답 기록을 보관합니다. 이 기록은 연결을 삭제해도 남으며, 이 앱과 CODEF의 이용 계약이 끝나면 일괄 삭제됩니다.`
+  - 목록 아래 외부 링크 `CODEF 보안 정책 보기` → `https://codef.io/legal/security`(`target="_blank"`, `rel="noopener noreferrer"`).
+  - 동의 체크 문구: `위 내용을 확인했고, 금융사 로그인 정보를 CODEF에 등록하는 데 동의합니다.` 체크하지 않고 제출하면 `안내 내용을 확인하고 동의해 주세요.`
+  - CODEF 상태 카드의 안내 줄: `이 앱에는 연결 식별값만 암호화해 저장해요. 로그인 정보는 CODEF가 암호화해 보관하고, 연결을 삭제하면 함께 지워져요.`
+  - 기존 은행 안내("은행은 기관에 따라 아이디 로그인이 막힐 수 있어요.")와 다이얼로그 설명은 그대로 둔다.
 - 계정 목록: 기관·별칭·종류, "가져오기"(카드는 기간 선택), 최근 동기화 결과(저장·중복·실패 또는 추가·갱신), 삭제.
+- 삭제 확인 창 설명: 카드는 `연결과 CODEF에 등록된 로그인 정보를 삭제합니다. 이미 기록한 가계부 내역은 유지됩니다.`, 은행은 `연결과 CODEF에 등록된 로그인 정보, 이 연결에서 가져온 현금 자산을 삭제합니다.`
+- 삭제가 `502 CONNECTOR_FAILED` 또는 `409 CONFLICT`로 실패하면 계정 카드에 서버 메시지를 보여 주고, 그 아래 `이 앱에서만 삭제` 버튼을 보여 준다. 누르면 확인 창(제목 `이 앱에서만 삭제할까요?`, 설명 `CODEF에 등록된 로그인 정보는 남을 수 있습니다. 금융사 비밀번호를 바꾸면 남은 정보로는 로그인할 수 없습니다.`, 은행이면 끝에 ` 이 연결에서 가져온 현금 자산도 삭제합니다.`, 확인 버튼 `이 앱에서만 삭제`, 빨간색)을 띄우고, 확인하면 `DELETE /api/connectors/accounts/{id}?localOnly=true`를 부른다. 성공 뒤 처리(캐시·갱신 순서)는 일반 삭제와 같다. 다른 오류(네트워크 등)나 삭제 성공 뒤에는 이 버튼을 보여 주지 않는다.
 - 계정을 삭제하면 그 계정의 동기화 이력 쿼리는 다시 요청하지 않고 캐시에서 지운다. 계정 목록에서 먼저 빼서 카드가 사라진 뒤 나머지(계정 목록·가계부·자산배분·홈)를 갱신한다. 삭제 뒤 `GET /api/connectors/syncs?accountId=<삭제한 계정>` 요청이 나가지 않아야 한다(웨이브 4 통합 검증 F1).
 - 카드 가져오기 완료 후 "가계부에서 보기"(`/ledger/import/review?batch=<syncId>`) 링크.
 - 카드 동기화 결과에 실패가 있으면 결과 아래에 "실패 이유" 목록을 보여 준다. 항목은 `"{rowNumber}번째 승인 내역: {message}"`로 최대 5건이고, 더 있으면 `"외 N건"`(N = `failed` − 보여 준 건수)을 붙인다. `failed`가 1 이상인데 `errors`가 비어 있으면(이 규칙 전에 저장된 이력) "실패 이유가 기록되지 않은 이전 가져오기입니다."를 보여 준다. 360px에서 줄바꿈되어 가로로 넘치지 않아야 한다.
@@ -187,6 +206,8 @@ UNIQUE `(user_id, provider, kind, organization)`.
 - 카드 동기화가 `ledger.import_entries`로, 은행 동기화가 `allocation.upsert_synced_holdings`로 들어감(두 번 실행 시 중복 없음)
 - 마이데이터 스텁 501, 키 없음 409, 동의 없음 422, 실패 시 동기화 행 `failed`, 사용자 격리 404
 - 실패 이유: 4.1 표의 원인마다 `summary.errors`에 응답 순번·필드·고정 문구가 남고 원문 값이 없음, 가계부 검사 실패의 순번 변환, 거절 행 제외, 20건 상한과 `failed` 전체 건수
+- 계정 삭제: CODEF 성공 시 행(은행이면 현금 자산) 삭제 204, CODEF 실패 응답·`errorList` 있음·네트워크 오류면 502이고 행·현금 자산이 남음, 키 없음 409이고 CODEF 미호출·행 남음, `localOnly=true`면 CODEF 미호출 204, 남의 계정 404(두 방식), 로그에 connectedId 원문 없음
+- 화면: 안내 박스 제목·다섯 항목·링크 속성·동의 문구·상태 카드 줄·삭제 확인 창 설명이 8절 문구와 같음, 삭제 502·409 뒤 `이 앱에서만 삭제` 표시와 `localOnly=true` 요청, 다른 오류에서는 버튼 없음
 - 실제 외부 호출 없음(`assert_all_mocked`)
 
 ## 10. 완료 기준
@@ -203,6 +224,8 @@ UNIQUE `(user_id, provider, kind, organization)`.
 4. 10·14 서비스 함수만 호출하고 그 모듈 코드를 고치지 않았다.
 5. 7절 응답·에러 코드가 같다.
 6. 마이데이터 안내 문구가 화면과 API에 있다.
+7. 로그인 정보 안내·동의·상태 카드·삭제 확인 문구가 8절과 글자 그대로 같고, "저장하지 않고 한 번만 전송" 같은 이전 문구가 화면·테스트에 남아 있지 않다.
+8. CODEF 삭제가 실패하면 연결이 남고(502·409), `이 앱에서만 삭제`를 확인해야만 CODEF 없이 지워진다.
 
 ## 구현 결과
 
@@ -314,3 +337,27 @@ UNIQUE `(user_id, provider, kind, organization)`.
 
 - 실제 서버 확인: CODEF 키가 없어 `$TMPDIR` 임시 실행 스크립트가 이 프로세스에서 만든 가짜 키·RSA 키로 설정을 채우고, CODEF 토큰·계정 등록·카드 승인내역을 respx 고정 응답(`assert_all_mocked`, LLM 꺼 둠)으로 바꾼 채 백엔드를 8017에 띄웠다. 프론트는 `scripts/start.sh frontend`(3017)로 띄웠다. 독립 헤드리스 Chrome 컨텍스트(Playwright)에서 API로 가입·출생연도를 넣고 카드 계정 세 개를 등록한 뒤 쿠키를 지우고 로그인 화면에서 로그인했다. `/settings/connections`에서 신한카드 계정(샌드박스와 같은 객체 한 건·가려진 값 응답)과 KB국민카드 계정(거절 1·저장 2·실패 7건 응답)의 "가져오기"를 눌렀다. 결과는 `POST /api/connectors/sync` 200 `succeeded`, summary `failed 1`·`errors [{rowNumber 1, field "resUsedDate", 가림 문구}]`와 `inserted 2`·`failed 7`·errors 7건(순번 3~9, 가계부 검사 실패 4번은 `field null`)이었다. 삼성카드 계정에는 이 수정 전 형태(`failed 1`, `errors []`)의 이력을 임시 스크립트로 finance_17에 직접 넣어 이전 이력 문구를 확인했다. `/api/market/connections/egress-ip`는 브라우저에서 가로채 가짜 응답으로 바꿨고, localhost 밖으로 나간 브라우저 요청은 0건이었다. 400 이상 응답은 로그인 전 `/api/auth/me` 401 두 건뿐이었고, 서버 로그에 가짜 키·로그인 값·500 오류가 없었다. 띄운 백엔드는 종료했고 프론트는 `scripts/stop.sh`로 멈췄다.
 - 남은 일: 코디네이터 검증과 병합. 데모 키로 실제 값이 오는 승인내역의 가계부 반영 확인은 이 수정 범위 밖이다.
+
+### 로그인 정보 안내와 삭제 실패 처리 수정
+
+- **발견과 바뀐 구현 결과**: 앞선 구현 결과의 "일회 전송 동의 폼"과 "CODEF 호출이 실패해도 행은 지운다"는 동작을 이 수정으로 바꿨다. 앱이 로그인 정보를 저장하지 않는다는 사실과 CODEF가 로그인 정보를 암호화해 보관한다는 사실을 구분하고, CODEF에서 삭제하지 못했을 때 연결이 조용히 사라지던 문제를 해결했다.
+- **백엔드**: 기본 삭제는 CODEF 성공 뒤에만 계정과 은행 현금 자산을 같은 트랜잭션에서 지운다. CODEF 결과 실패·비어 있지 않은 `data.errorList`·네트워크 오류는 고정 메시지의 502, 키 없음은 CODEF 미호출 409이며 계정·이력·현금 자산을 유지한다. `localOnly=true`는 CODEF를 호출하지 않고 로컬 연결과 은행 현금 자산을 삭제하며 스펙의 고정 경고 로그를 남긴다. 두 삭제 방식 모두 다른 사용자는 404이고, 로그에는 connectedId·응답 메시지를 넣지 않는다. 등록 동의가 없거나 false인 422 상세 메시지도 7절대로 바꿨다.
+- **프론트**: 8절의 안내 박스 제목·다섯 항목·보안 정책 링크 속성·동의 및 오류·상태 카드·카드와 은행 삭제 확인 문구를 그대로 적용했다. 삭제가 502 CONNECTOR_FAILED 또는 409 CONFLICT이면 서버 메시지 아래에 "이 앱에서만 삭제" 버튼과 경고 확인 창을 제공한다. 확인 뒤 `localOnly=true`로 요청하며 일반 삭제와 같은 캐시 정리 순서를 사용한다. 다른 오류에는 이 버튼을 표시하지 않는다.
+- **회귀 테스트**: respx로 삭제 성공, 실패 코드·errorList·네트워크 오류의 자원 보존, 키 없음과 로컬 삭제의 CODEF 미호출, 두 방식의 사용자 격리, 민감값 비노출과 등록 동의 메시지를 확인했다. MSW로 모든 안내 문자열·링크 속성, 두 종류의 확인 문구, 502·409 후 로컬 삭제 요청, 다른 상태·코드·네트워크 오류에서 버튼 숨김을 확인했다. 기존 삭제 캐시 회귀 테스트는 일반 삭제와 로컬 삭제 모두에 적용했다.
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 17·8017/3017·finance_17 준비 성공 |
+| `cd backend && uv run ruff check .` | 통과 |
+| `cd backend && uv run ruff format --check .` | 300개 파일 통과 |
+| `cd backend && uv run pytest -q` | 1,393개 통과(커넥터 28개), 기존 Starlette/httpx 사용 중단 경고 1개 |
+| `cd frontend && npm run lint` | 통과 |
+| `cd frontend && npx tsc --noEmit` | 통과 |
+| `cd frontend && npm run test` | 47개 파일·480개 테스트 통과(커넥터 18개) |
+| `cd frontend && npm run build` | Next.js 프로덕션 빌드 통과 |
+| 실제 서버·독립 Playwright 컨텍스트 | 키 없음 409 뒤 은행 연결 유지와 로컬 삭제 204, CODEF errorList 실패 502 뒤 카드 연결 유지와 확인 후 로컬 삭제, 안내 박스 5개 항목 표시 확인 |
+| 화면 360×800·1280×1000 | 페이지 `scrollWidth == innerWidth`, 다이얼로그 가로 넘침 없음, 안내 목록·동의·버튼을 스크린샷으로 확인 |
+| `git diff --check`, 변경 경로 대조 | 공백 오류 없음, 지정 소유 경로만 변경 |
+
+- 실제 서버 확인은 API로 가입한 확인용 사용자와 DB에 직접 넣은 가짜 연결·현금 자산으로 진행했다. 첫 실행은 키가 없는 일반 서버였고, 두 번째는 저장소 밖 임시 스크립트가 프로세스 메모리에 가짜 키를 넣고 respx의 `assert_all_mocked=True`로 CODEF 토큰·삭제 응답을 고정한 서버였다. CODEF 실서비스·LLM은 호출하지 않았고 `/api/market/connections/egress-ip`도 브라우저에서 가짜 응답으로 가로챘다. 브라우저 컨텍스트와 임시 서버를 종료하고 `scripts/stop.sh`로 이 워크트리의 서버를 정리했다.
+- 스펙과 다르게 구현한 사항, 의존성·마이그레이션 변경은 없다. 남은 일은 코디네이터의 별도 검증과 병합이다.

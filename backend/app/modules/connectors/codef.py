@@ -145,10 +145,14 @@ class CodefConnector:
 
     def delete_account(self, connected_id, *, kind, organization) -> None:
         # https://developer.codef.io/common-guide/connected-id/delete
-        self.client.request(
+        data = self.client.request(
             "/v1/account/delete",
             {"connectedId": connected_id, "accountList": [self._account(kind, organization)]},
         )
+        errors = data.get("errorList") if isinstance(data, dict) else None
+        if errors:
+            first = errors[0] if isinstance(errors, list) else errors
+            raise CodefError(first.get("code") if isinstance(first, dict) else None)
 
     def fetch_card_approvals(self, connected_id, organization, start, end) -> list[LedgerImportRow]:
         # KR_CD_P_002: https://developer.codef.io/products

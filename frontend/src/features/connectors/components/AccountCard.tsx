@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/format";
 import { useConnectorActions, useConnectorSyncs } from "../hooks";
 import type { ConnectorAccount, ImportSummary } from "../types";
@@ -34,12 +34,14 @@ function FailureReasons({ summary }: { summary: ImportSummary }) {
 export function AccountCard({ account, available }: { account: ConnectorAccount; available: boolean }) {
   const [range, setRange] = useState(dateDefaults);
   const [error, setError] = useState<string | null>(null);
+  const [canDeleteLocally, setCanDeleteLocally] = useState(false);
   const actions = useConnectorActions();
   const syncs = useConnectorSyncs(account.id);
   const latest = syncs.data?.items[0];
   const busy = actions.sync.isPending || actions.remove.isPending || latest?.status === "running";
   async function run() {
     setError(null);
+    setCanDeleteLocally(false);
     if (account.kind === "card") {
       const days = (Date.parse(range.to) - Date.parse(range.from)) / 86400000;
       if (!range.from || !range.to || !Number.isFinite(days) || days < 0 || days > 91) {
@@ -49,10 +51,14 @@ export function AccountCard({ account, available }: { account: ConnectorAccount;
     try { await actions.sync.mutateAsync({ accountId: account.id, ...(account.kind === "card" ? range : {}) }); }
     catch (cause) { setError(getErrorMessage(cause)); }
   }
-  async function remove() {
+  async function remove(localOnly = false) {
     setError(null);
-    try { await actions.remove.mutateAsync(account.id); }
-    catch (cause) { setError(getErrorMessage(cause)); }
+    setCanDeleteLocally(false);
+    try { await actions.remove.mutateAsync({ id: account.id, localOnly }); }
+    catch (cause) {
+      setError(getErrorMessage(cause));
+      setCanDeleteLocally(isApiError(cause) && ((cause.status === 502 && cause.code === "CONNECTOR_FAILED") || (cause.status === 409 && cause.code === "CONFLICT")));
+    }
   }
   return <Card className="min-w-0">
     <CardHeader><div className="flex flex-wrap items-center gap-2 text-sm"><Badge variant="outline">{account.kind === "card" ? "카드" : "은행"}</Badge><span>{account.organizationName}</span></div><CardTitle className="break-all">{account.label}</CardTitle></CardHeader>
@@ -66,7 +72,8 @@ export function AccountCard({ account, available }: { account: ConnectorAccount;
         </>}
       </div> : <p className="text-muted-foreground">아직 가져온 내역이 없어요.</p>}
       {error && <p role="alert" className="break-words text-destructive">{error}</p>}
-      <div className="flex flex-wrap gap-2"><Button onClick={() => void run()} disabled={busy || !available}>{actions.sync.isPending ? "가져오는 중…" : "가져오기"}</Button><ConfirmDialog title="수집 계정을 삭제할까요?" description={account.kind === "bank" ? "연결과 이 연결에서 가져온 현금 자산을 삭제합니다." : "연결을 삭제합니다. 이미 기록한 가계부 내역은 유지됩니다."} confirmLabel="계정 삭제" destructive trigger={<Button variant="ghost" disabled={busy}>삭제</Button>} onConfirm={remove} /></div>
+      {canDeleteLocally && <ConfirmDialog title="이 앱에서만 삭제할까요?" description={"CODEF에 등록된 로그인 정보는 남을 수 있습니다. 금융사 비밀번호를 바꾸면 남은 정보로는 로그인할 수 없습니다." + (account.kind === "bank" ? " 이 연결에서 가져온 현금 자산도 삭제합니다." : "")} confirmLabel="이 앱에서만 삭제" destructive trigger={<Button variant="destructive" disabled={busy}>이 앱에서만 삭제</Button>} onConfirm={() => remove(true)} />}
+      <div className="flex flex-wrap gap-2"><Button onClick={() => void run()} disabled={busy || !available}>{actions.sync.isPending ? "가져오는 중…" : "가져오기"}</Button><ConfirmDialog title="수집 계정을 삭제할까요?" description={account.kind === "bank" ? "연결과 CODEF에 등록된 로그인 정보, 이 연결에서 가져온 현금 자산을 삭제합니다." : "연결과 CODEF에 등록된 로그인 정보를 삭제합니다. 이미 기록한 가계부 내역은 유지됩니다."} confirmLabel="계정 삭제" destructive trigger={<Button variant="ghost" disabled={busy}>삭제</Button>} onConfirm={() => remove()} /></div>
     </CardContent>
   </Card>;
 }

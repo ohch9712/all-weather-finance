@@ -32,7 +32,7 @@ export function useConnectorActions() {
   };
   // 삭제한 계정의 카드가 아직 떠 있을 때 이력을 다시 부르면 404가 나므로(웨이브 4 통합 검증 F1),
   // 계정 목록에서 먼저 빼고 그 계정의 이력 캐시를 지운 뒤 나머지만 갱신한다.
-  const afterRemove = async (_: void, id: string) => {
+  const afterRemove = async (_: void, { id }: { id: string; localOnly?: boolean }) => {
     // 진행 중인 목록 요청이 삭제 전 목록으로 캐시를 덮어쓰지 않게 먼저 취소한다.
     await client.cancelQueries({ queryKey: accountsKey });
     client.setQueryData<{ items: ConnectorAccount[] }>(accountsKey, (data) => data && { ...data, items: data.items.filter((item) => item.id !== id) });
