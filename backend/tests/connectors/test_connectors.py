@@ -206,7 +206,17 @@ def test_card_end_to_end_dedup_cancellation_and_review(auth_client, codef_http):
     first = sync(auth_client, account_id)
     assert first.status_code == 200, first.text
     data = first.json()
-    assert data["summary"] == {"inserted": 6, "skippedDuplicates": 0, "failed": 3, "errors": []}
+    errors = [
+        {"rowNumber": 7, "field": "resKRWAmt", "message": "해외 이용 건의 원화 금액이 없습니다."},
+        {"rowNumber": 8, "field": "resMemberStoreName", "message": "가맹점명이 비어 있습니다."},
+        {"rowNumber": 9, "field": "resUsedDate", "message": "이용일을 읽을 수 없습니다."},
+    ]
+    assert data["summary"] == {
+        "inserted": 6,
+        "skippedDuplicates": 0,
+        "failed": 3,
+        "errors": errors,
+    }
     assert data["status"] == "succeeded" and data["finishedAt"]
     assert set(data) == {
         "id",
@@ -231,7 +241,12 @@ def test_card_end_to_end_dedup_cancellation_and_review(auth_client, codef_http):
         "memberStoreInfoType": "0",
     }
     again = sync(auth_client, account_id).json()
-    assert again["summary"] == {"inserted": 0, "skippedDuplicates": 6, "failed": 3, "errors": []}
+    assert again["summary"] == {
+        "inserted": 0,
+        "skippedDuplicates": 6,
+        "failed": 3,
+        "errors": errors,
+    }
     review = auth_client.get("/api/ledger/entries", params={"importBatchId": data["id"]})
     assert review.status_code == 200
     assert len(review.json()["items"]) == 6
@@ -242,6 +257,117 @@ def test_card_end_to_end_dedup_cancellation_and_review(auth_client, codef_http):
         ROOT + "/syncs", params={"accountId": account_id, "pageSize": 1}
     ).json()
     assert history["total"] == 2 and len(history["items"]) == 1 and history["pageSize"] == 1
+
+
+MASKED = "값이 가려져 있어 읽을 수 없습니다."
+LEDGER_AMOUNT = "금액을 확인해 주세요."
+
+
+def card_errors(client, account_id):
+    result = sync(client, account_id)
+    assert result.status_code == 200, result.text
+    summary = result.json()["summary"]
+    history = client.get(ROOT + "/syncs", params={"accountId": account_id}).json()
+    assert history["items"][0]["summary"] == summary
+    return summary
+
+
+@freeze_time("2026-10-17")
+def test_card_masked_single_object_records_reason(auth_client, codef_http):
+    # CODEF 샌드박스에서 본 응답: data가 객체 한 건이고 이용일·가맹점명·금액이 모두 가려져 있다.
+    account_id = register(auth_client)
+    masked = card_row(
+        resUsedDate="********", resMemberStoreName="********", resUsedAmount="********"
+    )
+    codef_http.post(CARD_PATH).mock(return_value=response(masked))
+    assert card_errors(auth_client, account_id) == {
+        "inserted": 0,
+        "skippedDuplicates": 0,
+        "failed": 1,
+        "errors": [{"rowNumber": 1, "field": "resUsedDate", "message": MASKED}],
+    }
+
+
+@freeze_time("2026-10-17")
+def test_card_failure_reasons_per_cause_without_raw_values(auth_client, codef_http, caplog):
+    account_id = register(auth_client)
+    raw = dict(
+        resMemberStoreName="원문-가맹점-7731",
+        resCardName="원문-카드-5512",
+        resApprovalNo="원문승인-9043",
+        resUsedAmount="87,654",
+        resUsedDate="20260911",
+    )
+
+    def raw_row(**changes):
+        return card_row(**raw) | changes
+
+    missing_date = raw_row()
+    del missing_date["resUsedDate"]
+    rows = [
+        raw_row(),  # 1 저장
+        raw_row(resCancelYN="3", resApprovalNo="원문승인-거절"),  # 2 거절은 제외하고 순번만 센다
+        raw_row(resUsedDate="********", resMemberStoreName="**", resUsedAmount="***"),  # 3
+        raw_row(resUsedAmount="0"),  # 4 가계부 검사 실패(넘긴 목록 2번째)
+        missing_date,  # 5
+        raw_row(resUsedDate="2026-09-11"),  # 6
+        raw_row(resMemberStoreName=" ", resUsedAmount="x"),  # 7 가맹점명을 금액보다 먼저 본다
+        raw_row(resMemberStoreName="***"),  # 8
+        raw_row(resUsedAmount="8만 7천"),  # 9
+        raw_row(resUsedAmount="*****"),  # 10
+        raw_row(resHomeForeignType="2"),  # 11
+        raw_row(resHomeForeignType="2", resKRWAmt="12.5"),  # 12
+        raw_row(resHomeForeignType="2", resKRWAmt="****"),  # 13
+        raw_row(resCancelYN="1", resCancelAmount="일부"),  # 14
+        raw_row(resCancelYN="2", resCancelAmount="******"),  # 15
+        raw_row(resCardName="가" * 51),  # 16 가계부 검사 실패(넘긴 목록 3번째)
+        raw_row(resApprovalNo="원문승인-2"),  # 17 저장
+    ]
+    codef_http.post(CARD_PATH).mock(return_value=response(rows))
+    summary = card_errors(auth_client, account_id)
+    assert summary["inserted"] == 2 and summary["skippedDuplicates"] == 0
+    assert summary["failed"] == 14
+    assert summary["errors"] == [
+        {"rowNumber": 3, "field": "resUsedDate", "message": MASKED},
+        {"rowNumber": 4, "field": None, "message": LEDGER_AMOUNT},
+        {"rowNumber": 5, "field": "resUsedDate", "message": "이용일을 읽을 수 없습니다."},
+        {"rowNumber": 6, "field": "resUsedDate", "message": "이용일을 읽을 수 없습니다."},
+        {"rowNumber": 7, "field": "resMemberStoreName", "message": "가맹점명이 비어 있습니다."},
+        {"rowNumber": 8, "field": "resMemberStoreName", "message": MASKED},
+        {"rowNumber": 9, "field": "resUsedAmount", "message": "이용금액을 읽을 수 없습니다."},
+        {"rowNumber": 10, "field": "resUsedAmount", "message": MASKED},
+        {"rowNumber": 11, "field": "resKRWAmt", "message": "해외 이용 건의 원화 금액이 없습니다."},
+        {"rowNumber": 12, "field": "resKRWAmt", "message": "해외 이용 건의 원화 금액이 없습니다."},
+        {"rowNumber": 13, "field": "resKRWAmt", "message": MASKED},
+        {"rowNumber": 14, "field": "resCancelAmount", "message": "취소금액을 읽을 수 없습니다."},
+        {"rowNumber": 15, "field": "resCancelAmount", "message": MASKED},
+        {"rowNumber": 16, "field": None, "message": "카드명 또는 승인번호 길이를 확인해 주세요."},
+    ]
+    recorded = json.dumps(summary, ensure_ascii=False) + caplog.text
+    for value in [*raw.values(), "87654", "원문승인-거절", "원문승인-2", "가" * 51, "12.5"]:
+        assert value not in recorded
+
+
+@freeze_time("2026-10-17")
+def test_card_failure_reasons_keep_first_twenty_and_total_failed(auth_client, codef_http):
+    account_id = register(auth_client)
+    rows = [card_row(resCancelYN="3")]
+    for index in range(30):
+        # 응답 순번 짝수는 커넥터 변환 실패, 홀수는 가계부 검사 실패
+        rows.append(
+            card_row(resUsedDate="********")
+            if index % 2 == 0
+            else card_row(resUsedAmount="0", resApprovalNo=f"test-approval-{index}")
+        )
+    codef_http.post(CARD_PATH).mock(return_value=response(rows))
+    summary = card_errors(auth_client, account_id)
+    assert summary["inserted"] == 0 and summary["failed"] == 30
+    assert summary["errors"] == [
+        {"rowNumber": number, "field": "resUsedDate", "message": MASKED}
+        if number % 2 == 0
+        else {"rowNumber": number, "field": None, "message": LEDGER_AMOUNT}
+        for number in range(2, 22)
+    ]
 
 
 @freeze_time("2026-10-17")
