@@ -91,6 +91,7 @@ describe("데이터 자동 수집", () => {
     fireEvent.change(screen.getByLabelText("종료일"), { target: { value: "2026-09-30" } });
     fireEvent.click(screen.getByRole("button", { name: "가져오기" }));
     expect(await screen.findByText("저장 2건 · 중복 1건 · 실패 0건")).toBeInTheDocument();
+    expect(screen.queryByText("실패 이유")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "가계부에서 보기" })).toHaveAttribute("href", "/ledger/import/review?batch=test-sync");
     expect(sent).toEqual({ accountId: account.id, from: "2026-09-01", to: "2026-09-30" });
   });
@@ -144,6 +145,46 @@ describe("데이터 자동 수집", () => {
     expect(screen.getByText("월급 통장")).toBeInTheDocument();
     expect(screen.getByText("추가 1건 · 갱신 2건 · 삭제 0건")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("카드 실패 이유를 응답 순번과 함께 최대 5건 보여 주고 나머지는 외 N건으로 줄인다", async () => {
+    const masked = "값이 가려져 있어 읽을 수 없습니다.";
+    const errors = [
+      { rowNumber: 2, field: "resUsedDate", message: masked },
+      { rowNumber: 3, field: null, message: "금액을 확인해 주세요." },
+      { rowNumber: 5, field: "resMemberStoreName", message: "가맹점명이 비어 있습니다." },
+      { rowNumber: 6, field: "resKRWAmt", message: "해외 이용 건의 원화 금액이 없습니다." },
+      { rowNumber: 8, field: "resCancelAmount", message: "취소금액을 읽을 수 없습니다." },
+      { rowNumber: 9, field: "resUsedAmount", message: masked },
+      { rowNumber: 10, field: "resUsedAmount", message: "이용금액을 읽을 수 없습니다." },
+    ];
+    handlers({ accounts: [account], syncs: [{ ...succeeded, summary: { inserted: 1, skippedDuplicates: 0, failed: 9, errors } }] });
+    renderWithProviders(<DataConnectionsSection />);
+    expect(await screen.findByText("저장 1건 · 중복 0건 · 실패 9건")).toBeInTheDocument();
+    const reasons = screen.getByText("실패 이유").parentElement as HTMLElement;
+    expect(within(reasons).getAllByRole("listitem").map(item => item.textContent)).toEqual([
+      `2번째 승인 내역: ${masked}`,
+      "3번째 승인 내역: 금액을 확인해 주세요.",
+      "5번째 승인 내역: 가맹점명이 비어 있습니다.",
+      "6번째 승인 내역: 해외 이용 건의 원화 금액이 없습니다.",
+      "8번째 승인 내역: 취소금액을 읽을 수 없습니다.",
+    ]);
+    expect(within(reasons).getByText("외 4건")).toBeInTheDocument();
+    expect(screen.queryByText(/9번째 승인 내역/)).not.toBeInTheDocument();
+    expect(screen.queryByText("실패 이유가 기록되지 않은 이전 가져오기입니다.")).not.toBeInTheDocument();
+  });
+  it("실패 이유를 모두 보여 줄 수 있으면 외 N건을 붙이지 않는다", async () => {
+    const errors = [{ rowNumber: 1, field: "resUsedDate", message: "값이 가려져 있어 읽을 수 없습니다." }];
+    handlers({ accounts: [account], syncs: [{ ...succeeded, summary: { inserted: 0, skippedDuplicates: 0, failed: 1, errors } }] });
+    renderWithProviders(<DataConnectionsSection />);
+    expect(await screen.findByText("1번째 승인 내역: 값이 가려져 있어 읽을 수 없습니다.")).toBeInTheDocument();
+    expect(screen.queryByText(/^외 \d+건$/)).not.toBeInTheDocument();
+  });
+  it("실패 이유가 없는 이전 가져오기 이력은 안내 문구를 보여 준다", async () => {
+    handlers({ accounts: [account], syncs: [{ ...succeeded, summary: { inserted: 0, skippedDuplicates: 0, failed: 1, errors: [] } }] });
+    renderWithProviders(<DataConnectionsSection />);
+    expect(await screen.findByText("실패 이유가 기록되지 않은 이전 가져오기입니다.")).toBeInTheDocument();
+    expect(screen.getByText("실패 이유")).toBeInTheDocument();
+    expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
   });
   it("실패 이력과 API 오류를 안내한다", async () => {
     handlers({ accounts: [account], syncs: [{ ...succeeded, status: "failed", summary: null, errorCode: "CF-03002" }] });
