@@ -14,6 +14,7 @@ from app.integrations.brokers import kiwoom, toss
 from app.integrations.brokers.errors import BrokerError
 from app.integrations.brokers.mock import MockBroker
 from app.integrations.brokers.ratelimit import TokenBucket, group_rate, request_with_retry
+from app.modules.market import service as market
 
 
 @pytest.fixture(autouse=True)
@@ -522,6 +523,11 @@ def test_kiwoom_executions_dates_side_and_cost_defaults(respx_mock, monkeypatch)
         ({"dmst_stex_tp": ""}, "J005930", ""),
         ({"dmst_stex_tp": None}, "005930", ""),
         ({"dmst_stex_tp": "KRX"}, "Q005930", ""),
+        ({"dmst_stex_tp": "KRX "}, "A005930", ""),
+        ({"dmst_stex_tp": " KRX"}, "A005930", ""),
+        ({"dmst_stex_tp": "   "}, "A005930", ""),
+        ({"dmst_stex_tp": ""}, " A005930 ", ""),
+        ({"dmst_stex_tp": " NXT "}, " A005930_NX ", ":NXT"),
         ({"dmst_stex_tp": "NXT"}, "005930_NX", ":NXT"),
         ({"dmst_stex_tp": "SOR"}, "005930_AL", ":SOR"),
         ({"dmst_stex_tp": "NXT"}, "A005930_NX", ":NXT"),
@@ -561,6 +567,72 @@ def test_kiwoom_execution_exchange_ids_and_krx_codes(
     assert route.call_count == 2 and len(rows) == 1
     assert rows[0].external_id == f"20261016:0000001:0000002{suffix}"
     assert rows[0].code == "005930" and rows[0].side == "buy"
+
+
+@pytest.mark.parametrize("exchange", ["KRX ", " KRX", "   ", ""])
+@pytest.mark.respx(assert_all_mocked=True)
+def test_kiwoom_resync_exchange_whitespace_keeps_existing_fill(
+    auth_client, respx_mock, monkeypatch, exchange
+):
+    monkeypatch.setattr(kiwoom, "now_utc", lambda: datetime(2026, 10, 16, tzinfo=UTC))
+    kiwoom_token(respx_mock)
+    broker = kiwoom.KiwoomBroker(
+        "test-app",
+        "test-secret",
+        client=httpx.Client(transport=httpx.MockTransport(respx_mock.handler)),
+    )
+    monkeypatch.setattr(market, "_make_client", lambda *args: broker)
+    fill = {
+        "ord_no": "0000001",
+        "cntr_no": "0000002",
+        "stk_cd": "A005930",
+        "stk_nm": "삼성전자",
+        "cntr_qty": "2",
+        "cntr_uv": "71000",
+        "cntr_tm": "13:07:47",
+        "dmst_stex_tp": "KRX",
+    }
+
+    def response(request):
+        if request.headers["api-id"] == "kt00018":
+            return httpx.Response(200, json={"return_code": 0, "acnt_evlt_remn_indv_tot": []})
+        assert request.headers["api-id"] == "kt00009"
+        body = json.loads(request.content)
+        assert body["dmst_stex_tp"] == "%"
+        rows = [fill.copy()] if body["sell_tp"] == "2" else []
+        return httpx.Response(200, json={"return_code": 0, "acnt_ord_cntr_prst_array": rows})
+
+    route = respx_mock.post("https://mockapi.kiwoom.com/api/dostk/acnt").mock(side_effect=response)
+    connection = auth_client.post(
+        "/api/market/connections",
+        json={
+            "provider": "kiwoom",
+            "environment": "mock",
+            "label": "공백 정규화 테스트",
+            "appKey": "test-app",
+            "appSecret": "test-secret",
+        },
+    )
+    assert connection.status_code == 201, connection.text
+    connection_id = connection.json()["id"]
+    verified = auth_client.post(f"/api/market/connections/{connection_id}/verify", json={})
+    assert verified.status_code == 200, verified.text
+    assert verified.json()["status"] == "active"
+    payload = {"connectionId": connection_id, "from": "2026-10-16", "to": "2026-10-16"}
+    first = auth_client.post("/api/journal/sync", json=payload)
+    assert first.status_code == 200, first.text
+    assert (first.json()["inserted"], first.json()["unchanged"]) == (1, 0)
+    stored = auth_client.get("/api/journal/trades").json()["items"]
+    assert len(stored) == 1 and stored[0]["symbolCode"] == "005930"
+
+    fill["dmst_stex_tp"] = exchange
+    second = auth_client.post("/api/journal/sync", json=payload)
+    assert second.status_code == 200, second.text
+    result = second.json()
+    assert (result["inserted"], result["updated"], result["unchanged"]) == (0, 0, 1)
+    repeated = auth_client.get("/api/journal/trades").json()["items"]
+    assert len(repeated) == 1 and repeated[0]["id"] == stored[0]["id"]
+    assert route.call_count == 5
 
 
 @respx.mock(assert_all_mocked=True, using="httpx")

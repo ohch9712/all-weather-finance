@@ -399,11 +399,13 @@ class KiwoomBroker(UnsupportedBroker):
                             tzinfo=KST,
                         )
                         external_id = f"{day:%Y%m%d}:{row['ord_no']}:{row['cntr_no']}"
-                        exchange = row.get("dmst_stex_tp")
+                        exchange = (row.get("dmst_stex_tp") or "").strip()
                         # 이미 동기화한 KRX 체결의 ID는 유지하고 다른 거래소만 구분한다.
                         if exchange and exchange != "KRX":
                             external_id += f":{exchange}"
-                        code = krx_code(row["stk_cd"].removesuffix("_NX").removesuffix("_AL"))
+                        code = krx_code(
+                            row["stk_cd"].strip().removesuffix("_NX").removesuffix("_AL")
+                        )
                         result[external_id] = Execution(
                             external_id,
                             executed_at,

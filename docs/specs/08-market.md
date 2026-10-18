@@ -473,6 +473,7 @@ class SnapshotSet:
 
 ### 키움 체결 전체 거래소 조회
 
+- 검증 후 수정(2026-10-19): 체결 거래소를 `(row.get("dmst_stex_tp") or "").strip()`으로 정규화해 `KRX `·` KRX`·공백만 있는 값·빈 값은 기존 ID를 유지하고 ` NXT `는 `:NXT`를 붙이도록 했으며, 종목코드도 앞뒤 공백을 지운 뒤 접두어·거래소 접미사를 제거한다. respx `assert_all_mocked=True`로 같은 프로세스 TestClient에서 KRX 1건 저장 후 네 거래소 값으로 재동기화하면 `inserted=0`·`updated=0`·`unchanged=1`과 같은 거래 ID가 유지되는지 확인했다. 관련 테스트 63개·전체 `uv run pytest` 1,463개·`ruff check`·`ruff format --check` 모두 통과했고, 기존 Starlette TestClient 사용 중단 안내 1건 외 실패는 없다.
 - 발견 사항: `kt00009`의 `dmst_stex_tp="KRX"` 고정 요청으로 NXT 체결이 빠지고, 거래소가 다른 동일 주문번호·체결번호는 같은 `external_id`로 덮어썼다. 체결 종목코드의 `_NX`·`_AL` 접미사도 남았다.
 - 고친 내용: 요청을 `dmst_stex_tp="%"`로 바꿨다. 응답 행의 거래소가 KRX·빈 값(누락·null 포함)이면 기존 `{날짜}:{ord_no}:{cntr_no}`를 유지하고, 그 밖이면 `:{dmst_stex_tp}`를 붙인다. 체결 경로에서만 `_NX`·`_AL`을 제거한 뒤 기존 접두어(A·J·Q) 변환을 적용한다. 공용 코드 변환 함수·잔고 `kt00018`·체결 없음 응답 처리·매도수 필터·연속조회는 유지했다.
 - 근거: [키움 공식 `kiwoom_api_spec.json`](https://github.com/Kiwoom-Securities/Kiwoom-REST-API/blob/main/kiwoom/_data/kiwoom_api_spec.json)의 `kt00009` 요청 `dmst_stex_tp`는 `%`·`KRX`·`NXT`·`SOR`이고, 응답 행에도 `dmst_stex_tp`가 있다(2026-10-19 재확인). 같은 근거를 코드 주석에 남겼다.
