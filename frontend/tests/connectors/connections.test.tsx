@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DataConnectionsSection } from "@/features/connectors/components/DataConnectionsSection";
 import { API_BASE_URL } from "@/lib/api-client";
 import { renderWithProviders, server } from "../utils";
@@ -261,5 +261,58 @@ describe("삭제 실패 처리", () => {
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "계정 삭제" }));
     await screen.findByRole("alert");
     expect(screen.queryByRole("button", { name: "이 앱에서만 삭제" })).not.toBeInTheDocument();
+  });
+});
+
+
+describe("로그인 정보 안내 박스 스크롤", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const regionName = "로그인 정보 처리 방식 내용";
+  async function openForm() {
+    handlers();
+    renderWithProviders(<DataConnectionsSection />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "수집 계정 추가" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "수집 계정 추가" }));
+    return screen.findByRole("dialog");
+  }
+
+  it("다섯 항목만 키보드로 스크롤할 수 있는 영역에 두고 제목과 링크는 밖에 둔다", async () => {
+    const dialog = await openForm();
+    const aside = within(dialog).getByRole("complementary", { name: "로그인 정보 처리 방식" });
+    const region = within(aside).getByRole("region", { name: regionName });
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(within(region).getAllByRole("listitem")).toHaveLength(5);
+    const heading = within(aside).getByRole("heading", { name: "로그인 정보 처리 방식" });
+    const policy = within(aside).getByRole("link", { name: "CODEF 보안 정책 보기" });
+    expect(region).not.toContainElement(heading);
+    expect(region).not.toContainElement(policy);
+    // jsdom은 레이아웃이 없어 높이가 0이므로 넘치는 내용이 없고 흐림 처리도 없다.
+    expect(within(dialog).queryByTestId("login-info-fade")).not.toBeInTheDocument();
+  });
+
+  it("아래에 내용이 더 있으면 흐림 처리를 보여 주고 끝까지 스크롤하면 없앤다", async () => {
+    // 목록 영역만 내용 300px, 보이는 높이 144px(9rem)로 둔다.
+    const sizeOf = (height: number) => function (this: Element) { return this.getAttribute("aria-label") === regionName ? height : 0; };
+    vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(sizeOf(300));
+    vi.spyOn(Element.prototype, "clientHeight", "get").mockImplementation(sizeOf(144));
+    const dialog = await openForm();
+    const region = within(dialog).getByRole("region", { name: regionName });
+    const fade = await within(dialog).findByTestId("login-info-fade");
+    expect(fade).toHaveAttribute("aria-hidden", "true");
+    expect(fade).toHaveClass("pointer-events-none");
+    expect(region).not.toContainElement(fade);
+    const scrollTo = (top: number) => {
+      Object.defineProperty(region, "scrollTop", { configurable: true, value: top });
+      fireEvent.scroll(region);
+    };
+    scrollTo(100);
+    expect(within(dialog).getByTestId("login-info-fade")).toBeInTheDocument();
+    // 끝에서 1px 모자란 값은 반올림 오차로 보고 끝으로 친다.
+    scrollTo(155);
+    await waitFor(() => expect(within(dialog).queryByTestId("login-info-fade")).not.toBeInTheDocument());
+    scrollTo(20);
+    expect(await within(dialog).findByTestId("login-info-fade")).toBeInTheDocument();
+    scrollTo(156);
+    await waitFor(() => expect(within(dialog).queryByTestId("login-info-fade")).not.toBeInTheDocument());
   });
 });
