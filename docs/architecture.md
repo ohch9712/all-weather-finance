@@ -402,6 +402,9 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # /stocks/screener?f= �
 def register_tool(spec: ToolSpec) -> None
 def get_registered_tools() -> list[ToolSpec]
 
+# app/modules/connectors/service.py  (17, 19)
+def delete_all_accounts(db, user_id) -> None   # 19가 추가. 계정 삭제 전에 사용자의 CODEF 연결을 하나씩 CODEF에서 지우고 연결마다 commit. 실패하면 AppError(409 CONFLICT)
+
 # app/integrations/llm/status.py  (01a)
 def get_ai_status() -> AiStatus              # GET /api/ai/status와 같은 내용. 09의 /api/chat/status가 personal 값을 쓴다
 ```

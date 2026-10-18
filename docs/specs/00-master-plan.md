@@ -97,6 +97,7 @@
 | 4 | 16 홈 대시보드 | `feature/16-dashboard` | 02, 03, 05, 12 | claude |
 | 4 | 17 CODEF·마이데이터 커넥터 | `feature/17-connectors` | 10, 14 | codex |
 | 5 | 18 배포(호스팅·고정 IP·시크릿·백업) | `feature/18-deploy` | 전체, 호스팅 결정 후 | codex |
+| 6 | 19 개인정보 처리방침·회원 탈퇴·만 14세 확인(2026-10-19 추가) | `feature/19-privacy` | 18 | claude |
 
 ## 구현 → 검증 → 병합 흐름 (docs/roadmap.md에 명령까지 기록)
 
