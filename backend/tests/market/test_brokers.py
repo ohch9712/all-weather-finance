@@ -512,7 +512,103 @@ def test_kiwoom_executions_dates_side_and_cost_defaults(respx_mock, monkeypatch)
         for row in rows
     )
     assert rows[0].executed_at == datetime(2026, 10, 16, 4, 7, 47, tzinfo=UTC)
-    assert all(r["qry_tp"] == "1" and r["dmst_stex_tp"] == "KRX" for r in requests)
+    assert all(r["qry_tp"] == "1" and r["dmst_stex_tp"] == "%" for r in requests)
+
+
+@pytest.mark.parametrize(
+    ("exchange_fields", "stock_code", "suffix"),
+    [
+        ({}, "A005930", ""),
+        ({"dmst_stex_tp": ""}, "J005930", ""),
+        ({"dmst_stex_tp": None}, "005930", ""),
+        ({"dmst_stex_tp": "KRX"}, "Q005930", ""),
+        ({"dmst_stex_tp": "NXT"}, "005930_NX", ":NXT"),
+        ({"dmst_stex_tp": "SOR"}, "005930_AL", ":SOR"),
+        ({"dmst_stex_tp": "NXT"}, "A005930_NX", ":NXT"),
+    ],
+)
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_kiwoom_execution_exchange_ids_and_krx_codes(
+    respx_mock, monkeypatch, exchange_fields, stock_code, suffix
+):
+    monkeypatch.setattr(kiwoom, "now_utc", lambda: datetime(2026, 10, 16, tzinfo=UTC))
+    kiwoom_token(respx_mock)
+
+    def response(request):
+        assert request.headers["api-id"] == "kt00009"
+        body = json.loads(request.content)
+        assert body["dmst_stex_tp"] == "%"
+        rows = []
+        if body["sell_tp"] == "2":
+            rows = [
+                {
+                    "ord_no": "0000001",
+                    "cntr_no": "0000002",
+                    "stk_cd": stock_code,
+                    "stk_nm": "삼성전자",
+                    "cntr_qty": "2",
+                    "cntr_uv": "71000",
+                    "cntr_tm": "13:07:47",
+                    **exchange_fields,
+                }
+            ]
+        return httpx.Response(200, json={"return_code": 0, "acnt_ord_cntr_prst_array": rows})
+
+    route = respx_mock.post("https://mockapi.kiwoom.com/api/dostk/acnt").mock(side_effect=response)
+    rows = kiwoom.KiwoomBroker("test-app", "test-secret").get_executions(
+        date(2026, 10, 16), date(2026, 10, 16)
+    )
+    assert route.call_count == 2 and len(rows) == 1
+    assert rows[0].external_id == f"20261016:0000001:0000002{suffix}"
+    assert rows[0].code == "005930" and rows[0].side == "buy"
+
+
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_kiwoom_executions_keep_exchange_collisions_across_pages(respx_mock, monkeypatch):
+    monkeypatch.setattr(kiwoom, "now_utc", lambda: datetime(2026, 10, 16, tzinfo=UTC))
+    kiwoom_token(respx_mock)
+    fill = {
+        "ord_no": "1",
+        "cntr_no": "2",
+        "stk_cd": "A005930",
+        "stk_nm": "삼성전자",
+        "cntr_qty": "2",
+        "cntr_uv": "71000",
+        "cntr_tm": "13:07:47",
+    }
+
+    def response(request):
+        body = json.loads(request.content)
+        assert body["dmst_stex_tp"] == "%"
+        headers = {}
+        if body["sell_tp"] == "2":
+            rows = []
+        elif request.headers["next-key"] == "next-exchange":
+            assert request.headers["cont-yn"] == "Y"
+            rows = [
+                {**fill, "dmst_stex_tp": "NXT", "stk_cd": "005930_NX"},
+                {**fill, "dmst_stex_tp": "SOR", "stk_cd": "005930_AL"},
+                {**fill, "dmst_stex_tp": "KRX"},
+            ]
+        else:
+            assert request.headers["cont-yn"] == "N"
+            rows = [{**fill, "dmst_stex_tp": "KRX"}]
+            headers = {"cont-yn": "Y", "next-key": "next-exchange"}
+        return httpx.Response(
+            200, headers=headers, json={"return_code": 0, "acnt_ord_cntr_prst_array": rows}
+        )
+
+    route = respx_mock.post("https://mockapi.kiwoom.com/api/dostk/acnt").mock(side_effect=response)
+    rows = kiwoom.KiwoomBroker("test-app", "test-secret").get_executions(
+        date(2026, 10, 16), date(2026, 10, 16)
+    )
+    assert route.call_count == 3
+    assert [row.external_id for row in rows] == [
+        "20261016:1:2",
+        "20261016:1:2:NXT",
+        "20261016:1:2:SOR",
+    ]
+    assert all(row.code == "005930" and row.side == "sell" for row in rows)
 
 
 @pytest.mark.parametrize("return_code", [20, "20"])

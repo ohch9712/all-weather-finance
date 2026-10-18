@@ -470,3 +470,26 @@ class SnapshotSet:
 
 - 스펙과 다른 점: 없음. 의존성을 추가하지 않았다.
 - 남은 일: 수정 범위의 구현은 완료했다. 실제 토스 키·허용 IP로 하는 확인과 별도 검증·PR 검토·병합은 코디네이터가 진행한다.
+
+### 키움 체결 전체 거래소 조회
+
+- 발견 사항: `kt00009`의 `dmst_stex_tp="KRX"` 고정 요청으로 NXT 체결이 빠지고, 거래소가 다른 동일 주문번호·체결번호는 같은 `external_id`로 덮어썼다. 체결 종목코드의 `_NX`·`_AL` 접미사도 남았다.
+- 고친 내용: 요청을 `dmst_stex_tp="%"`로 바꿨다. 응답 행의 거래소가 KRX·빈 값(누락·null 포함)이면 기존 `{날짜}:{ord_no}:{cntr_no}`를 유지하고, 그 밖이면 `:{dmst_stex_tp}`를 붙인다. 체결 경로에서만 `_NX`·`_AL`을 제거한 뒤 기존 접두어(A·J·Q) 변환을 적용한다. 공용 코드 변환 함수·잔고 `kt00018`·체결 없음 응답 처리·매도수 필터·연속조회는 유지했다.
+- 근거: [키움 공식 `kiwoom_api_spec.json`](https://github.com/Kiwoom-Securities/Kiwoom-REST-API/blob/main/kiwoom/_data/kiwoom_api_spec.json)의 `kt00009` 요청 `dmst_stex_tp`는 `%`·`KRX`·`NXT`·`SOR`이고, 응답 행에도 `dmst_stex_tp`가 있다(2026-10-19 재확인). 같은 근거를 코드 주석에 남겼다.
+- 회귀 테스트: respx로 전체 거래소 요청, 누락·빈 값·null·KRX의 ID 유지, NXT·SOR 접미사, A·J·Q 및 `_NX`·`_AL` 코드 정리, 같은 주문·체결번호의 KRX·NXT·SOR가 연속조회 뒤에도 각각 남고 같은 KRX 행의 중복만 제거되는 것을 확인한다. 기존 체결 조회 테스트의 요청 단언도 `%`로 맞췄다.
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 08(8008·3008·finance_08) 준비 성공 |
+| 수정 전 새 회귀 테스트(`-k 'exchange_ids or exchange_collisions'`) | 8개 모두 `KRX` 고정 요청으로 실패하여 재현 확인 |
+| `uv run ruff check .` / `uv run ruff format --check .` | 통과, 307개 파일 포맷 확인 |
+| `uv run pytest tests/market/test_brokers.py tests/journal/test_sync.py -q` | 54개 통과 |
+| `uv run pytest -q` | 전체 1,454개 통과, 기존 Starlette TestClient 사용 중단 안내 1건 |
+| 실제 슬롯 08 uvicorn 서버: `POST /api/journal/sync` | 기존 KRX 1건 저장 → 전체 거래소 응답에서 3건 추가·기존 1건 유지 → 재동기화 0건 추가·4건 유지, 모두 HTTP 200 |
+| 같은 서버의 DB·요청 확인 | `20261016:1:2`, `:NXT`, `:SOR`와 빈 거래소 `20261016:3:2` 총 4건·코드 모두 `005930`. `kt00009` 전체 거래소·연속조회·다른 날짜 no-data, `kt00018` KRX 유지 확인 |
+| 같은 서버의 사용자 격리 | 다른 사용자가 같은 연결로 동기화하면 HTTP 404·`NOT_FOUND` |
+| 외부 호출·정리 | 저장소 밖 임시 `sitecustomize.py`에서 키움 HTTP 전송을 가짜 응답으로 대체하고 그 밖의 외부 HTTP를 차단. 실서비스 키·LLM·외부 IP 조회 미사용. 확인용 사용자 2명과 연결·거래 삭제, `scripts/stop.sh`로 백엔드 종료 |
+| 프론트·마이그레이션 검사 | 변경이 없어 생략. API·화면·DB 계약 변경 없음 |
+
+- 스펙과 다른 점: 없음. 의존성을 추가하지 않았고 소유 경로만 수정했다.
+- 남은 일: 수정 범위의 구현은 완료했다. 별도 검증·PR 검토·병합은 코디네이터가 진행한다.
