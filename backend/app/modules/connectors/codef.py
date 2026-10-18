@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 from typing import Literal
@@ -18,10 +19,36 @@ def object_rows(value) -> list[dict]:
     raise CodefError()
 
 
-class ApprovalRows(list[LedgerImportRow]):
-    """공개 list 계약을 유지하면서 변환 중 제외한 행 수도 호출자에게 전달한다."""
+MASKED_MESSAGE = "값이 가려져 있어 읽을 수 없습니다."
 
-    failed = 0
+
+@dataclass(frozen=True)
+class RowFailure:
+    # row_number는 CODEF 응답 목록의 1부터 센 순번(거절로 건너뛴 행 포함)이다.
+    row_number: int
+    field: str
+    message: str
+
+
+class ApprovalRows(list[LedgerImportRow]):
+    """공개 list 계약을 유지하면서 각 행의 응답 순번과 읽지 못한 행의 실패 이유도 전달한다."""
+
+    def __init__(self):
+        super().__init__()
+        self.numbers: list[int] = []
+        self.failures: list[RowFailure] = []
+
+    @property
+    def failed(self) -> int:
+        return len(self.failures)
+
+
+class RowRejected(Exception):
+    # 메시지는 고정 문구만 쓴다. 응답 원문 값은 넣지 않는다.
+    def __init__(self, field: str, message: str):
+        super().__init__(message)
+        self.field = field
+        self.message = message
 
 
 def integer(value) -> int:
@@ -29,6 +56,54 @@ def integer(value) -> int:
     if not re.fullmatch(r"[+-]?\d+", text):
         raise ValueError
     return int(text)
+
+
+def field_text(row: dict, field: str) -> str:
+    value = row.get(field)
+    text = "" if value is None else str(value).strip()
+    if text and set(text) == {"*"}:
+        raise RowRejected(field, MASKED_MESSAGE)
+    return text
+
+
+def field_integer(row: dict, field: str, message: str) -> int:
+    try:
+        return integer(field_text(row, field))
+    except ValueError:
+        raise RowRejected(field, message) from None
+
+
+def approval_row(row: dict) -> LedgerImportRow:
+    # 스펙 17 4.1: 이용일 → 가맹점명 → 금액 → 취소금액 순서로 처음 걸린 원인 하나만 남긴다.
+    used_date = field_text(row, "resUsedDate")
+    try:
+        if not re.fullmatch(r"\d{8}", used_date):
+            raise ValueError
+        occurred_on = datetime.strptime(used_date, "%Y%m%d").date()
+    except ValueError:
+        raise RowRejected("resUsedDate", "이용일을 읽을 수 없습니다.") from None
+    merchant = field_text(row, "resMemberStoreName")
+    if not merchant:
+        raise RowRejected("resMemberStoreName", "가맹점명이 비어 있습니다.")
+    if row.get("resHomeForeignType") == "1":
+        used = field_integer(row, "resUsedAmount", "이용금액을 읽을 수 없습니다.")
+    else:
+        used = field_integer(row, "resKRWAmt", "해외 이용 건의 원화 금액이 없습니다.")
+    cancelled = row.get("resCancelYN")
+    has_cancel_amount = bool(str(row.get("resCancelAmount") or "").strip())
+    cancellation = cancelled == "1" or used < 0 or (cancelled == "2" and has_cancel_amount)
+    amount = used
+    if cancellation and has_cancel_amount:
+        amount = field_integer(row, "resCancelAmount", "취소금액을 읽을 수 없습니다.")
+    return LedgerImportRow(
+        occurred_on=occurred_on,
+        merchant=merchant,
+        amount=abs(amount),
+        is_cancellation=cancellation,
+        card_name=row.get("resCardName") or None,
+        approval_no=row.get("resApprovalNo") or None,
+        merchant_category=row.get("resMemberStoreType") or None,
+    )
 
 
 class CodefConnector:
@@ -91,34 +166,15 @@ class CodefConnector:
             },
         )
         result = ApprovalRows()
-        for row in object_rows(data):
+        for number, row in enumerate(object_rows(data), 1):
+            # 거절 건은 실패가 아니므로 건너뛰되 응답 순번은 센다.
             if row.get("resCancelYN") == "3":
                 continue
             try:
-                merchant = str(row.get("resMemberStoreName") or "").strip()
-                if not merchant:
-                    raise ValueError
-                domestic = row.get("resHomeForeignType") == "1"
-                used = integer(row.get("resUsedAmount") if domestic else row.get("resKRWAmt"))
-                cancelled = row.get("resCancelYN")
-                cancel_amount = row.get("resCancelAmount")
-                cancellation = (
-                    cancelled == "1" or used < 0 or (cancelled == "2" and bool(cancel_amount))
-                )
-                amount = integer(cancel_amount) if cancellation and cancel_amount else used
-                result.append(
-                    LedgerImportRow(
-                        occurred_on=datetime.strptime(row["resUsedDate"], "%Y%m%d").date(),
-                        merchant=merchant,
-                        amount=abs(amount),
-                        is_cancellation=cancellation,
-                        card_name=row.get("resCardName") or None,
-                        approval_no=row.get("resApprovalNo") or None,
-                        merchant_category=row.get("resMemberStoreType") or None,
-                    )
-                )
-            except (ValueError, TypeError, KeyError):
-                result.failed += 1
+                result.append(approval_row(row))
+                result.numbers.append(number)
+            except RowRejected as exc:
+                result.failures.append(RowFailure(number, exc.field, exc.message))
         return result
 
     def fetch_bank_balances(self, connected_id, organization) -> list[SyncedHolding]:
