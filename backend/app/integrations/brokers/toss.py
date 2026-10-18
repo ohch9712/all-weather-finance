@@ -1,9 +1,10 @@
 """공식 OpenAPI 1.2.24: https://openapi.tossinvest.com/openapi-docs/latest/openapi.json
-issueOAuth2Token, listStocks, getStocks, getPrices, getCandles, getHoldings.
+issueOAuth2Token, getAccounts, listStocks, getStocks, getPrices, getCandles, getHoldings.
 확인되지 않은 재무지표·개별 체결은 추측하지 않는다.
 """
 
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 import httpx
@@ -34,8 +35,17 @@ BUCKETS = {
         "STOCK": 15,
         "STOCK_ALL": 15,
         "ASSET": 1,
+        "ACCOUNT": 1,
     }.items()
 }
+
+
+@dataclass(frozen=True)
+class TossAccount:
+    # 계좌번호 원문은 어댑터 밖으로 내보내지 않고 끝 4자리만 둔다.
+    seq: str
+    account_type: str
+    account_no_last4: str
 
 
 class TossBroker(UnsupportedBroker):
@@ -68,10 +78,14 @@ class TossBroker(UnsupportedBroker):
 
     @parsed_response
     def get_token(self):
+        return self._token()[0]
+
+    def _token(self):
+        """(토큰, 캐시에서 꺼냈는지)를 돌려준다."""
         # OAuth2: form-urlencoded, expires_in(초), 동일 client 재발급 시 이전 토큰 무효화.
         with self.token_lock:
             if self.token and self.expires_at - timedelta(minutes=5) > now_utc():
-                return self.token
+                return self.token, True
             response = request_with_retry(
                 self.client,
                 "POST",
@@ -86,20 +100,58 @@ class TossBroker(UnsupportedBroker):
             data = self._read(response)
             self.token = data["access_token"]
             self.expires_at = now_utc() + timedelta(seconds=int(data["expires_in"]))
-            return self.token
+            return self.token, False
+
+    def _discard_token(self, token):
+        # 다른 스레드가 이미 새 토큰을 받았으면 그 토큰은 버리지 않는다.
+        with self.token_lock:
+            if self.token == token:
+                self.token = None
 
     @parsed_response
     def _get(self, path, group, params=None, *, account=False):
-        headers = {"Authorization": f"Bearer {self.get_token()}"}
+        headers = {}
         if account:
             if not self.account_no:
                 raise BrokerError("BROKER_AUTH_FAILED")
             # AccountSeq: 계좌번호 원문이 아니라 /accounts의 accountSeq 값이다.
             headers["X-Tossinvest-Account"] = self.account_no
-        response = request_with_retry(
-            self.client, "GET", self.base_url + path, BUCKETS[group], headers=headers, params=params
-        )
+
+        def send(token):
+            return request_with_retry(
+                self.client,
+                "GET",
+                self.base_url + path,
+                BUCKETS[group],
+                headers={**headers, "Authorization": f"Bearer {token}"},
+                params=params,
+            )
+
+        token, cached = self._token()
+        response = send(token)
+        if response.status_code == 401 and cached:
+            # client당 유효 토큰은 1개이고 재발급하면 이전 토큰은 즉시 무효가 된다
+            # (issueOAuth2Token 설명, Unauthorized 예시 token-revoked). 같은 키로 다른
+            # 클라이언트가 토큰을 받았을 수 있으므로 한 번만 새로 받아 같은 요청을 다시 보낸다.
+            # 새 토큰으로도 401이면 _read가 BROKER_AUTH_FAILED로 바꾼다.
+            self._discard_token(token)
+            token, _ = self._token()
+            response = send(token)
         return self._read(response)["result"]
+
+    @parsed_response
+    def list_accounts(self):
+        # getAccounts(GET /api/v1/accounts): 계좌 헤더 없이 토큰만 보낸다. 한도 그룹 ACCOUNT.
+        # result[]의 accountNo(문자열)·accountSeq(int64)·accountType. 지금은 BROKERAGE만 오지만
+        # 명세가 알 수 없는 enum 값을 허용하라고 하므로 accountType은 그대로 둔다.
+        return [
+            TossAccount(
+                str(int(r["accountSeq"])),
+                str(r["accountType"]),
+                str(r["accountNo"]).replace("-", "")[-4:],
+            )
+            for r in self._get("/api/v1/accounts", "ACCOUNT")
+        ]
 
     @parsed_response
     def list_stocks(self, market):

@@ -30,6 +30,7 @@ from app.modules.market.schemas import (
     Snapshot,
     StockDetail,
     StockSummary,
+    TossAccount,
 )
 
 
@@ -280,6 +281,26 @@ def verify_connection(db, user_id, connection_id):
         row.last_error_code = exc.code
     repository.save_connection(db, row)
     return Connection.model_validate(row)
+
+
+def list_toss_accounts(app_key: str, app_secret: str) -> list[TossAccount]:
+    if not app_key.strip():
+        raise field_error("appKey", "앱키를 입력해 주세요.")
+    if not app_secret.strip():
+        raise field_error("appSecret", "시크릿을 입력해 주세요.")
+    # 키는 이 요청 안에서만 쓰고 DB나 연결 캐시(_make_client)에 남기지 않는다.
+    # 같은 키의 연결 클라이언트 토큰은 무효가 되지만 TossBroker가 401이면 한 번 재발급한다.
+    try:
+        with httpx.Client(timeout=10) as http:
+            accounts = TossBroker(app_key, app_secret, client=http).list_accounts()
+    except BrokerError as exc:
+        raise exc.as_app_error() from None
+    return [
+        TossAccount(
+            account_seq=a.seq, account_type=a.account_type, account_no_last4=a.account_no_last4
+        )
+        for a in accounts
+    ]
 
 
 def delete_connection(db, user_id, connection_id):

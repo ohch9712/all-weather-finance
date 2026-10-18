@@ -1,7 +1,10 @@
+import logging
 from datetime import date
 from types import SimpleNamespace
+from urllib.parse import parse_qs
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
 import respx
 from sqlalchemy import delete, func, select
@@ -9,6 +12,7 @@ from sqlalchemy import delete, func, select
 from app.core.config import get_settings
 from app.core.crypto import decrypt_str
 from app.core.errors import AppError
+from app.integrations.brokers import toss
 from app.integrations.brokers.errors import BrokerError
 from app.integrations.brokers.mock import MockBroker
 from app.modules.market import jobs, service
@@ -247,6 +251,139 @@ def test_egress_ip_cached_and_failure(respx_mock, auth_client):
     route.respond(500)
     assert auth_client.get("/api/market/connections/egress-ip").json() == {"ip": None}
     service.get_egress_ip.cache_clear()
+
+
+TOSS = "https://openapi.tossinvest.com"
+TOSS_KEYS = {"appKey": "test-toss-key-abcd", "appSecret": "test-toss-secret-wxyz"}
+TOSS_ACCOUNTS = "/api/market/connections/toss-accounts"
+REVOKED = {"error": {"code": "token-revoked", "message": "새로 발급된 토큰으로 대체되었습니다."}}
+
+
+@pytest.fixture
+def toss_http(monkeypatch):
+    immediate = SimpleNamespace(acquire=lambda: None)
+    monkeypatch.setattr(toss, "BUCKETS", {name: immediate for name in toss.BUCKETS})
+    service._make_client.cache_clear()
+    with respx.mock(assert_all_mocked=True, assert_all_called=False, using="httpx") as mock:
+        mock.route(host="testserver").pass_through()
+        yield mock
+    service._make_client.cache_clear()
+
+
+def test_toss_accounts_last4_only_and_keys_not_kept(auth_client, db, toss_http, caplog):
+    caplog.set_level(logging.DEBUG)
+    token = toss_http.post(TOSS + "/oauth2/token").respond(
+        200, json={"access_token": "test-token", "expires_in": 86400}
+    )
+    accounts = toss_http.get(TOSS + "/api/v1/accounts").respond(
+        200,
+        json={
+            "result": [{"accountNo": "12345678901", "accountSeq": 1, "accountType": "BROKERAGE"}]
+        },
+    )
+    r = auth_client.post(TOSS_ACCOUNTS, json=TOSS_KEYS)
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "items": [{"accountSeq": "1", "accountType": "BROKERAGE", "accountNoLast4": "8901"}]
+    }
+    assert "12345678901" not in r.text
+    sent = parse_qs(token.calls[0].request.content.decode())
+    assert sent["client_id"] == [TOSS_KEYS["appKey"]]
+    assert sent["client_secret"] == [TOSS_KEYS["appSecret"]]
+    assert "X-Tossinvest-Account" not in accounts.calls[0].request.headers
+    # 키는 저장하지 않는다: 연결 행도, 연결 클라이언트 캐시도 남지 않는다.
+    assert db.scalar(select(func.count()).select_from(BrokerConnection)) == 0
+    assert service._make_client.cache_info().currsize == 0
+    for value in TOSS_KEYS.values():
+        assert value not in r.text + caplog.text
+
+    accounts.respond(200, json={"result": []})
+    assert auth_client.post(TOSS_ACCOUNTS, json=TOSS_KEYS).json() == {"items": []}
+
+
+@pytest.mark.parametrize("where", ["token", "accounts"])
+@pytest.mark.parametrize(
+    ("status", "code"), [(403, "BROKER_IP_NOT_ALLOWED"), (401, "BROKER_AUTH_FAILED")]
+)
+def test_toss_accounts_broker_errors(auth_client, toss_http, where, status, code):
+    token = toss_http.post(TOSS + "/oauth2/token").respond(
+        200, json={"access_token": "test-token", "expires_in": 86400}
+    )
+    accounts = toss_http.get(TOSS + "/api/v1/accounts").respond(200, json={"result": []})
+    (token if where == "token" else accounts).respond(
+        status, json={"error": {"code": "test-error", "message": "테스트 오류"}}
+    )
+    r = auth_client.post(TOSS_ACCOUNTS, json=TOSS_KEYS)
+    assert r.status_code == 502 and r.json()["error"]["code"] == code
+    assert token.call_count == 1 and accounts.call_count == (where == "accounts")
+
+
+def test_toss_accounts_validation_and_auth(client, auth_client, toss_http):
+    token = toss_http.post(TOSS + "/oauth2/token").respond(
+        200, json={"access_token": "test-token", "expires_in": 86400}
+    )
+    for field in ("appKey", "appSecret"):
+        for value in ("", "   "):
+            r = auth_client.post(TOSS_ACCOUNTS, json={**TOSS_KEYS, field: value})
+            assert r.status_code == 422, r.text
+            assert r.json()["error"]["details"][0]["field"] == field
+    assert auth_client.post(TOSS_ACCOUNTS, json={"appKey": "test-key"}).status_code == 422
+    assert (
+        auth_client.post(TOSS_ACCOUNTS, json={**TOSS_KEYS, "appKey": "x" * 201}).status_code == 422
+    )
+    assert (
+        auth_client.post(
+            TOSS_ACCOUNTS, content="appKey=a", headers={"Content-Type": "text/plain"}
+        ).status_code
+        == 422
+    )
+    assert client.post(TOSS_ACCOUNTS, json=TOSS_KEYS).status_code == 401
+    assert token.call_count == 0
+
+
+def test_toss_accounts_then_connection_reissues_revoked_token(auth_client, toss_http):
+    # 토스처럼 마지막으로 발급한 토큰만 유효하게 둔다.
+    issued = []
+
+    def issue(request):
+        issued.append(f"test-token-{len(issued) + 1}")
+        return httpx.Response(200, json={"access_token": issued[-1], "expires_in": 86400})
+
+    def latest_only(payload):
+        def handler(request):
+            if request.headers["Authorization"] != f"Bearer {issued[-1]}":
+                return httpx.Response(401, json=REVOKED)
+            return httpx.Response(200, json=payload)
+
+        return handler
+
+    toss_http.post(TOSS + "/oauth2/token").mock(side_effect=issue)
+    account = {"accountNo": "12345678901", "accountSeq": 7, "accountType": "BROKERAGE"}
+    toss_http.get(TOSS + "/api/v1/accounts").mock(side_effect=latest_only({"result": [account]}))
+    holdings = toss_http.get(TOSS + "/api/v1/holdings").mock(
+        side_effect=latest_only({"result": {"items": []}})
+    )
+    seq = auth_client.post(TOSS_ACCOUNTS, json=TOSS_KEYS).json()["items"][0]["accountSeq"]
+    created = auth_client.post(
+        "/api/market/connections",
+        json={
+            "provider": "toss",
+            "environment": "real",
+            "label": "토스",
+            **TOSS_KEYS,
+            "accountNo": seq,
+        },
+    )
+    assert created.status_code == 201, created.text
+    verify = f"/api/market/connections/{created.json()['id']}/verify"
+    assert auth_client.post(verify, json={}).json()["status"] == "active"
+    # 같은 키로 계좌를 다시 불러오면 연결 클라이언트에 캐시된 토큰이 무효가 된다.
+    assert auth_client.post(TOSS_ACCOUNTS, json=TOSS_KEYS).status_code == 200
+    again = auth_client.post(verify, json={}).json()
+    assert again["status"] == "active" and again["lastErrorCode"] is None
+    sent = [call.request.headers["Authorization"] for call in holdings.calls]
+    assert sent == ["Bearer test-token-2", "Bearer test-token-2", "Bearer test-token-4"]
+    assert {call.request.headers["X-Tossinvest-Account"] for call in holdings.calls} == {"7"}
 
 
 def test_auth_required_and_nonexistent_ids(client, auth_client):

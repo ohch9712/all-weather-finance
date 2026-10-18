@@ -97,6 +97,15 @@ def create_connection(data: schemas.ConnectionCreate, user: CurrentUser, db: DBS
 
 
 @router.post(
+    "/connections/toss-accounts",
+    response_model=schemas.TossAccountList,
+    dependencies=[Depends(require_json)],
+)
+def toss_accounts(data: schemas.TossAccountsRequest, user: CurrentUser):
+    return schemas.TossAccountList(items=service.list_toss_accounts(data.app_key, data.app_secret))
+
+
+@router.post(
     "/connections/{connection_id}/verify",
     response_model=schemas.Connection,
     dependencies=[Depends(require_json)],
