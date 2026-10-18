@@ -39,7 +39,7 @@
 | AI | 데이터 등급별 공급자. 개인 데이터가 없는 작업은 Gemini API(`google-genai`, `gemini-3.8-flash`), 개인 금융 데이터(챗봇·업로드 파일 처리)는 로컬 Ollama(`ollama`, `gemma4:12b`). 환경변수로 교체한다(architecture 9.1) |
 | 외부 데이터 | 키움 REST API, 토스증권 Open API, CODEF(모두 조회 전용 어댑터, 기본은 Mock) |
 | 테스트 | pytest(+ respx), Vitest + Testing Library + MSW |
-| 배포 | 미정(작업 18에서 결정). 증권사 API의 허용 IP 때문에 고정 아웃바운드 IP가 필요하다 |
+| 배포 | 서울 리전 VPS 한 대 + Docker Compose(Caddy, frontend, backend, postgres, 배치 cron). VPS 고정 공인 IP가 증권사 API 허용 IP다. 운영의 personal 등급 LLM은 결제 연결 Gemini(작업 18) |
 
 ## 프로젝트 디렉토리 구조
 
