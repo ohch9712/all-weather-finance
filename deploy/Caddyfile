@@ -20,6 +20,11 @@
 				method POST
 				path /api/auth/login /api/auth/signup
 			}
+			# 여러 match 블록은 OR로 묶여 같은 제한(10분 10회)을 함께 쓴다(handler.go AnyMatch).
+			match {
+				method DELETE
+				path /api/auth/me
+			}
 			key {remote_host}
 			events 10
 			window 10m

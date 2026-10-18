@@ -10,6 +10,9 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
         {APP_NAME}
       </Link>
       <main className="w-full max-w-sm">{children}</main>
+      <Link href="/privacy" className="mt-6 text-xs text-muted-foreground underline-offset-4 hover:underline">
+        개인정보 처리방침
+      </Link>
     </div>
   );
 }

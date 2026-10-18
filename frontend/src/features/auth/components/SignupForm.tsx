@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { applyFieldErrors, toSubmitErrors } from "@/lib/form-errors";
@@ -26,13 +28,14 @@ export function SignupForm() {
 
   const form = useForm<SignupValues>({
     resolver: zodResolver(signupSchema),
-    defaultValues: { email: "", password: "", passwordConfirm: "" },
+    defaultValues: { email: "", password: "", passwordConfirm: "", ageConfirmed: false },
   });
 
-  async function onSubmit(values: SignupValues) {
+  async function onSubmit({ email, password, passwordConfirm }: SignupValues) {
     setFormError(null);
     try {
-      const payload = await signupMutation.mutateAsync(values);
+      // 만 14세 확인 값은 서버로 보내지 않는다(서버는 출생연도로 검사한다).
+      const payload = await signupMutation.mutateAsync({ email, password, passwordConfirm });
       setCompleted(true);
       setAuth(payload);
       router.push(ONBOARDING_PATH);
@@ -89,6 +92,39 @@ export function SignupForm() {
             </FormItem>
           )}
         />
+        <FormField
+          control={form.control}
+          name="ageConfirmed"
+          render={({ field }) => (
+            <FormItem>
+              <div className="flex items-center gap-2">
+                <FormControl>
+                  <Checkbox
+                    ref={field.ref}
+                    name={field.name}
+                    checked={field.value}
+                    onCheckedChange={(checked) => field.onChange(checked === true)}
+                    onBlur={field.onBlur}
+                  />
+                </FormControl>
+                <FormLabel className="font-normal">만 14세 이상입니다.</FormLabel>
+              </div>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <p className="text-xs leading-5 text-muted-foreground break-keep">
+          가입하면{" "}
+          <Link
+            href="/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-foreground underline underline-offset-4"
+          >
+            개인정보 처리방침
+          </Link>
+          에 따라 개인정보가 처리됩니다.
+        </p>
         <Button type="submit" size="lg" className="w-full" disabled={submitting}>
           {submitting ? "가입 중…" : "가입하기"}
         </Button>

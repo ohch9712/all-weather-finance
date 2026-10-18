@@ -98,6 +98,13 @@ services:
       args:
         NEXT_PUBLIC_API_BASE_URL: ""
     restart: unless-stopped
+    # 처리방침 운영자 정보(스펙 19 6절). /privacy가 요청 때 읽는 런타임 값이고 빌드에 넣지 않는다.
+    environment:
+      PRIVACY_OPERATOR_NAME: ${PRIVACY_OPERATOR_NAME:-}
+      PRIVACY_OFFICER_NAME: ${PRIVACY_OFFICER_NAME:-}
+      PRIVACY_CONTACT_EMAIL: ${PRIVACY_CONTACT_EMAIL:-}
+      PRIVACY_HOSTING_PROVIDER: ${PRIVACY_HOSTING_PROVIDER:-}
+      PRIVACY_EFFECTIVE_DATE: ${PRIVACY_EFFECTIVE_DATE:-}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s

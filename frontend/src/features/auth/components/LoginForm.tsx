@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { CircleCheck } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -24,6 +26,16 @@ export function LoginForm() {
   const [formError, setFormError] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
   useRedirectIfAuthenticated(completed);
+  // 계정 삭제 뒤(`/login?deleted=1`) 한 번만 안내한다. 주소에서 deleted를 지워 새로 고치면 다시 보이지 않는다.
+  const [accountDeleted] = useState(() => searchParams.get("deleted") === "1");
+  useEffect(() => {
+    if (!accountDeleted) return;
+    const rest = new URLSearchParams(searchParams.toString());
+    if (!rest.has("deleted")) return;
+    rest.delete("deleted");
+    const query = rest.toString();
+    router.replace(query ? `/login?${query}` : "/login");
+  }, [accountDeleted, searchParams, router]);
 
   const form = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
@@ -48,6 +60,12 @@ export function LoginForm() {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} noValidate className="space-y-4">
+        {accountDeleted && !formError && (
+          <Alert role="status">
+            <CircleCheck aria-hidden="true" />
+            <AlertDescription>계정을 삭제했습니다.</AlertDescription>
+          </Alert>
+        )}
         <FormAlert message={formError} />
         <FormField
           control={form.control}

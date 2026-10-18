@@ -6,6 +6,7 @@ from app.core.cookies import clear_session_cookie, set_session_cookie
 from app.modules.auth import service
 from app.modules.auth.schemas import (
     AuthPayload,
+    DeleteAccountRequest,
     LoginRequest,
     ProfileOut,
     ProfileUpdate,
@@ -47,6 +48,14 @@ def logout(request: Request, db: DBSession):
 @auth_router.get("/me", response_model=AuthPayload)
 def me(db: DBSession, user: CurrentUser):
     return service.auth_payload(db, user)
+
+
+@auth_router.delete("/me", status_code=204, dependencies=[Depends(require_json)])
+def delete_me(data: DeleteAccountRequest, db: DBSession, user: CurrentUser):
+    service.delete_account(db, user, data.password.get_secret_value())
+    response = Response(status_code=204)
+    clear_session_cookie(response)
+    return response
 
 
 @profile_router.get("", response_model=ProfileOut)
