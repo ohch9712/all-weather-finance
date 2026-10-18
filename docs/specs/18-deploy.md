@@ -102,3 +102,13 @@
 - 조정: 기존 AI 상태 API에는 billing 필드가 없어 코디네이터 승인으로 personal.enabled=true·provider=gemini·reason=null과 운영 결제 설정을 함께 확인하도록 문서화했다. API 계약과 실제 외부 호출은 추가하지 않았다.
 - 실제 서버에서 사용자·코디네이터가 할 일: VPS·고정 IP·도메인·DNS·공개 인증서 준비, 결제 연결 Gemini·시장·CODEF 키 입력, 증권사 허용 IP 등록, 실제 키 동작·amd64 서버 확인, 개인정보처리방침·Google 개인 데이터 처리/국외 이전 안내 제공, 암호화 키·백업의 서버 밖 보관과 호스트 crontab 설정.
 - 리허설 브라우저·컨테이너·볼륨·이미지와 이번 생성 빌드 캐시를 정리했고 기존 개발 서버·공용 Postgres는 건드리지 않았다.
+
+### 실제 서버 배포 (코디네이터, 2026-10-19)
+
+- 환경: AWS Lightsail 서울 리전 Ubuntu 24.04.4 LTS(x86_64, 2 vCPU, 메모리 3.7GB, 디스크 77GB), 고정 공인 IPv4, 업체 방화벽 22·80·443. `main` `82e986b`를 `/opt/finance`에 받아 `deploy/README.md` 순서대로 진행했다. 도메인·이메일·키 값은 이 문서에 적지 않는다.
+- 서버 준비: 패키지 업데이트 뒤 커널 업데이트로 한 번 재부팅, `ufw` 22·80·443, 시간대 Asia/Seoul. README에 없는 단계로 첫 빌드 전에 2GB 스왑을 만들었다(4GB 서버에서 프론트·Caddy 빌드 메모리 여유). Docker 29.9.1, Compose v5.6.0.
+- 시크릿: `.env.production`은 예시를 복사한 뒤 README 3절 스크립트로 DB 비밀번호 두 개·`APP_ENCRYPTION_KEY`·두 DB URL을 만들고(출력 없음), 사용자가 도메인·ACME 이메일·결제 연결 Gemini 키·CODEF 데모 키(`CODEF_ENV=development`)·`PRIVACY_*`를 직접 넣었다. 코디네이터는 키 이름별 채움 여부와 형식만 확인했다.
+- 빌드·기동: 이미지 빌드는 `DOMAIN`·`ACME_EMAIL`이 필수 보간이라 빌드 때만 임시 값을 넣어 먼저 빌드했다(이미지에 도메인이 들어가지 않는다). `up -d` 후 postgres healthy → migrate Exit 0 → backend·frontend healthy → caddy. Let's Encrypt 인증서 자동 발급, HTTP → HTTPS 308.
+- 확인: `/api/health` 200, 보안 헤더(HSTS, nosniff, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy, CSP), 외부에서 열린 포트 22·80·443뿐(3000·8000·5432·2019 닫힘), backend·frontend·caddy uid 10001, `supercronic -test` 통과, AI 상태 general·personal 모두 `enabled=true, provider=gemini, reason=null`, 호스트·backend·cron의 나가는 IP가 고정 IP와 같음, `/privacy` 운영자 정보 표시(초안 경고 없음), 학습 시드 35개, 사용자 가입·온보딩 후 `make-admin`.
+- 백업: `/var/backups/finance`(700)에 첫 덤프 생성, 호스트 crontab 매일 03:30 `backup.sh` 등록(기존 crontab이 없던 계정이라 `crontab -l`이 실패한다). 사용자가 Lightsail 인스턴스 자동 스냅샷을 켰다.
+- 남은 일: 키움·토스 앱키 발급과 허용 IP 등록 후 `MARKET_DATA_PROVIDER` 전환, README 보완(데모 키 `CODEF_ENV=development`, 스왑, 첫 crontab 등록), 다른 사용자에게 가입을 열기 전 처리방침 법률 검토, 백업의 새 DB 복구 정기 점검.
