@@ -227,3 +227,13 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 - 회귀 테스트 3개를 추가했다. 수정 전 3개 모두 실패한 것을 확인한 뒤, 숫자 열 두 번 클릭의 `asc → desc` 요청 순서·헤더 방향·지연 응답 중 동일한 표 유지, 모바일 선택 필드 유지·방향 전환, URL 및 저장 검색의 sort 복원을 모두 통과했다.
 - 수정 후 `npm run lint`, `npx tsc --noEmit`, `npm run test`(전체 **362개**, screener **11개**), `npm run build` 통과. 백엔드·의존성·공유 파일은 수정하지 않았다.
 - 실제 서버와 독립 Playwright Chrome 컨텍스트에서 1280px PER `asc → desc`, 360px PBR 선택 후 `asc → desc`, 응답 지연 중 표 유지, URL ROE `desc → asc`, 저장 검색 현재가 `desc → asc` 요청과 표시를 확인했다. 두 너비의 문서 가로 넘침과 pageerror는 없었고 실제 외부 API/LLM은 호출하지 않았다. `scripts/stop.sh`로 서버를 종료했다.
+
+### 운영자 키 조건식 노출 수정
+
+- 앞선 구현의 '연결 선택(없으면 운영자 데이터)' 동작을 변경했다. `connectionId`가 없으면 운영자 클라이언트가 Mock일 때만 샘플을 허용하며, 실제 증권사(Kiwoom·Toss)는 조건식 API를 호출하기 전에 `422 VALIDATION_ERROR`와 `connectionId` 필드 오류("내 키움 증권사 연결을 선택해 주세요.")로 막는다. 목록·실행에 같은 보호 규칙을 적용하며 사용자 연결과 다른 시장 데이터 API는 기존 경로를 유지한다.
+- '내 키움 조건식' 선택지에서 '운영자 데이터'를 없애고 사용자의 active 키움 연결만 표시하며 첫 연결을 기본으로 고른다. 연결 조회가 성공한 뒤 조건식 목록을 요청하므로 초기 렌더에서 불필요한 운영자 목록 요청을 보내지 않는다. 연결이 없고 목록이 Mock 200이면 '샘플 조건식'과 샘플 고지를 표시하고, 422이면 스펙의 연결 안내와 `/settings/connections` 링크를 표시한다.
+- 백엔드 회귀 테스트는 Kiwoom·Toss 운영자 클라이언트(능력 유무 모두)의 연결 없는 목록·실행 422와 조건식 API 미호출, Mock 샘플 2개, 사용자 연결로 조회·실행하는 경로를 검증했다. 프론트 MSW 테스트는 선택지 제한·첫 연결 기본 선택·연결 조회 대기 중 조건식 미요청, 연결 변경, 연결 없는 422 안내·링크, Mock 샘플 표시·실행을 검증했다. 기존 사용자 격리 404도 통과했다.
+- 검사: `scripts/worktree-setup.sh`, 백엔드 `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`(전체 **1,426개**, screener **33개**), 프론트 `npm run lint`, `npx tsc --noEmit`, `npm run test`(전체 **504개**, screener **13개**), `npm run build`가 통과했다. 기존 Starlette TestClient deprecation 경고 1건이 있으며 실패는 없다.
+- 실제 슬롯 13 서버를 Kiwoom 실전 provider 설정(실제 자격증명 없이)으로 실행해 연결 없는 목록·실행의 422와 정확한 필드 오류를 확인했다. Mock 설정으로 재기동해 샘플 목록 2개·실행 200을 확인했다. 독립 Playwright 세션에서 로그인하고 연결 안내·설정 링크 이동·Mock 샘플 표시를 확인했으며, 안내와 샘플 화면 모두 360px·1280px에서 문서 가로 넘침이 없었다. `/api/market/connections/egress-ip`는 브라우저에서 가짜 응답으로 가로챘고 실제 외부 API·LLM은 호출하지 않았다. 확인 후 `scripts/stop.sh`로 서버를 종료했다.
+- 스펙과 다른 점: 없음. 소유 경로만 수정했으며 공유 파일·의존성·마이그레이션은 변경하지 않았다.
+- 남은 일: 별도 검증 워커의 PR 검증과 코디네이터 병합.
