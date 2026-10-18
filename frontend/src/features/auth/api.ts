@@ -20,6 +20,11 @@ export async function logout(): Promise<void> {
   await apiFetch<void>("/api/auth/logout", { method: "POST" });
 }
 
+/** `DELETE /api/auth/me`(스펙 19 4절). 비밀번호를 확인한 뒤 계정과 모든 데이터를 지우고 세션 쿠키를 지운다. */
+export async function deleteAccount(password: string): Promise<void> {
+  await apiFetch<void>("/api/auth/me", { method: "DELETE", body: JSON.stringify({ password }) });
+}
+
 /** 로그인 상태면 AuthPayload, `401 UNAUTHENTICATED`면 null. 그 밖의 에러는 그대로 던진다. */
 export async function getMe(): Promise<AuthPayload | null> {
   try {

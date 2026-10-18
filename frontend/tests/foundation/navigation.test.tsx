@@ -17,6 +17,7 @@ describe("내비게이션 데이터(architecture 12.1)", () => {
       ["배우기", "/learn"],
       ["AI 상담", "/chat"],
       ["프로필", "/settings/profile"],
+      ["계정", "/settings/account"],
       ["증권사 연결", "/settings/connections"],
       ["매매 수수료·세금", "/settings/trading-costs"],
       ["학습 콘텐츠 관리", "/admin/learn"],

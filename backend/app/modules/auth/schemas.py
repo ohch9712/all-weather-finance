@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import EmailStr, Field, field_serializer, field_validator
+from pydantic import EmailStr, Field, SecretStr, field_serializer, field_validator
 from pydantic_core import PydanticCustomError
 
 from app.core.domain import AgeBand
@@ -72,3 +72,9 @@ class ProfileUpdate(CamelModel):
 class AuthPayload(CamelModel):
     user: UserOut
     profile: ProfileOut
+
+
+class DeleteAccountRequest(CamelModel):
+    # 비어 있거나 없으면 서비스가 "비밀번호가 맞지 않습니다."로 거절한다.
+    # 값은 repr·로그에 남기지 않는다.
+    password: SecretStr = Field(default=SecretStr(""), repr=False)

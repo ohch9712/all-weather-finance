@@ -52,6 +52,7 @@ describe("SignupForm", () => {
     await user.type(fieldInput("이메일"), "potato@example.com");
     await user.type(fieldInput("비밀번호"), "gamja1234");
     await user.type(fieldInput("비밀번호 확인"), "gamja1234");
+    await user.click(screen.getByLabelText("만 14세 이상입니다."));
     await user.click(screen.getByRole("button", { name: "가입하기" }));
     expect(await screen.findByText("이미 가입된 이메일입니다.")).toBeInTheDocument();
     expect(fieldInput("이메일")).toHaveAttribute("aria-invalid", "true");
@@ -70,6 +71,7 @@ describe("SignupForm", () => {
     await user.type(fieldInput("이메일"), "potato@example.com");
     await user.type(fieldInput("비밀번호"), "gamja1234");
     await user.type(fieldInput("비밀번호 확인"), "gamja1234");
+    await user.click(screen.getByLabelText("만 14세 이상입니다."));
     await user.click(screen.getByRole("button", { name: "가입하기" }));
     expect(await screen.findByText("비밀번호가 일치하지 않습니다.")).toBeInTheDocument();
     expect(fieldInput("비밀번호 확인")).toHaveAttribute("aria-invalid", "true");
@@ -91,6 +93,7 @@ describe("SignupForm", () => {
     await user.type(fieldInput("이메일"), " Potato@Example.com ");
     await user.type(fieldInput("비밀번호"), "gamja1234");
     await user.type(fieldInput("비밀번호 확인"), "gamja1234");
+    await user.click(screen.getByLabelText("만 14세 이상입니다."));
     await user.click(screen.getByRole("button", { name: "가입하기" }));
     await waitFor(() => expect(router.push).toHaveBeenCalledWith("/onboarding"));
     expect(body).toEqual({ email: "Potato@Example.com", password: "gamja1234", passwordConfirm: "gamja1234" });

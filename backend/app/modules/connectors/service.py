@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 # 카드 동기화 summary.errors에 남기는 실패 이유 최대 건수(스펙 17 4.1)
 MAX_SUMMARY_ERRORS = 20
+# 계정 삭제 중 CODEF 연결을 지우지 못했을 때의 안내(스펙 19 4.1)
+DELETE_ALL_FAILED_MESSAGE = (
+    "CODEF 연결을 지우지 못했습니다. 데이터 자동 수집 화면에서 연결을 먼저 삭제해 주세요."
+)
 
 
 @lru_cache
@@ -147,6 +151,26 @@ def delete_account(db, user_id, account_id, *, local_only=False):
         )
     repository.delete_account(db, row)
     db.commit()
+
+
+def delete_all_accounts(db, user_id) -> None:
+    """계정 삭제 전에 사용자의 CODEF 연결을 만든 순서대로 하나씩 지운다(스펙 19 4.1).
+
+    연결마다 delete_account의 기본 삭제 규칙(CODEF 성공 뒤에만 행·현금 자산 삭제)을 따르고
+    그 안에서 commit하므로, 중간에 멈춰도 다시 시도하면 남은 연결만 처리한다.
+    """
+    rows = sorted(repository.list_accounts(db, user_id), key=lambda row: (row.created_at, row.id))
+    for account_id in [row.id for row in rows]:
+        try:
+            delete_account(db, user_id, account_id)
+        except AppError as exc:
+            if exc.code == "NOT_FOUND":
+                # 그 사이 다른 요청이 먼저 지운 연결은 건너뛴다.
+                continue
+            if exc.code not in {"CONNECTOR_FAILED", "CONFLICT"}:
+                raise
+            logger.warning("계정 삭제 중 CODEF 연결 삭제를 멈췄습니다.")
+            raise AppError(409, "CONFLICT", DELETE_ALL_FAILED_MESSAGE) from None
 
 
 def card_summary(rows, result):

@@ -8,6 +8,7 @@ export const authMessages = {
   password: "비밀번호는 8~128자로 입력해 주세요.",
   passwordMismatch: "비밀번호가 일치하지 않습니다.",
   passwordConfirmRequired: "비밀번호를 한 번 더 입력해 주세요.",
+  ageConfirmRequired: "만 14세 이상만 가입할 수 있습니다.",
 } as const;
 
 export const profileMessages = {
@@ -45,6 +46,8 @@ export const signupSchema = z
     email: z.string().refine(isValidEmail, authMessages.email),
     password: z.string().refine(isValidPassword, authMessages.password),
     passwordConfirm: z.string(),
+    // "만 14세 이상입니다." 필수 확인(스펙 19 5.2). 서버로 보내지 않는다(서버는 출생연도로 검사한다).
+    ageConfirmed: z.boolean().refine((value) => value, authMessages.ageConfirmRequired),
   })
   .superRefine((values, ctx) => {
     if (values.passwordConfirm === "") {
@@ -57,6 +60,11 @@ export const signupSchema = z
     }
   });
 export type SignupValues = z.infer<typeof signupSchema>;
+
+export const deleteAccountSchema = z.object({
+  password: z.string().min(1, authMessages.passwordRequired),
+});
+export type DeleteAccountValues = z.infer<typeof deleteAccountSchema>;
 
 export const MIN_BIRTH_YEAR = 1920;
 

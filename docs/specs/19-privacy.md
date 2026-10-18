@@ -234,3 +234,57 @@ AI 기능은 Google의 Gemini API로 처리합니다. 서비스 이용 계약을
 5. 출생연도 만 14세 검사와 가입 체크박스.
 6. Caddy 시도 제한에 계정 삭제 요청이 들어갔고, 프론트 컨테이너에 `PRIVACY_*` 다섯 개만 넘어간다.
 7. 소유 경로 밖 변경 없음, 비밀값·개인 연락처가 저장소에 없음.
+
+## 구현 결과
+
+### 구현한 것
+
+- **백엔드**
+  - `DELETE /api/auth/me`(`require_json`, 인증 필요): 비밀번호 확인 → 마지막 관리자 확인 → `connectors.delete_all_accounts` → `users` 행 삭제(다른 사용자 테이블은 FK CASCADE, `posts.author_id`는 SET NULL) → commit → `clear_session_cookie`로 204. 요청 스키마 `DeleteAccountRequest.password`는 `SecretStr`(repr 제외)이다.
+  - `connectors.delete_all_accounts(db, user_id)`: 연결을 `(created_at, id)` 오름차순으로 하나씩 기존 `delete_account`(기본 삭제, 연결마다 commit)로 지운다. `CONNECTOR_FAILED`(502)·`CONFLICT`(409)는 고정 경고 로그를 남기고 `AppError(409, "CONFLICT", "CODEF 연결을 지우지 못했습니다. …")`로 멈춘다. 연결이 없으면 아무것도 하지 않는다.
+  - `PUT /api/profile`: 기존 범위 검사(스키마 1920~올해−10, DB CHECK 1900~2100)는 그대로 두고, 서비스에서 `올해(KST) − birthYear < 14`면 `field_error("birthYear", "만 14세 이상만 이용할 수 있습니다.")`. 기존 테스트·시드의 출생연도는 이 검사에 걸리지 않아 고치지 않았다.
+- **프론트**
+  - `/privacy`(앱 셸 밖 서버 컴포넌트): `await connection()` 뒤 `process.env`에서 `PRIVACY_*` 다섯 값을 요청 때 읽는다(Next.js 16 `environment-variables.md`의 "Runtime Environment Variables", `connection.md`). 빌드 결과에서 `ƒ /privacy`(동적)다. 7절 문구는 `features/privacy/content.ts`에 데이터로 두고 표·번호 목록·글머리 목록으로 그린다. 값이 하나라도 비면 경고 상자와 "(미설정)", 이메일은 `mailto:`, Google 문의 URL과 13절 기관 주소 네 개는 `target="_blank"`·`rel="noopener noreferrer"` 링크다. 표는 `role="region"`·`tabIndex=0`의 `overflow-x-auto` 영역 안에서만 가로로 스크롤하고, 인쇄 때는 영역을 펼친다(`print:` 변형).
+  - 링크: `(auth)/layout.tsx` 본문 아래 작은 "개인정보 처리방침" 링크, 가입 폼 제출 버튼 위 필수 체크박스 "만 14세 이상입니다."(미체크 "만 14세 이상만 가입할 수 있습니다.", 서버로 보내지 않음)와 새 창 처리방침 링크 안내, 내비게이션 설정 그룹 "프로필" 다음 "계정"(`UserCog`).
+  - `/settings/account`: "계정 정보" 카드(이메일, "개인정보 처리방침 보기"), 위험 영역 "계정 삭제" 카드(안내 네 항목, `autoComplete="current-password"` 비밀번호, 빨간 버튼 → 확인 창 → `DELETE /api/auth/me`). 성공하면 `AuthProvider.deleteAccount`가 쿼리 캐시를 비우고 로그아웃 상태(`signedOut`)로 바꾼 뒤 `/login?deleted=1`로 보낸다. 로그인 폼은 `deleted=1`이면 "계정을 삭제했습니다."(`role="status"`)를 보여 주고 주소에서 `deleted`를 지워 새로 고치면 다시 나오지 않는다. 422는 비밀번호 칸 아래, CODEF 409는 메시지와 "데이터 자동 수집으로 이동"(`/settings/connections`), 그 밖의 409·오류는 메시지만 보여 주고 실패하면 비밀번호 칸을 비운다.
+- **배포**: `.env.production.example`에 값 없는 `PRIVACY_*` 다섯 키, `compose.prod.yaml`의 `frontend`에 이 다섯 개만 런타임 `environment`로 전달, `Caddyfile`의 `auth` 시도 제한 zone에 `DELETE /api/auth/me` match 블록 추가(로그인·가입과 같은 10분 10회 카운터), `README.md`에 3.1절(운영자 정보 다섯 값 넣는 법·`dc up -d frontend`), 4절 `/privacy` 확인과 계정 삭제 제한, 10절 공개 전 확인(법률 검토 권장·시행일·호스팅 업체 이름·탈퇴 확인)을 적었다.
+
+### 스펙에 없던 세부 사항과 구현 선택
+
+- 비밀번호 키가 없거나 빈 값이면 스키마 기본값 `""`로 받아 서비스에서 같은 `field_error("password", "비밀번호가 맞지 않습니다.")`를 낸다. 128자(가입 최대 길이)를 넘으면 해시 검증 없이 같은 422다. 문자열이 아니면 기존 검증 처리기의 `password` 필드 422다.
+- `connectors.repository.list_accounts`는 최신순이라(17 소유, 고치지 않음) `delete_all_accounts` 안에서 오름차순으로 정렬한다. 그 사이 다른 요청이 먼저 지운 연결(`NOT_FOUND`)은 건너뛴다.
+- `auth.service`가 `connectors.service`를 모듈 위에서 import하면 `connectors → allocation → auth` 순환 import가 생겨(allocation을 먼저 import하는 경우 `ImportError`) `delete_account` 함수 안에서 불러온다.
+- 계정 화면은 비밀번호가 비어 있으면 서버에 보내지 않고 "비밀번호를 입력해 주세요."를 보여 준다(확인 창도 열지 않는다). CODEF 409는 `status === 409`이고 메시지에 "CODEF"가 들어 있으면으로 판별한다.
+- `PRIVACY_EFFECTIVE_DATE`가 `YYYY-MM-DD`가 아니거나 달력에 없는 날짜면 미설정으로 보고 경고한다. 값은 앞뒤 공백을 걷는다.
+- 7절 문구는 스펙 마크다운에서 기계적으로 옮겨(저장소 밖 일회성 스크립트) `content.ts`를 만들었고, 테스트(`tests/privacy/privacy.test.tsx`)가 매번 스펙 7절을 다시 읽어 화면의 제목·문단·목록 항목·표 칸 98개와 글자 단위로 비교한다. 문구는 다듬지 않았다.
+- 코디네이터 승인(2026-10-19)으로 `tests/foundation/auth-forms.test.tsx`(가입 제출 전 체크박스 클릭 세 줄)와 `tests/foundation/navigation.test.tsx`("계정" 한 줄)를 고쳤고, `lib/navigation.ts`의 `UserCog` import 한 줄도 승인받았다. 체크하지 않은 제출 오류 테스트는 `tests/auth`에 두었다.
+- 의존성·마이그레이션 변경은 없다.
+
+### 실행한 검증
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 19·8019/3019·finance_19 준비 성공 |
+| `cd backend && uv run ruff check .` / `uv run ruff format --check .` | 통과 / 307개 파일 통과 |
+| `cd backend && uv run pytest` | 1,421개 통과(새 테스트: `tests/auth` 18개, `test_delete_all_accounts.py` 7개). 기존 Starlette/httpx 사용 중단 경고 1개 |
+| `cd frontend && npm run lint` / `npx tsc --noEmit` | 통과 / 통과 |
+| `cd frontend && npm run test` | 50개 파일·502개 통과(새 테스트: `tests/privacy` 7개, `tests/auth` 13개) |
+| `cd frontend && npm run build` | 통과. `ƒ /privacy`(요청 시 렌더링), `○ /settings/account` |
+| 가짜 `PRIVACY_*` 값을 넣고 `npm run build` 뒤 `.next` 전체 검색 | 다섯 값 모두 `.next/static`·`.next` 어디에도 없음(서버 청크에 키 이름만 있음) |
+| 가짜 env 파일로 `docker compose -f deploy/compose.prod.yaml config --format json` | `frontend.environment`가 `PRIVACY_*` 다섯 개뿐이고 다른 서비스에는 `PRIVACY_*` 없음 |
+| `deploy/caddy` 이미지를 임시로 빌드해 `caddy adapt`·`caddy validate` | "Valid configuration". `auth` zone의 `match`가 `[POST login·signup, DELETE /api/auth/me]` 두 matcher set(플러그인 `caddyfile.go`가 append, `handler.go`가 `AnyMatch`). 확인 뒤 임시 이미지 삭제 |
+| `git diff --name-only develop...HEAD` | 모두 3절 소유 경로(승인된 foundation 테스트 두 곳 포함) |
+
+- 백엔드 테스트는 users.id를 참조하는 26개 테이블 모두(`posts`는 작성자 SET NULL, 나머지 25개는 CASCADE)에 두 사용자의 행을 만든 뒤 한 사용자를 지워 그 사용자 행 0건, 다른 사용자 행 수 유지, 탈퇴자 글의 `author_id` NULL, 다른 사용자 북마크 유지를 확인한다. 메타데이터에서 사용자 테이블 목록을 구해 새 테이블이 생기면 테스트가 실패한다. 그 밖에 쿠키 삭제(`Max-Age=0`)·세션 삭제·재가입, 비밀번호 틀림·빈 값·없음·초과 길이 422, 비 JSON 422, 미인증 401, 마지막 관리자 409와 다른 관리자가 있을 때 204, CODEF 두 연결 중 두 번째 실패 시 409·사용자 유지·첫 연결 삭제 반영·재시도 때 남은 연결만 호출, 키 없음 409, 로그·응답에 비밀번호·connectedId·외부 메시지 없음, 출생연도 13세 422·14세 200(KST 연말 경계 포함)을 확인한다. CODEF는 respx(`assert_all_mocked=True`)로만 흉내 내고 루트 conftest의 외부 HTTP 차단을 유지했다.
+- 실제 서버(슬롯 19, `scripts/start.sh`)와 독립 헤드리스 Chrome 컨텍스트(저장소 밖 스크래치의 playwright-core)로 확인했다.
+  - `/privacy`(가짜 값 있음·없음 두 번 기동): 본문 98블록이 7절과 글자 단위로 같음, 값 있음은 경고 없음·mailto·외부 링크 속성, 값 없음은 경고와 "(미설정)", 표 5개, 인쇄 미디어에서 표 영역 `overflow: visible`. 브라우저의 4xx는 모든 화면의 루트 `AuthProvider`가 부르는 기존 `GET /api/auth/me` 401뿐이고 외부 요청 0건.
+  - CODEF 연결 없는 사용자: 가입 화면 미체크 오류·새 창 처리방침 링크·레이아웃 링크, 체크 후 가입, API로 출생연도 13세 422·14세 200, 계정 화면 안내 네 항목, 틀린 비밀번호 422(칸 비움), 확인 창을 거친 삭제 → `/login?deleted=1` 안내 → 주소 정리, 세션 쿠키 없음, `/api/auth/me`·재로그인 401, 새로 고치면 안내 없음.
+  - respx로 CODEF 실패를 흉내 낸 사용자: 저장소 밖 임시 스크립트가 프로세스 메모리에만 가짜 CODEF 키를 넣고 respx(`assert_all_mocked=True`)로 토큰·계정 삭제 응답을 고정한 백엔드를 8019에 띄웠다. 가짜 connectedId 연결 두 개를 finance_19에 넣고 화면에서 삭제하면 첫 연결 성공·두 번째 `CF-03002` → 409 메시지와 "데이터 자동 수집으로 이동" 링크(이동 확인), 비밀번호 칸 비움, 계정 유지(`/me` 200), 연결은 두 번째만 남음. 다시 삭제하면 두 번째 연결만 CODEF에 요청하고 204 → 로그인 화면 안내. 서버 로그에는 고정 문구와 결과 코드만 있고 비밀번호·가짜 키·connectedId가 없었다. 실제 CODEF·LLM·증권사는 호출하지 않았다.
+  - 360·768·1280px에서 `/privacy`·`/signup`·`/settings/account` 모두 `scrollWidth == innerWidth`. 360px에서 처리방침 표는 표 영역 안에서만 가로로 스크롤한다(스크린샷 확인).
+  - 확인용 사용자는 확인 뒤 모두 삭제했고, 띄운 서버는 임시 백엔드를 종료한 뒤 `scripts/stop.sh`로 멈췄다.
+
+### 남은 일
+
+- 코디네이터 검증과 병합.
+- 운영자가 서버 `.env.production`에 실제 `PRIVACY_*` 값을 넣고, 가입을 열기 전에 처리방침 법률 검토를 받는다(README 10절).
+- 실제 CODEF 키로 연결이 있는 계정의 탈퇴는 확인하지 않았다(respx로만 확인).

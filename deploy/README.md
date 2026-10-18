@@ -101,6 +101,20 @@ nano deploy/.env.production
 
 시장 데이터 키가 없으면 `MARKET_DATA_PROVIDER=mock`을 유지한다. 키를 준비했을 때만 `kiwoom`과 `KIWOOM_ENV=real`·`KIWOOM_APP_KEY`·`KIWOOM_APP_SECRET`, 또는 `toss`와 `TOSS_CLIENT_ID`·`TOSS_CLIENT_SECRET`을 넣는다. CODEF는 `CODEF_ENV=production`과 세 키를 넣으면 활성화되며, 비우면 화면에서 키 설정 필요로 표시된다. 실제 키·계좌번호·쿠키를 문서·로그·PR에 붙이지 않는다. `.env.production`과 `APP_ENCRYPTION_KEY`는 별도 접근 통제된 비밀 보관소에도 보관한다. 키를 잃으면 백업 DB의 암호화된 연결 정보를 해독할 수 없다. 기존 운영 볼륨에서 위 생성 명령을 다시 실행하지 않는다(비밀번호는 DB 역할에서도 따로 변경해야 한다).
 
+### 3.1 개인정보 처리방침 운영자 정보
+
+`/privacy`(로그인 없이 보는 개인정보 처리방침)의 운영자·보호책임자 정보는 공개 저장소가 아니라 서버의 `deploy/.env.production`에만 넣는다. Compose는 이 다섯 값을 frontend 컨테이너에만 런타임 환경변수로 넘기고, 화면은 요청 때 읽으므로 이미지를 다시 빌드하지 않아도 된다. `NEXT_PUBLIC_`을 붙이지 않는다(브라우저 번들에 들어가지 않게 한다).
+
+| 키 | 넣을 값 |
+| --- | --- |
+| `PRIVACY_OPERATOR_NAME` | 운영자(개인 또는 사업자) 이름. 처리방침 첫 문장과 "운영자"에 쓰인다 |
+| `PRIVACY_OFFICER_NAME` | 개인정보 보호책임자 성명 |
+| `PRIVACY_CONTACT_EMAIL` | 개인정보 문의를 받을 이메일. 화면에 `mailto:` 링크로 나온다 |
+| `PRIVACY_HOSTING_PROVIDER` | 서버를 빌린 호스팅 업체의 정식 이름(위탁 표의 수탁자) |
+| `PRIVACY_EFFECTIVE_DATE` | 시행일 `YYYY-MM-DD`. 형식이 틀리면 미설정으로 본다 |
+
+하나라도 비어 있으면 `/privacy` 위에 "운영자 정보가 아직 설정되지 않았습니다. 이 처리방침은 공개 전 초안입니다." 경고가 나오고 빈 자리는 "(미설정)"으로 보인다. 값을 바꾼 뒤에는 `dc up -d frontend`로 frontend 컨테이너만 다시 만든다(`dc`는 4절에서 정의한다). 실제 이름·연락처를 문서·PR·로그에 붙이지 않는다.
+
 ## 4. 첫 배포
 
 이하 편의를 위해 매 SSH 세션에 함수를 정의한다. `config`는 시크릿을 펼칠 수 있으므로 `--quiet` 없이 출력하지 않는다.
@@ -129,7 +143,7 @@ dc ps
 
 외부 게시 포트는 Caddy의 80·443뿐이어야 한다. backend·frontend·Caddy는 uid 10001이다. HTTPS 응답에 HSTS·nosniff·프레임 제한·CSP 등이 있는지 확인한다. `/api/*`는 경로를 유지해 backend로, 나머지는 frontend로 간다. 프론트 API 주소는 빌드에서 빈 문자열로 고정해 같은 출처 `/api/...`를 쓰며 쿠키는 Secure·HttpOnly·SameSite=Lax다. TLS 종료 뒤의 backend는 내부 네트워크에서만 연결되므로 Caddy의 프록시 헤더를 신뢰한다.
 
-브라우저에서 가입 → 온보딩 → 자산배분·가계부·배우기를 확인한다. 로그인·가입 POST는 같은 IP에서 합산 10분당 10회이며 초과하면 Caddy가 429와 Retry-After를 돌려준다. 앞에 임의의 프록시를 추가하지 않는다. 제한 상태는 Caddy 재시작 시 초기화된다.
+브라우저에서 가입 → 온보딩 → 자산배분·가계부·배우기를 확인한다. 로그아웃한 브라우저에서 `https://<도메인>/privacy`를 열어 경고 상자 없이 운영자·보호책임자·이메일·호스팅 업체·시행일이 보이는지 확인한다. 로그인·가입 POST와 계정 삭제(`DELETE /api/auth/me`)는 같은 IP에서 합산 10분당 10회이며 초과하면 Caddy가 429와 Retry-After를 돌려준다. 앞에 임의의 프록시를 추가하지 않는다. 제한 상태는 Caddy 재시작 시 초기화된다.
 
 ## 5. 관리자·학습 시드·AI 확인
 
@@ -255,7 +269,10 @@ dc up -d
 
 ## 10. 공개 전 확인
 
-- 개인정보처리방침을 별도 작업으로 제공한다. [CODEF 위탁 안내](https://codef.io/privacy-pop), Google Gemini의 개인 금융 데이터 처리·국외 이전 안내와 동의 등 실제 서비스 조건을 반영하기 전에는 다른 사람에게 가입을 열지 않는다.
+- 다른 사람에게 가입을 열기 전에 `/privacy`의 개인정보 처리방침(원안: 스펙 19 7절)에 대해 법률 검토를 받는 것을 권한다. [CODEF 위탁 안내](https://codef.io/privacy-pop), Google Gemini의 개인 금융 데이터 처리·국외 이전 안내가 실제 서비스 조건과 맞는지 함께 확인한다.
+- `/privacy`에 "공개 전 초안" 경고가 없고, 시행일(`PRIVACY_EFFECTIVE_DATE`)이 실제로 처리방침을 적용하는 날(가입을 여는 날)인지 확인한다. 처리방침에 "시행 7일 전에 이 화면으로 알린다"고 적혀 있으므로 나중에 내용을 바꾸면 알린 날부터 7일 뒤 이후로 시행일을 잡는다.
+- 위탁 표의 호스팅 업체 이름(`PRIVACY_HOSTING_PROVIDER`)이 실제 계약한 업체의 정식 이름이고, 서버·DB가 서울 리전에 있는지 확인한다.
+- 계정 화면의 계정 삭제(회원 탈퇴)가 동작하는지 확인용 계정으로 확인한다. CODEF 연결이 있으면 CODEF에서 먼저 지운다.
 - 관리자 계정이 본인 소유이며 일반 사용자는 관리자 화면에 접근할 수 없는지 확인한다.
 - Gemini 키에 결제가 실제 연결되어 있고 personal 상태·화면 배지가 Google Gemini인지 확인한다.
 - 시장 키·CODEF 키 유무와 disabled·sample 상태가 의도대로인지, 증권사 IP 등록이 맞는지 확인한다.

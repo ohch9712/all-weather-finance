@@ -32,9 +32,14 @@ export interface AuthContextValue {
   setAuth(payload: AuthPayload): void;
   /** `POST /api/auth/logout` → 쿼리 캐시 비움 → `/login`. 요청이 실패하면 상태를 그대로 두고 에러를 던진다. */
   logout(): Promise<void>;
+  /** `DELETE /api/auth/me` → 쿼리 캐시 비움 → 로그아웃 상태 → `/login?deleted=1`. 실패하면 상태를 그대로 두고 에러를 던진다. */
+  deleteAccount(password: string): Promise<void>;
 }
 
 type AuthState = Pick<AuthContextValue, "status" | "user" | "profile" | "error" | "signedOut">;
+
+/** 계정 삭제 뒤 로그인 화면. `deleted=1`이면 로그인 화면이 "계정을 삭제했습니다."를 한 번 보여 준다. */
+export const ACCOUNT_DELETED_LOGIN_PATH = "/login?deleted=1";
 
 const LOADING: AuthState = { status: "loading", user: null, profile: null, error: null, signedOut: false };
 const UNAUTHENTICATED: AuthState = { ...LOADING, status: "unauthenticated" };
@@ -89,17 +94,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState(authenticated(payload));
   }, []);
 
+  const signOut = useCallback(
+    (path: string) => {
+      versionRef.current += 1;
+      queryClient.clear();
+      setState({ ...UNAUTHENTICATED, signedOut: true });
+      router.push(path);
+    },
+    [queryClient, router],
+  );
+
   const logout = useCallback(async () => {
     await authApi.logout();
-    versionRef.current += 1;
-    queryClient.clear();
-    setState({ ...UNAUTHENTICATED, signedOut: true });
-    router.push("/login");
-  }, [queryClient, router]);
+    signOut("/login");
+  }, [signOut]);
+
+  const deleteAccount = useCallback(
+    async (password: string) => {
+      await authApi.deleteAccount(password);
+      signOut(ACCOUNT_DELETED_LOGIN_PATH);
+    },
+    [signOut],
+  );
 
   const value = useMemo<AuthContextValue>(
-    () => ({ ...state, refresh, setAuth, logout }),
-    [state, refresh, setAuth, logout],
+    () => ({ ...state, refresh, setAuth, logout, deleteAccount }),
+    [state, refresh, setAuth, logout, deleteAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
