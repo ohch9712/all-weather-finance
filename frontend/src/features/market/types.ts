@@ -19,6 +19,11 @@ export interface ConnectionInput {
   appSecret: string;
   accountNo?: string;
 }
+export interface TossAccount {
+  accountSeq: string;
+  accountType: string;
+  accountNoLast4: string;
+}
 export interface SnapshotStatus {
   asOf: string | null;
   count: number;
