@@ -234,10 +234,11 @@ install -m 600 /dev/null /var/backups/finance/backup.log
 30 3 * * * /opt/finance/deploy/backup.sh >> /var/backups/finance/backup.log 2>&1
 ```
 
-편집기 대신 다음 비대화형 명령으로 같은 줄을 더할 수 있다. crontab을 처음 쓰는 계정은 `crontab -l`이 "no crontab" 오류로 실패하므로 오류 출력을 버리고 빈 목록으로 시작한다. 기존 줄은 그대로 두고 이전에 넣은 이 백업 줄만 빼고 다시 더하므로 여러 번 실행해도 한 줄만 남는다. 등록 뒤 `crontab -l`로 백업 줄이 한 번만 있는지 확인한다.
+편집기 대신 다음 비대화형 명령으로 같은 줄을 더할 수 있다. crontab을 처음 쓰는 계정은 `crontab -l`이 "no crontab" 오류로 실패하므로 오류 출력을 버리고 빈 목록으로 시작한다. 이 백업 줄과 똑같은 줄만 빼고 다시 더하므로 다른 작업·주석은 그대로 두고 여러 번 실행해도 한 줄만 남는다. 남길 줄이 없어 `grep`이 실패해도(빈 crontab, 백업 줄만 있는 경우) `|| true`로 이어 가므로 `set -e`·`set -o pipefail` 셸에서도 백업 줄이 빠지지 않는다. 등록 뒤 `crontab -l`로 백업 줄이 한 번만 있는지 확인한다(손으로 고쳐 글자가 다른 백업 줄은 지워지지 않는다).
 
 ```bash
-(crontab -l 2>/dev/null | grep -vF '/opt/finance/deploy/backup.sh'; echo '30 3 * * * /opt/finance/deploy/backup.sh >> /var/backups/finance/backup.log 2>&1') | crontab -
+L='30 3 * * * /opt/finance/deploy/backup.sh >> /var/backups/finance/backup.log 2>&1'
+(crontab -l 2>/dev/null | grep -vxF "$L" || true; echo "$L") | crontab -
 crontab -l
 ```
 
