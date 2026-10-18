@@ -24,6 +24,7 @@
 | 로그인 보호 | 로그인 시도 제한(IP·계정 기준, 예: 10분 10회) — 리버스 프록시 또는 앱 미들웨어 |
 | 보안 헤더 | HSTS, `X-Content-Type-Options`, `Referrer-Policy`, CSP(YouTube nocookie 임베드 허용) |
 | 관리자 | 배포 후 `make-admin`으로 첫 관리자 지정, 학습 시드(`learn.seed`) 실행 |
+| 개인정보처리방침 | 운영에서 CODEF를 켜면(데모·정식 키) 이 앱의 개인정보처리방침에 CODEF가 이용기관에 주는 위탁 안내(https://codef.io/privacy-pop: 수탁업체 (주)헥토데이터, 인증 정보를 이용한 개인(신용)정보 중계, 품질향상·업무 대응을 위한 요청/응답 데이터 저장(위탁 계약 종료 시 일괄 삭제), 열람·정정·삭제 요청 처리)를 넣는다. 방침 화면이 없으면 소유 경로를 `ask`로 받는다 |
 | LLM | general 등급은 Gemini API(나가는 HTTPS만 필요). personal 등급(챗봇, 카드 명세서·매매 파일 처리)은 둘 중 하나: ① 백엔드에서 닿는 Ollama 서버(같은 서버나 사설망, `OLLAMA_HOST`, 모델을 미리 받아 둠. `gemma4:12b` 기준 메모리 16GB 이상, GPU나 Apple Silicon이 아니면 응답이 매우 느리다) ② 결제가 연결된 Gemini 키(`LLM_PERSONAL_PROVIDER=gemini`, `GEMINI_BILLING_ENABLED=true`). Ollama 포트(11434)는 외부에 열지 않는다 |
 
 ## 3. 호스팅 선택지 (사용자 결정 필요)
