@@ -59,6 +59,7 @@
 - `deploy/**`
 - `backend/Dockerfile`, `backend/.dockerignore`, `frontend/Dockerfile`, `frontend/.dockerignore`
 - `frontend/next.config.ts`(`output: "standalone"` 한 줄만)
+- `frontend/src/app/providers.tsx`(모듈 최상단 `z.config({ jitless: true })`와 이유 주석만. Zod 4의 JIT 지원 탐지 `Function("")`가 CSP에서 eval 차단 이벤트를 내므로 끈다. `'unsafe-eval'`은 넣지 않는다. 코디네이터 승인 2026-10-18)
 - `backend/app/modules/imports/jobs.py`, `backend/app/modules/imports/repository.py`(만료 작업 전체 삭제 함수 추가만), `backend/tests/imports/test_purge_expired.py`
 - 이 문서의 `## 구현 결과`
 - 그 밖의 경로는 `ask`로 받는다.
