@@ -382,6 +382,100 @@ def test_toss_errors(respx_mock, status, code):
 
 
 @respx.mock(assert_all_mocked=True, using="httpx")
+def test_toss_list_accounts_without_account_header_and_last4(respx_mock):
+    respx_mock.post("https://openapi.tossinvest.com/oauth2/token").respond(
+        200, json={"access_token": "test-token", "expires_in": 86400}
+    )
+    route = respx_mock.get("https://openapi.tossinvest.com/api/v1/accounts").respond(
+        200,
+        json={
+            "result": [
+                {"accountNo": "12345678901", "accountSeq": 1, "accountType": "BROKERAGE"},
+                {"accountNo": "98765432109", "accountSeq": 2, "accountType": "PENSION_SAVINGS"},
+            ]
+        },
+    )
+    accounts = toss.TossBroker("test-client", "test-secret").list_accounts()
+    assert accounts == [
+        toss.TossAccount("1", "BROKERAGE", "8901"),
+        toss.TossAccount("2", "PENSION_SAVINGS", "2109"),
+    ]
+    assert "12345678901" not in repr(accounts)
+    request = route.calls[0].request
+    assert "X-Tossinvest-Account" not in request.headers
+    assert request.headers["Authorization"] == "Bearer test-token"
+
+
+def toss_token_sequence(respx_mock):
+    """발급할 때마다 새 토큰을 주는 토큰 경로. 토스처럼 마지막 토큰만 유효하다고 본다."""
+    issued = []
+
+    def issue(request):
+        issued.append(f"test-token-{len(issued) + 1}")
+        return httpx.Response(200, json={"access_token": issued[-1], "expires_in": 86400})
+
+    route = respx_mock.post("https://openapi.tossinvest.com/oauth2/token").mock(side_effect=issue)
+    return route, issued
+
+
+REVOKED = {"error": {"code": "token-revoked", "message": "새로 발급된 토큰으로 대체되었습니다."}}
+
+
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_toss_cached_token_revoked_reissues_once(respx_mock):
+    token, issued = toss_token_sequence(respx_mock)
+
+    def holdings(request):
+        if request.headers["Authorization"] != f"Bearer {issued[-1]}":
+            return httpx.Response(401, json=REVOKED)
+        return httpx.Response(200, json={"result": {"items": []}})
+
+    route = respx_mock.get("https://openapi.tossinvest.com/api/v1/holdings").mock(
+        side_effect=holdings
+    )
+    broker = toss.TossBroker("test-client", "test-secret", "1")
+    assert broker.get_holdings().holdings == []
+    # 같은 키로 다른 클라이언트가 토큰을 받아 캐시 토큰이 무효가 된다.
+    toss.TossBroker("test-client", "test-secret").get_token()
+    assert broker.token == "test-token-1" and issued[-1] == "test-token-2"
+    assert broker.get_holdings().holdings == []
+    assert token.call_count == 3 and route.call_count == 3
+    sent = [call.request.headers["Authorization"] for call in route.calls]
+    assert sent == ["Bearer test-token-1", "Bearer test-token-1", "Bearer test-token-3"]
+    assert all(call.request.headers["X-Tossinvest-Account"] == "1" for call in route.calls)
+    assert broker.token == "test-token-3"
+    # 새 토큰은 다시 캐시해 쓴다.
+    broker.get_holdings()
+    assert token.call_count == 3 and route.call_count == 4
+
+
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_toss_reissued_token_still_401_fails_after_one_retry(respx_mock):
+    token, _ = toss_token_sequence(respx_mock)
+    route = respx_mock.get("https://openapi.tossinvest.com/api/v1/holdings").respond(
+        401, json=REVOKED
+    )
+    broker = toss.TossBroker("test-client", "test-secret", "1")
+    broker.get_token()
+    with pytest.raises(BrokerError) as exc:
+        broker.get_holdings()
+    assert exc.value.code == "BROKER_AUTH_FAILED"
+    assert token.call_count == 2 and route.call_count == 2
+
+
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_toss_fresh_token_401_is_not_retried(respx_mock):
+    token, _ = toss_token_sequence(respx_mock)
+    route = respx_mock.get("https://openapi.tossinvest.com/api/v1/accounts").respond(
+        401, json=REVOKED
+    )
+    with pytest.raises(BrokerError) as exc:
+        toss.TossBroker("test-client", "test-secret").list_accounts()
+    assert exc.value.code == "BROKER_AUTH_FAILED"
+    assert token.call_count == 1 and route.call_count == 1
+
+
+@respx.mock(assert_all_mocked=True, using="httpx")
 def test_kiwoom_executions_dates_side_and_cost_defaults(respx_mock, monkeypatch):
     monkeypatch.setattr(kiwoom, "now_utc", lambda: datetime(2026, 10, 16, tzinfo=UTC))
     kiwoom_token(respx_mock)

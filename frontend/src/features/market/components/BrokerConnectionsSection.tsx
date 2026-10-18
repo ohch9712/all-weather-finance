@@ -13,18 +13,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getErrorMessage } from "@/lib/api-client";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { brokerErrors } from "../errors";
 import { useConnectionActions, useConnections, useEgressIp, useSnapshotStatus } from "../hooks";
 import { ConnectionForm } from "./ConnectionForm";
 
 const providers = { kiwoom: "키움증권", toss: "토스증권", mock: "샘플 증권사" };
 const statuses = { unverified: "미확인", active: "정상", error: "오류" };
-const brokerErrors: Record<string, string> = {
-  BROKER_AUTH_FAILED: "앱키·시크릿과 계좌 식별값을 확인해 주세요.",
-  BROKER_IP_NOT_ALLOWED: "증권사 포털에 이 서버의 IP를 허용 IP로 등록해 주세요.",
-  BROKER_RATE_LIMITED: "호출 한도를 초과했습니다. 잠시 후 다시 확인해 주세요.",
-  BROKER_UNAVAILABLE: "증권사에 연결하지 못했습니다. 잠시 후 다시 확인해 주세요.",
-  BROKER_NOT_SUPPORTED: "이 연결에서는 잔고 조회를 지원하지 않습니다.",
-};
 
 export function BrokerConnectionsSection({ allowMock = false }: { allowMock?: boolean }) {
   const [open, setOpen] = useState(false);
