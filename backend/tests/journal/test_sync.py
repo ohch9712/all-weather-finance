@@ -285,6 +285,58 @@ def test_kiwoom_missing_costs_market_conversion_and_etf(auth_client, db, respx_m
     assert auth_client.get("/api/journal/trades").json()["items"][0]["tax"] == "0"
 
 
+@pytest.mark.parametrize("with_fill", [False, True])
+def test_kiwoom_sync_period_with_no_data_days(auth_client, respx_mock, monkeypatch, with_fill):
+    broker = kiwoom.KiwoomBroker(
+        "fake-app",
+        "fake-secret",
+        client=httpx.Client(transport=httpx.MockTransport(respx_mock.handler)),
+    )
+    broker.token = "test-token"
+    broker.expires_at = datetime(2099, 1, 1, tzinfo=UTC)
+    monkeypatch.setattr(kiwoom.BUCKET, "acquire", lambda: None)
+    monkeypatch.setattr(market, "KiwoomBroker", lambda *args: broker)
+
+    def response(request):
+        if request.headers["api-id"] == "kt00018":
+            return httpx.Response(200, json={"return_code": 0, "acnt_evlt_remn_indv_tot": []})
+        assert request.headers["api-id"] == "kt00009"
+        body = json.loads(request.content)
+        if with_fill and body["ord_dt"] == "20261015" and body["sell_tp"] == "2":
+            return httpx.Response(
+                200,
+                json={
+                    "return_code": 0,
+                    "acnt_ord_cntr_prst_array": [
+                        {
+                            "ord_no": "1",
+                            "cntr_no": "1",
+                            "stk_cd": "A005930",
+                            "stk_nm": "삼성전자",
+                            "cntr_qty": "2",
+                            "cntr_uv": "71000",
+                            "cntr_tm": "13:07:47",
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(
+            200, json={"return_code": 20, "return_msg": "[2000](조회:관련자료가없습니다)"}
+        )
+
+    route = respx_mock.post("https://mockapi.kiwoom.com/api/dostk/acnt").mock(side_effect=response)
+    cid = connection(auth_client, provider="kiwoom")
+    result = sync(auth_client, cid, **{"from": "2026-10-14", "to": "2026-10-16"})
+    assert result.status_code == 200, result.text
+    assert result.json()["inserted"] == int(with_fill)
+    assert route.call_count == 7
+    trades = auth_client.get("/api/journal/trades").json()["items"]
+    assert len(trades) == int(with_fill)
+    if with_fill:
+        assert trades[0]["source"] == "kiwoom" and trades[0]["side"] == "buy"
+        assert trades[0]["tradedAt"] == "2026-10-15T04:07:47Z"
+
+
 def test_transaction_rollback(auth_client, db, monkeypatch):
     cid = connection(auth_client)
     original = service.repo.add_trade

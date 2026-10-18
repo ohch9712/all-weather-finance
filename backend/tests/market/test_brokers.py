@@ -419,3 +419,110 @@ def test_kiwoom_executions_dates_side_and_cost_defaults(respx_mock, monkeypatch)
     )
     assert rows[0].executed_at == datetime(2026, 10, 16, 4, 7, 47, tzinfo=UTC)
     assert all(r["qry_tp"] == "1" and r["dmst_stex_tp"] == "KRX" for r in requests)
+
+
+@pytest.mark.parametrize("return_code", [20, "20"])
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_kiwoom_executions_all_days_no_data(respx_mock, monkeypatch, return_code):
+    monkeypatch.setattr(kiwoom, "now_utc", lambda: datetime(2026, 10, 16, tzinfo=UTC))
+    kiwoom_token(respx_mock)
+    route = respx_mock.post("https://mockapi.kiwoom.com/api/dostk/acnt").respond(
+        200,
+        headers={"cont-yn": "Y", "next-key": "unused"},
+        json={"return_code": return_code, "return_msg": "[2000](조회:관련자료가없습니다)"},
+    )
+    broker = kiwoom.KiwoomBroker("test-app", "test-secret")
+    assert broker.get_executions(date(2026, 9, 17), date(2026, 10, 16)) == []
+    assert route.call_count == 60
+    requests = [json.loads(call.request.content) for call in route.calls]
+    assert len({body["ord_dt"] for body in requests}) == 30
+    assert {body["sell_tp"] for body in requests} == {"1", "2"}
+    assert all(call.request.headers["next-key"] == "" for call in route.calls)
+
+
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_kiwoom_executions_keep_fills_among_no_data_days(respx_mock, monkeypatch):
+    monkeypatch.setattr(kiwoom, "now_utc", lambda: datetime(2026, 10, 16, tzinfo=UTC))
+    kiwoom_token(respx_mock)
+
+    def response(request):
+        body = json.loads(request.content)
+        if (
+            body["ord_dt"] == "20261015"
+            and body["sell_tp"] == "2"
+            and not request.headers["next-key"]
+        ):
+            return httpx.Response(
+                200,
+                headers={"cont-yn": "Y", "next-key": "after-fill"},
+                json={
+                    "return_code": 0,
+                    "acnt_ord_cntr_prst_array": [
+                        {
+                            "ord_no": "1",
+                            "cntr_no": "2",
+                            "stk_cd": "A005930",
+                            "stk_nm": "삼성전자",
+                            "cntr_qty": "2",
+                            "cntr_uv": "71000",
+                            "cntr_tm": "13:07:47",
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(
+            200,
+            headers={"cont-yn": "Y", "next-key": "unused"},
+            json={"return_code": 20, "return_msg": "[2000](조회:관련자료가없습니다)"},
+        )
+
+    route = respx_mock.post("https://mockapi.kiwoom.com/api/dostk/acnt").mock(side_effect=response)
+    rows = kiwoom.KiwoomBroker("test-app", "test-secret").get_executions(
+        date(2026, 10, 14), date(2026, 10, 16)
+    )
+    assert len(rows) == 1
+    assert rows[0].external_id == "20261015:1:2" and rows[0].side == "buy"
+    assert rows[0].price == 71000 and rows[0].quantity == 2
+    assert route.call_count == 7
+    assert sum(call.request.headers["next-key"] == "after-fill" for call in route.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "return_code", "message"),
+    [
+        (200, 20, "[2000](조회:처리할 수 없습니다)"),
+        (200, 21, "[2000](조회:관련자료가없습니다)"),
+        (500, 20, "[2000](조회:관련자료가없습니다)"),
+    ],
+)
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_kiwoom_executions_other_errors_still_fail(
+    respx_mock, monkeypatch, status, return_code, message
+):
+    monkeypatch.setattr(kiwoom, "now_utc", lambda: datetime(2026, 10, 16, tzinfo=UTC))
+    kiwoom_token(respx_mock)
+    respx_mock.post("https://mockapi.kiwoom.com/api/dostk/acnt").respond(
+        status, json={"return_code": return_code, "return_msg": message}
+    )
+    with pytest.raises(BrokerError) as exc:
+        kiwoom.KiwoomBroker("test-app", "test-secret").get_executions(
+            date(2026, 10, 16), date(2026, 10, 16)
+        )
+    assert exc.value.code == "BROKER_UNAVAILABLE"
+
+
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_kiwoom_holdings_no_data_still_fails(respx_mock, monkeypatch):
+    monkeypatch.setattr(kiwoom, "now_utc", lambda: datetime(2026, 10, 16, tzinfo=UTC))
+    kiwoom_token(respx_mock)
+
+    def response(request):
+        assert request.headers["api-id"] == "kt00018"
+        return httpx.Response(
+            200, json={"return_code": 20, "return_msg": "[2000](조회:관련자료가없습니다)"}
+        )
+
+    respx_mock.post("https://mockapi.kiwoom.com/api/dostk/acnt").mock(side_effect=response)
+    with pytest.raises(BrokerError) as exc:
+        kiwoom.KiwoomBroker("test-app", "test-secret").get_holdings()
+    assert exc.value.code == "BROKER_UNAVAILABLE"
