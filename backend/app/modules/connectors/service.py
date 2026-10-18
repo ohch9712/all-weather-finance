@@ -75,7 +75,7 @@ def require_account(db, user_id, account_id):
 
 def register_account(db, user_id, data):
     if not data.consent:
-        raise field_error("consent", "카드사 로그인 정보가 CODEF로 전송되는 데 동의해 주세요.")
+        raise field_error("consent", "금융사 로그인 정보를 CODEF에 등록하는 데 동의해 주세요.")
     connector = get_connector(data.provider)
     if data.provider == "mydata":
         raise AppError(501, "CONNECTOR_NOT_SUPPORTED", MYDATA_NOTE)
@@ -113,14 +113,34 @@ def register_account(db, user_id, data):
     return account_view(row)
 
 
-def delete_account(db, user_id, account_id):
+def delete_account(db, user_id, account_id, *, local_only=False):
     row = require_account(db, user_id, account_id)
-    try:
-        get_connector(row.provider).delete_account(
-            decrypt_str(row.connected_id_enc), kind=row.kind, organization=row.organization
-        )
-    except Exception:
-        logger.warning("CODEF 외부 계정 삭제에 실패했습니다. 로컬 연결을 삭제합니다.")
+    if local_only:
+        logger.warning("CODEF 삭제 없이 로컬 연결을 삭제했습니다.")
+    else:
+        connector = get_connector(row.provider)
+        if not connector.is_available():
+            raise AppError(
+                409,
+                "CONFLICT",
+                "CODEF 키가 설정되지 않아 CODEF에 등록된 로그인 정보를 지울 수 없습니다.",
+            )
+        try:
+            connector.delete_account(
+                decrypt_str(row.connected_id_enc), kind=row.kind, organization=row.organization
+            )
+        except Exception as exc:
+            if isinstance(exc, CodefError):
+                logger.warning(
+                    "CODEF 로그인 정보 삭제에 실패했습니다. 결과 코드: %s", exc.result_code
+                )
+            else:
+                logger.warning("CODEF 로그인 정보 삭제에 실패했습니다.")
+            raise AppError(
+                502,
+                "CONNECTOR_FAILED",
+                "CODEF에서 로그인 정보를 지우지 못했습니다. 잠시 후 다시 시도해 주세요.",
+            ) from None
     if row.kind == "bank":
         allocation.upsert_synced_holdings(
             db, user_id, source="codef", connection_id=row.id, items=[]
