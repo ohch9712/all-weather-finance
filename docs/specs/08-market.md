@@ -120,6 +120,7 @@ class BrokerClient(Protocol):
 - 토큰은 만료 시각(`expires_dt`)까지 메모리에 캐시하고 만료 5분 전에 새로 받는다.
 - IP 미등록·키 오류는 `return_code`/HTTP 상태를 보고 `BROKER_IP_NOT_ALLOWED`·`BROKER_AUTH_FAILED`로 바꾼다(정확한 코드값은 공식 문서에서 확인).
 - **체결 없는 날의 `kt00009` 응답(운영 서버 실제 응답, 2026-10-19 코디네이터 확인. 공식 명세에는 없다)**: 그날 체결이 없으면 HTTP 200, `return_code: 20`, `return_msg`에 `[2000]`과 `관련자료가없습니다`가 들어 있고 `acnt_ord_cntr_prst_array`가 없다. 지금 어댑터는 이것을 `BROKER_UNAVAILABLE`로 바꿔, 체결이 없는 날이 하루라도 낀 기간의 체결 조회(11 매매일지 동기화)가 통째로 실패한다. `kt00009`에서만 이 조합(`return_code` 20 + 메시지에 `관련자료가없습니다`)을 그날 그 매도·매수 구분의 빈 결과로 처리하고 연속조회를 멈춘다. 다른 `return_code`, 다른 api-id, 메시지가 다른 20은 지금처럼 오류다. 코드 주석에 이 근거(공식 명세 미기재, 실제 응답 관찰일)를 남긴다.
+- **`kt00009` 거래소 구분(2026-10-19 코디네이터 추가)**: 요청 `dmst_stex_tp`를 `"KRX"`에서 `"%"`(전체)로 바꾼다. 공식 명세의 값은 `%`(전체)·`KRX`·`NXT`(넥스트트레이드)·`SOR`(최선주문집행)이고, KRX만 조회하면 넥스트트레이드에서 체결된 거래가 매매일지에서 빠진다. 응답 행의 `dmst_stex_tp`(국내거래소구분)를 읽어 `external_id`를 정한다. 값이 비었거나 `KRX`이면 지금처럼 `{날짜}:{ord_no}:{cntr_no}`(이미 동기화한 KRX 체결이 다시 들어오지 않게 형식을 유지한다), 그 밖의 거래소면 끝에 `:{dmst_stex_tp}`를 붙인다. 종목코드는 접두어(A·J·Q)뿐 아니라 거래소 접미사(`_NX`·`_AL`)도 떼어 KRX 6자리로 맞춘다. 체결 없음 응답 처리와 연속조회는 그대로다. 잔고(`kt00018`)는 바꾸지 않는다.
 
 ### 4.4 TossBroker (`toss.py`)
 
@@ -288,6 +289,7 @@ class SnapshotSet:
 - API: 검색 순서, 상세(시세 실패 시 `quote: null`), 시세 50개 제한, 캔들 기간 제한, 연결 CRUD·검증 성공/실패, Mock 연결(개발 허용·운영 422), 응답에 원문 키 없음, 남의 연결 404
 - 토스 계좌 불러오기: respx로 토큰·`/api/v1/accounts` 고정, 응답에 `accountNo` 원문 없음(끝 4자리만), 키를 DB에 저장하지 않음·로그에 없음, 앱키·시크릿 빈 값 422, 403 → `BROKER_IP_NOT_ALLOWED`·401 → `BROKER_AUTH_FAILED`, 계좌 없음 빈 목록, 미인증 401
 - 토스 토큰 무효화: 캐시 토큰 401 → 한 번 재발급 후 성공, 재발급 토큰도 401이면 `BROKER_AUTH_FAILED`(재시도 한 번뿐)
+- 키움 `kt00009` 거래소 구분: 요청 본문 `dmst_stex_tp="%"`, KRX·빈 값 행의 `external_id` 형식 유지, NXT·SOR 행의 `:NXT`·`:SOR` 접미사, 같은 `ord_no`·`cntr_no`가 KRX와 NXT에 함께 있어도 두 건으로 남음, 종목코드 접두어·`_NX`·`_AL` 접미사 제거
 - 실제 외부 호출이 없음(respx `assert_all_mocked`)
 
 ### 프론트 (`frontend/tests/market/`, MSW)
