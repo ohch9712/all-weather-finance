@@ -112,3 +112,13 @@
 - 확인: `/api/health` 200, 보안 헤더(HSTS, nosniff, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy, CSP), 외부에서 열린 포트 22·80·443뿐(3000·8000·5432·2019 닫힘), backend·frontend·caddy uid 10001, `supercronic -test` 통과, AI 상태 general·personal 모두 `enabled=true, provider=gemini, reason=null`, 호스트·backend·cron의 나가는 IP가 고정 IP와 같음, `/privacy` 운영자 정보 표시(초안 경고 없음), 학습 시드 35개, 사용자 가입·온보딩 후 `make-admin`.
 - 백업: `/var/backups/finance`(700)에 첫 덤프 생성, 호스트 crontab 매일 03:30 `backup.sh` 등록(기존 crontab이 없던 계정이라 `crontab -l`이 실패한다). 사용자가 Lightsail 인스턴스 자동 스냅샷을 켰다.
 - 남은 일: 키움·토스 앱키 발급과 허용 IP 등록 후 `MARKET_DATA_PROVIDER` 전환, README 보완(데모 키 `CODEF_ENV=development`, 스왑, 첫 crontab 등록), 다른 사용자에게 가입을 열기 전 처리방침 법률 검토, 백업의 새 DB 복구 정기 점검.
+
+### README 실제 서버 반영
+
+- 대상: 위 '실제 서버 배포'의 남은 일 중 README 보완. `deploy/README.md`만 고쳤고 다른 절·기존 명령은 그대로 두었다.
+- 3절: CODEF 문장을 `CODEF_ENV`와 세 키 이름으로 바꾸고, 키와 환경의 짝(샌드박스 `sandbox`, 데모 키(일 100회) `development`, 정식 키 `production`, 도메인은 스펙 17 4절)과 예시 기본값 `production`을 데모 키에서는 `development`로 바꾼다는 문장을 더했다.
+- 2.1절(새 소절): 메모리 4GB 이하 서버는 첫 빌드 전에 2GB 스왑 파일을 만든다. `swapon --show --noheadings` 출력이 있으면 건너뛰고, 없을 때만 `fallocate`·`chmod 600`·`mkswap`·`swapon`과 `/etc/fstab` 한 줄(이미 있으면 더하지 않음)을 실행한 뒤 `swapon --show`·`free -h`로 확인한다.
+- 4절: 빌드 전에 `DOMAIN`·`ACME_EMAIL`·`GEMINI_API_KEY`와 DB 값·`APP_ENCRYPTION_KEY`를 먼저 넣는다는 문장을 더했다. `DOMAIN`·`ACME_EMAIL`·DB 값은 Compose 필수 보간이라 비면 `dc config`·`dc build`가 멈추고, `GEMINI_API_KEY`는 보간 검사 대상이 아니지만 비면 AI 상태가 `missing_api_key`가 된다. 값이 빈 필수 키의 이름만 보여 주는 `grep`·`cut` 확인 명령을 더했다(값은 출력하지 않는다).
+- 8절: `crontab -e` 안내 뒤에 비대화형 등록 명령 `(crontab -l 2>/dev/null | grep -vF '/opt/finance/deploy/backup.sh'; echo '<백업 줄>') | crontab -`과 `crontab -l` 확인을 더했다. 처음 쓰는 계정의 `crontab -l` 실패를 무시하고, 기존 줄은 유지하며 같은 경로의 백업 줄만 바꿔 넣는다. `grep -vF`는 지시의 `backup.sh` 대신 전체 경로로 걸러 다른 프로젝트의 `backup.sh` 줄을 지우지 않게 했다.
+- 검사: 문서만 바뀌어 코드 검사(ruff·pytest·lint·tsc·test·build)는 생략했다. 바꾼 bash 블록 3개를 README에서 추출해 `bash -n`을 통과했다. 서버 명령은 실행하지 않았고, 로컬에서 `crontab`·`sudo`·`swapon`·`free`를 가짜 함수로 바꾸고 임시 파일만 쓰는 모의 실행으로 동작을 확인했다. crontab은 없는 계정·재실행·기존 줄 유지·다른 경로 `backup.sh` 유지에서 백업 줄이 한 줄만 남았다. 스왑은 없음·이미 켜짐·fstab 줄이 이미 있음에서 생성 건너뛰기와 fstab 중복 방지가 맞았다. 필수 값 확인은 빈 키 이름만 출력하고 모두 채우면 출력이 없었다(가짜 값만 쓴 임시 env).
+- 남은 일: 다음 서버 작업(새 서버·재설치) 때 실제 Ubuntu에서 2.1절 스왑 명령과 8절 비대화형 crontab 명령을 한 번 확인한다.
