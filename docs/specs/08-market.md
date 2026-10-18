@@ -119,6 +119,7 @@ class BrokerClient(Protocol):
 - 같은 종목도 거래소별 코드가 다르다(NXT `039490_NX`, SOR `039490_AL`). 이 프로젝트는 KRX 코드(접미사 없음)만 쓴다.
 - 토큰은 만료 시각(`expires_dt`)까지 메모리에 캐시하고 만료 5분 전에 새로 받는다.
 - IP 미등록·키 오류는 `return_code`/HTTP 상태를 보고 `BROKER_IP_NOT_ALLOWED`·`BROKER_AUTH_FAILED`로 바꾼다(정확한 코드값은 공식 문서에서 확인).
+- **체결 없는 날의 `kt00009` 응답(운영 서버 실제 응답, 2026-10-19 코디네이터 확인. 공식 명세에는 없다)**: 그날 체결이 없으면 HTTP 200, `return_code: 20`, `return_msg`에 `[2000]`과 `관련자료가없습니다`가 들어 있고 `acnt_ord_cntr_prst_array`가 없다. 지금 어댑터는 이것을 `BROKER_UNAVAILABLE`로 바꿔, 체결이 없는 날이 하루라도 낀 기간의 체결 조회(11 매매일지 동기화)가 통째로 실패한다. `kt00009`에서만 이 조합(`return_code` 20 + 메시지에 `관련자료가없습니다`)을 그날 그 매도·매수 구분의 빈 결과로 처리하고 연속조회를 멈춘다. 다른 `return_code`, 다른 api-id, 메시지가 다른 20은 지금처럼 오류다. 코드 주석에 이 근거(공식 명세 미기재, 실제 응답 관찰일)를 남긴다.
 
 ### 4.4 TossBroker (`toss.py`)
 
