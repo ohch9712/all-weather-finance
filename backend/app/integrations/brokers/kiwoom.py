@@ -365,6 +365,8 @@ class KiwoomBroker(UnsupportedBroker):
     @parsed_response
     def get_executions(self, start: date, end: date):
         # 공식 kiwoom_api_spec.json의 kt00009(계좌별주문체결현황) 조회만 사용한다.
+        # 요청 dmst_stex_tp는 %(전체)·KRX·NXT·SOR, 응답 행에도 같은 필드가 있다.
+        # stk_cd는 A·J·Q 접두어와 거래소 접미사(_NX·_AL)를 체결 경로에서만 제거한다.
         # 수수료·세금 미제공이라 fee/tax는 None이다(08b 계약).
         # 매도수 구분은 요청 필터 1/2로 확정하며 응답 문자열로 추측하지 않는다.
         result = {}
@@ -379,7 +381,7 @@ class KiwoomBroker(UnsupportedBroker):
                     "qry_tp": "1",
                     "stk_cd": "",
                     "fr_ord_no": "",
-                    "dmst_stex_tp": "KRX",
+                    "dmst_stex_tp": "%",
                 }
                 for page in self._pages(
                     "kt00009", "/api/dostk/acnt", body, "acnt_ord_cntr_prst_array"
@@ -397,10 +399,17 @@ class KiwoomBroker(UnsupportedBroker):
                             tzinfo=KST,
                         )
                         external_id = f"{day:%Y%m%d}:{row['ord_no']}:{row['cntr_no']}"
+                        exchange = (row.get("dmst_stex_tp") or "").strip()
+                        # 이미 동기화한 KRX 체결의 ID는 유지하고 다른 거래소만 구분한다.
+                        if exchange and exchange != "KRX":
+                            external_id += f":{exchange}"
+                        code = krx_code(
+                            row["stk_cd"].strip().removesuffix("_NX").removesuffix("_AL")
+                        )
                         result[external_id] = Execution(
                             external_id,
                             executed_at,
-                            krx_code(row["stk_cd"]),
+                            code,
                             row["stk_nm"],
                             "OTHER",
                             side,
