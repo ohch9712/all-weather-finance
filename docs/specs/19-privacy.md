@@ -27,7 +27,7 @@
 ## 3. 소유 파일
 
 - 백엔드: `backend/app/modules/auth/**`(라우터·서비스·스키마), `backend/app/modules/connectors/service.py`(공개 함수 `delete_all_accounts` 추가만), `backend/tests/auth/**`, `backend/tests/connectors/test_delete_all_accounts.py`
-- 프론트: `frontend/src/app/privacy/**`(새 공개 경로, 앱 셸 밖), `frontend/src/app/(app)/settings/account/**`, `frontend/src/app/(auth)/layout.tsx`(아래쪽 처리방침 링크만), `frontend/src/features/auth/**`, `frontend/src/features/privacy/**`, `frontend/src/lib/navigation.ts`("계정" 항목 한 줄만), `frontend/tests/privacy/**`, `frontend/tests/auth/**`
+- 프론트: `frontend/src/app/privacy/**`(새 공개 경로, 앱 셸 밖), `frontend/src/app/(app)/settings/account/**`, `frontend/src/app/(auth)/layout.tsx`(아래쪽 처리방침 링크만), `frontend/src/features/auth/**`, `frontend/src/features/privacy/**`, `frontend/src/lib/navigation.ts`("계정" 항목 한 줄만), `frontend/tests/privacy/**`, `frontend/tests/auth/**`, `frontend/tests/foundation/auth-forms.test.tsx`(가입 제출 전에 만 14세 체크박스를 누르는 줄만), `frontend/tests/foundation/navigation.test.tsx`("계정" 항목 한 줄만)(코디네이터 승인 2026-10-19)
 - 배포: `deploy/compose.prod.yaml`(frontend 서비스 환경변수만), `deploy/.env.production.example`(`PRIVACY_*` 키 추가), `deploy/Caddyfile`(시도 제한 대상 추가만), `deploy/README.md`(운영자 정보 넣기, 공개 전 확인 갱신)
 - 이 문서의 `## 구현 결과`
 
