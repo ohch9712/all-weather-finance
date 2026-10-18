@@ -253,6 +253,8 @@ def _condition_client(db, user_id, connection_id: UUID | None):
         if connection_id
         else get_market_data_client()
     )
+    if connection_id is None and client.provider != "mock":
+        raise field_error("connectionId", "내 키움 증권사 연결을 선택해 주세요.")
     if client.provider not in {"mock", "kiwoom"} or "CONDITIONS" not in client.capabilities:
         raise AppError(
             501, "BROKER_NOT_SUPPORTED", "이 증권사 연결에서는 조건검색을 지원하지 않습니다."

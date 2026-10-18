@@ -3,6 +3,7 @@ import json
 from dataclasses import asdict, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -302,7 +303,7 @@ def test_broker_conditions(auth_client, other_auth_client, snapshots, monkeypatc
     )
 
     class Unsupported:
-        provider = "kiwoom"
+        provider = "mock"
         capabilities = frozenset()
 
     monkeypatch.setattr(service, "get_market_data_client", Unsupported)
@@ -332,6 +333,58 @@ def test_broker_conditions(auth_client, other_auth_client, snapshots, monkeypatc
         ]["price"]
         is None
     )
+
+
+@pytest.mark.parametrize("provider", ["kiwoom", "toss"])
+@pytest.mark.parametrize("capabilities", [frozenset({"CONDITIONS"}), frozenset()])
+def test_operator_conditions_require_user_connection(
+    auth_client, monkeypatch, provider, capabilities
+):
+    operator = Mock(provider=provider, capabilities=capabilities)
+    monkeypatch.setattr(service, "get_market_data_client", lambda: operator)
+    responses = [
+        auth_client.get("/api/screener/broker-conditions"),
+        auth_client.post("/api/screener/broker-conditions/run", json={"seq": "0"}),
+        auth_client.post(
+            "/api/screener/broker-conditions/run", json={"seq": "0", "connectionId": None}
+        ),
+    ]
+    for response in responses:
+        assert response.status_code == 422, response.text
+        assert response.json()["error"] == {
+            "code": "VALIDATION_ERROR",
+            "message": "입력값을 확인해 주세요.",
+            "details": [
+                {"field": "connectionId", "message": "내 키움 증권사 연결을 선택해 주세요."}
+            ],
+        }
+    operator.list_conditions.assert_not_called()
+    operator.run_condition.assert_not_called()
+
+
+def test_conditions_use_selected_user_connection(auth_client, snapshots, monkeypatch):
+    connection_id = uuid4()
+    user_client = Mock(wraps=MockBroker(), provider="kiwoom")
+    user_client.capabilities = frozenset({"CONDITIONS"})
+    get_user = Mock(return_value=user_client)
+    get_operator = Mock(side_effect=AssertionError("운영자 클라이언트 접근 금지"))
+    monkeypatch.setattr(service, "get_user_broker_client", get_user)
+    monkeypatch.setattr(service, "get_market_data_client", get_operator)
+    response = auth_client.get(f"/api/screener/broker-conditions?connectionId={connection_id}")
+    assert response.status_code == 200 and response.json()["source"] == "kiwoom"
+    response = auth_client.post(
+        "/api/screener/broker-conditions/run",
+        json={"seq": "0", "connectionId": str(connection_id)},
+    )
+    assert response.status_code == 200 and response.json()["source"] == "kiwoom_condition"
+    assert response.json()["total"] > 0
+    user_id = auth_client.get("/api/auth/me").json()["user"]["id"]
+    assert get_user.call_count == 2
+    for call in get_user.call_args_list:
+        assert str(call.args[1]) == user_id and call.args[2] == connection_id
+    user_client.list_conditions.assert_called_once_with()
+    user_client.run_condition.assert_called_once_with("0")
+    get_operator.assert_not_called()
 
 
 def test_encoding():

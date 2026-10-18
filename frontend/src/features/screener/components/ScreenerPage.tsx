@@ -12,7 +12,7 @@ import { AiProviderBadge } from "@/components/common/AiProviderBadge";
 import { Disclaimer } from "@/components/common/Disclaimer";
 import { SampleDataBadge } from "@/components/common/SampleDataBadge";
 import { useAiStatus } from "@/lib/ai-status";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage, isApiError } from "@/lib/api-client";
 import {
   useBrokerConditions,
   useConnections,
@@ -55,13 +55,33 @@ function initial(encoded: string | null) {
 function BrokerResults({ connectionId }: { connectionId: string | null }) {
   const list = useBrokerConditions(connectionId, true);
   const run = useRunBrokerCondition();
+  const needsConnection =
+    connectionId === null &&
+    isApiError(list.error) &&
+    list.error.status === 422;
   return (
     <div className="space-y-3">
       {list.isPending && <p role="status">조건식을 불러오는 중이에요.</p>}
-      {list.error && (
+      {needsConnection && (
+        <div role="alert" className="space-y-2 text-sm">
+          <p>
+            내 키움 증권사 연결이 필요합니다. 키움 HTS에서 만든 내 조건식만
+            실행할 수 있습니다.
+          </p>
+          <Link href="/settings/connections" className="underline">
+            증권사 연결 설정
+          </Link>
+        </div>
+      )}
+      {list.error && !needsConnection && (
         <ErrorState error={list.error} onRetry={() => void list.refetch()} />
       )}
-      {list.data?.source === "mock" && <SampleDataBadge />}
+      {list.data?.source === "mock" && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm">샘플 조건식</span>
+          <SampleDataBadge />
+        </div>
+      )}
       {list.data?.items.length === 0 && <p>저장한 조건식이 없어요.</p>}
       <div className="flex flex-wrap gap-2">
         {list.data?.items.map((condition) => (
@@ -83,7 +103,13 @@ function BrokerResults({ connectionId }: { connectionId: string | null }) {
 }
 function BrokerTab() {
   const connections = useConnections(true);
-  const [connectionId, setConnectionId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const available =
+    connections.data?.items.filter(
+      (c) => c.provider === "kiwoom" && c.status === "active",
+    ) ?? [];
+  const connectionId =
+    available.find((c) => c.id === selectedId)?.id ?? available[0]?.id ?? null;
   return (
     <section
       className="space-y-4 rounded-xl border p-4"
@@ -99,29 +125,32 @@ function BrokerTab() {
           onRetry={() => void connections.refetch()}
         />
       )}
-      <label className="block space-y-1 text-sm">
-        연결 선택
-        <select
-          aria-label="연결 선택"
-          className="h-10 w-full min-w-0 rounded-md border bg-background px-2"
-          value={connectionId ?? ""}
-          onChange={(e) => setConnectionId(e.target.value || null)}
-        >
-          <option value="">운영자 데이터</option>
-          {connections.data?.items
-            .filter((c) => c.provider === "kiwoom" || c.provider === "mock")
-            .map((c) => (
+      {connections.isPending && (
+        <p role="status">증권사 연결을 확인하고 있어요.</p>
+      )}
+      {available.length > 0 && (
+        <label className="block space-y-1 text-sm">
+          연결 선택
+          <select
+            aria-label="연결 선택"
+            className="h-10 w-full min-w-0 rounded-md border bg-background px-2"
+            value={connectionId ?? ""}
+            onChange={(e) => setSelectedId(e.target.value)}
+          >
+            {available.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.label} ({c.status === "active" ? "연결됨" : "연결 확인 필요"}
-                )
+                {c.label} (연결됨)
               </option>
             ))}
-        </select>
-      </label>
-      <BrokerResults
-        key={connectionId ?? "operator"}
-        connectionId={connectionId}
-      />
+          </select>
+        </label>
+      )}
+      {connections.isSuccess && (
+        <BrokerResults
+          key={connectionId ?? "sample"}
+          connectionId={connectionId}
+        />
+      )}
     </section>
   );
 }

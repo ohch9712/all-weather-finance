@@ -152,7 +152,7 @@ class ScreenFilter(CamelModel):
 | `POST /api/screener/broker-conditions/run` | `{"connectionId": "…" \| null, "seq": "0"}` → `200` 6절 형식(`source: "kiwoom_condition"` 또는 `"mock"`) |
 
 - 저장 테이블 `saved_screens`(revision `screener_0001`, `branch_labels=("screener",)`): `id uuid PK`, `user_id`(FK users CASCADE), `name varchar(40) NOT NULL`, `query_text varchar(300) NULL`, `filter jsonb NOT NULL`, `created_at`. UNIQUE `(user_id, name)`.
-- 키움 조건식: `connectionId`가 있으면 사용자 키움 연결(`get_user_broker_client`), 없으면 운영자 클라이언트(`get_market_data_client`, Mock이면 샘플 조건식 2개). 클라이언트에 `CONDITIONS` 능력이 없으면 `501 BROKER_NOT_SUPPORTED`. 실행 결과 코드 목록을 스냅샷과 합쳐 6절 형식으로 준다(스냅샷에 없는 코드는 이름만).
+- 키움 조건식: `connectionId`가 있으면 사용자 키움 연결(`get_user_broker_client`). 없으면 운영자 클라이언트(`get_market_data_client`)가 **Mock일 때만** 샘플 조건식 2개를 쓴다. 운영자 클라이언트가 실제 증권사(`kiwoom`·`toss`)이면 운영자 계좌의 HTS 조건식이 다른 사용자에게 드러나므로 쓰지 않고 `422 VALIDATION_ERROR`(`field_error("connectionId", "내 키움 증권사 연결을 선택해 주세요.")`)를 돌려준다(목록·실행 둘 다, 2026-10-19 코디네이터 변경). 클라이언트에 `CONDITIONS` 능력이 없으면 `501 BROKER_NOT_SUPPORTED`. 실행 결과 코드 목록을 스냅샷과 합쳐 6절 형식으로 준다(스냅샷에 없는 코드는 이름만).
 
 ## 8. 다른 모듈용 서비스 함수
 
@@ -172,7 +172,7 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 - 해석 결과: 설명 한 문단, 조건 칩(눌러서 필드·연산자·값 수정, 삭제, "조건 추가"), `unsupported` 경고 상자.
 - "검색" → 결과 표(정렬 가능한 열: 종목명, 시장, 현재가, 등락률, 시가총액, PER, PBR, ROE), 행의 "관심종목 담기"(12 API, 409면 "이미 있어요"), 종목명은 `/stocks/[code]` 링크, `kind=etf` 행에는 "ETF" 배지, null 지표는 "—", 기준일·`SampleDataBadge`, 지표 없는 종목 제외 수.
 - 저장한 검색 목록(불러오기·삭제), "이 조건 저장".
-- "내 키움 조건식" 탭: 연결 선택(없으면 운영자 데이터), 조건식 목록, 실행 결과 표.
+- "내 키움 조건식" 탭: 연결 선택, 조건식 목록, 실행 결과 표. 선택지는 사용자의 `active` 키움 연결만 보여 주고, 연결이 있으면 첫 연결을 기본으로 고른다. 연결이 없으면 `connectionId` 없이 목록을 요청해 `200`(Mock)이면 "샘플 조건식"으로 보여 주고, `422`면 "내 키움 증권사 연결이 필요합니다. 키움 HTS에서 만든 내 조건식만 실행할 수 있습니다."와 `/settings/connections` 링크를 보여 준다. "운영자 데이터" 선택지는 없앤다.
 - `?f=`가 있으면 그 필터를 칩으로 보여 주고 바로 실행.
 - `Disclaimer variant="investment"`.
 
@@ -185,6 +185,7 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 - 해석: `FakeStructuredLLM`으로 정상·검증 실패(503)·거절(422) 경로, `chips` 생성, 시스템 프롬프트에 기준표가 들어감
 - 실행: Mock 스냅샷(`seed-mock`)으로 기대 종목 집합 확인, 스냅샷 없음
 - 저장 CRUD·20개 제한·이름 중복, 키움 조건식(Mock 2개, 미지원 501), `encode_filter` 왕복
+- 키움 조건식 운영자 키 보호: 운영자 클라이언트가 Kiwoom(가짜 클라이언트·respx)일 때 `connectionId` 없는 목록·실행이 422이고 운영자 클라이언트의 조건식 API를 부르지 않음, Mock이면 샘플 2개, 사용자 연결이 있으면 그 연결로 실행
 - 사용자 격리 404
 
 ### 프론트
@@ -226,3 +227,13 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 - 회귀 테스트 3개를 추가했다. 수정 전 3개 모두 실패한 것을 확인한 뒤, 숫자 열 두 번 클릭의 `asc → desc` 요청 순서·헤더 방향·지연 응답 중 동일한 표 유지, 모바일 선택 필드 유지·방향 전환, URL 및 저장 검색의 sort 복원을 모두 통과했다.
 - 수정 후 `npm run lint`, `npx tsc --noEmit`, `npm run test`(전체 **362개**, screener **11개**), `npm run build` 통과. 백엔드·의존성·공유 파일은 수정하지 않았다.
 - 실제 서버와 독립 Playwright Chrome 컨텍스트에서 1280px PER `asc → desc`, 360px PBR 선택 후 `asc → desc`, 응답 지연 중 표 유지, URL ROE `desc → asc`, 저장 검색 현재가 `desc → asc` 요청과 표시를 확인했다. 두 너비의 문서 가로 넘침과 pageerror는 없었고 실제 외부 API/LLM은 호출하지 않았다. `scripts/stop.sh`로 서버를 종료했다.
+
+### 운영자 키 조건식 노출 수정
+
+- 앞선 구현의 '연결 선택(없으면 운영자 데이터)' 동작을 변경했다. `connectionId`가 없으면 운영자 클라이언트가 Mock일 때만 샘플을 허용하며, 실제 증권사(Kiwoom·Toss)는 조건식 API를 호출하기 전에 `422 VALIDATION_ERROR`와 `connectionId` 필드 오류("내 키움 증권사 연결을 선택해 주세요.")로 막는다. 목록·실행에 같은 보호 규칙을 적용하며 사용자 연결과 다른 시장 데이터 API는 기존 경로를 유지한다.
+- '내 키움 조건식' 선택지에서 '운영자 데이터'를 없애고 사용자의 active 키움 연결만 표시하며 첫 연결을 기본으로 고른다. 연결 조회가 성공한 뒤 조건식 목록을 요청하므로 초기 렌더에서 불필요한 운영자 목록 요청을 보내지 않는다. 연결이 없고 목록이 Mock 200이면 '샘플 조건식'과 샘플 고지를 표시하고, 422이면 스펙의 연결 안내와 `/settings/connections` 링크를 표시한다.
+- 백엔드 회귀 테스트는 Kiwoom·Toss 운영자 클라이언트(능력 유무 모두)의 연결 없는 목록·실행 422와 조건식 API 미호출, Mock 샘플 2개, 사용자 연결로 조회·실행하는 경로를 검증했다. 프론트 MSW 테스트는 선택지 제한·첫 연결 기본 선택·연결 조회 대기 중 조건식 미요청, 연결 변경, 연결 없는 422 안내·링크, Mock 샘플 표시·실행을 검증했다. 기존 사용자 격리 404도 통과했다.
+- 검사: `scripts/worktree-setup.sh`, 백엔드 `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`(전체 **1,426개**, screener **33개**), 프론트 `npm run lint`, `npx tsc --noEmit`, `npm run test`(전체 **504개**, screener **13개**), `npm run build`가 통과했다. 기존 Starlette TestClient deprecation 경고 1건이 있으며 실패는 없다.
+- 실제 슬롯 13 서버를 Kiwoom 실전 provider 설정(실제 자격증명 없이)으로 실행해 연결 없는 목록·실행의 422와 정확한 필드 오류를 확인했다. Mock 설정으로 재기동해 샘플 목록 2개·실행 200을 확인했다. 독립 Playwright 세션에서 로그인하고 연결 안내·설정 링크 이동·Mock 샘플 표시를 확인했으며, 안내와 샘플 화면 모두 360px·1280px에서 문서 가로 넘침이 없었다. `/api/market/connections/egress-ip`는 브라우저에서 가짜 응답으로 가로챘고 실제 외부 API·LLM은 호출하지 않았다. 확인 후 `scripts/stop.sh`로 서버를 종료했다.
+- 스펙과 다른 점: 없음. 소유 경로만 수정했으며 공유 파일·의존성·마이그레이션은 변경하지 않았다.
+- 남은 일: 별도 검증 워커의 PR 검증과 코디네이터 병합.
