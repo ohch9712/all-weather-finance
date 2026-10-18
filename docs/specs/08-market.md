@@ -133,6 +133,8 @@ class BrokerClient(Protocol):
 | 경로·필드 | 개발자 포털의 OpenAPI 3.0 명세에서 확인해 구현. 명세를 구하지 못한 기능은 `BROKER_NOT_SUPPORTED` | 구현 시 확인 |
 
 - 토스 어댑터는 조건검색(`CONDITIONS`)을 지원하지 않는다.
+- 계좌 목록: `GET /api/v1/accounts`(공식 명세 1.2.24 `getAccounts`, 계좌 헤더 없이 토큰만). 응답 `result[]`의 `accountNo`·`accountSeq`(정수)·`accountType`. 종합매매(`BROKERAGE`) 계좌만 온다. `TossBroker.list_accounts()`로 둔다(`BrokerClient` 프로토콜에는 넣지 않는다). `accountNo` 원문은 어댑터 밖으로 끝 4자리만 내보낸다.
+- 토큰 무효화: 토스는 같은 client로 토큰을 다시 받으면 이전 토큰이 무효가 된다(공식 OAuth2 안내). 연결 클라이언트는 프로세스 안에서 캐시되므로(`_make_client`), 다른 클라이언트가 같은 키로 토큰을 받으면 캐시된 토큰이 401이 된다. 캐시한 토큰으로 보낸 요청이 401이면 토큰을 버리고 한 번만 새로 받아 같은 요청을 다시 보낸다. 새로 받은 토큰으로도 401이면 지금처럼 `BROKER_AUTH_FAILED`다(2026-10-19 코디네이터 추가).
 - 주문 생성·정정·취소 경로는 호출하지 않는다(코드에 경로 문자열도 두지 않는다).
 
 ## 5. DB 스키마 (revision `market_0001`, `branch_labels=("market",)`)
@@ -221,6 +223,7 @@ class BrokerClient(Protocol):
 | `POST /api/market/connections` | `{"provider": "kiwoom", "environment": "mock", "label": "키움 모의", "appKey": "…", "appSecret": "…", "accountNo": "1234567890"}` | `201 Connection`(`status: "unverified"`) |
 | `POST /api/market/connections/{id}/verify` | | `200 Connection`(토큰 발급 + 잔고 조회 성공이면 `active`, 실패면 `error`와 `lastErrorCode`) |
 | `DELETE /api/market/connections/{id}` | | `204` |
+| `POST /api/market/connections/toss-accounts` | `{"appKey": "…", "appSecret": "…"}` | `200 {"items": [{"accountSeq": "1", "accountType": "BROKERAGE", "accountNoLast4": "1234"}]}`(아래 "토스 계좌 불러오기") |
 | `GET /api/market/connections/egress-ip` | | `200 {"ip": "203.0.113.7" \| null}` 서버의 공인 IP(외부 IP 조회 서비스 1회 호출, 실패하면 null) |
 
 - `Connection`: `{"id", "provider", "environment", "label", "appKeyMasked", "accountNoMasked", "status", "lastVerifiedAt", "lastErrorCode", "createdAt"}`. **키·시크릿 원문은 어떤 응답에도 넣지 않는다.**
@@ -269,7 +272,8 @@ class SnapshotSet:
 - 서버 공인 IP는 화면을 열 때 자동으로 조회하지 않는다. "서버 공인 IP 확인" 버튼을 누를 때만 `GET /api/market/connections/egress-ip`를 부르고(외부 IP 조회 서비스를 부르기 때문), 누르기 전에는 "버튼을 누르면 확인합니다"를 보여 준다. 결과는 그 화면에 머무는 동안 다시 부르지 않는다. API 계약은 그대로다(웨이브 4 통합 검증 F3).
 - 시장 데이터 상태: 원천(샘플 데이터면 `SampleDataBadge`), 기준일, 종목 수.
 - 연결 목록 카드: 증권사, 환경(모의/실전), 별칭, 마스킹된 앱키·계좌, 상태 배지(미확인·정상·오류), 마지막 확인 시각, 오류 코드의 한국어 안내, "연결 확인" 버튼, 삭제(확인 대화상자).
-- 추가 다이얼로그: 증권사, 환경(토스는 실전만), 별칭, 앱키, 시크릿(비밀번호 입력), 계좌번호. 저장 후 바로 "연결 확인"을 권한다.
+- 추가 다이얼로그: 증권사, 환경(토스는 실전만), 별칭, 앱키, 시크릿(비밀번호 입력), 계좌번호(키움). 저장 후 바로 "연결 확인"을 권한다.
+- 토스 계좌 불러오기(2026-10-19 사용자 요청): 토스를 고르면 계좌 칸 대신 "계좌 불러오기" 버튼을 보여 준다. 앱키·시크릿이 비어 있으면 버튼을 끈다. 누르면 `POST /api/market/connections/toss-accounts`를 불러 결과를 선택 목록으로 보여 준다(항목 문구 `종합매매 ****1234`, `accountType`이 `BROKERAGE`가 아니면 그 값을 그대로). 계좌가 하나면 자동으로 고르고, 없으면 "토스증권 종합매매 계좌가 없습니다."를 보여 준다. 저장할 때 고른 `accountSeq`를 기존 `accountNo` 필드로 보낸다(연결 생성 API 계약은 그대로). 계좌를 고르기 전에는 저장 버튼을 끈다. 앱키·시크릿을 바꾸면 불러온 목록과 선택을 비운다. 오류는 기존 오류 코드 안내(IP 미등록·키 오류 등)를 그대로 보여 준다. 사용자가 accountSeq를 직접 입력하는 칸은 없앤다.
 - 17이 같은 페이지에 "데이터 자동 수집" 영역을 추가한다. 페이지를 섹션 컴포넌트 조합으로 만들어 두고 17이 섹션 하나를 더할 수 있게 한다.
 
 ## 10. 테스트
@@ -282,11 +286,14 @@ class SnapshotSet:
 - 호출 한도 버킷(시간 고정)
 - 배치: `seed-mock` 결과 80행, `--resume` 건너뛰기, 성공률 계산, `listed=false` 처리
 - API: 검색 순서, 상세(시세 실패 시 `quote: null`), 시세 50개 제한, 캔들 기간 제한, 연결 CRUD·검증 성공/실패, Mock 연결(개발 허용·운영 422), 응답에 원문 키 없음, 남의 연결 404
+- 토스 계좌 불러오기: respx로 토큰·`/api/v1/accounts` 고정, 응답에 `accountNo` 원문 없음(끝 4자리만), 키를 DB에 저장하지 않음·로그에 없음, 앱키·시크릿 빈 값 422, 403 → `BROKER_IP_NOT_ALLOWED`·401 → `BROKER_AUTH_FAILED`, 계좌 없음 빈 목록, 미인증 401
+- 토스 토큰 무효화: 캐시 토큰 401 → 한 번 재발급 후 성공, 재발급 토큰도 401이면 `BROKER_AUTH_FAILED`(재시도 한 번뿐)
 - 실제 외부 호출이 없음(respx `assert_all_mocked`)
 
 ### 프론트 (`frontend/tests/market/`, MSW)
 
 - 연결 추가·확인·삭제, 상태 배지·오류 안내, IP 안내, 샘플 데이터 배지, 개발 환경의 샘플 증권사 선택지
+- 토스 계좌 불러오기: 버튼 비활성 조건, 한 개 자동 선택, 여러 개 선택, 없음 안내, 오류 안내, 키 변경 시 선택 초기화, 저장 요청의 `accountNo`가 고른 accountSeq, 키움 폼은 그대로 계좌번호 칸
 
 ## 11. 완료 기준
 
