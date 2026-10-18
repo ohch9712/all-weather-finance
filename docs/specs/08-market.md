@@ -120,6 +120,7 @@ class BrokerClient(Protocol):
 - 토큰은 만료 시각(`expires_dt`)까지 메모리에 캐시하고 만료 5분 전에 새로 받는다.
 - IP 미등록·키 오류는 `return_code`/HTTP 상태를 보고 `BROKER_IP_NOT_ALLOWED`·`BROKER_AUTH_FAILED`로 바꾼다(정확한 코드값은 공식 문서에서 확인).
 - **체결 없는 날의 `kt00009` 응답(운영 서버 실제 응답, 2026-10-19 코디네이터 확인. 공식 명세에는 없다)**: 그날 체결이 없으면 HTTP 200, `return_code: 20`, `return_msg`에 `[2000]`과 `관련자료가없습니다`가 들어 있고 `acnt_ord_cntr_prst_array`가 없다. 지금 어댑터는 이것을 `BROKER_UNAVAILABLE`로 바꿔, 체결이 없는 날이 하루라도 낀 기간의 체결 조회(11 매매일지 동기화)가 통째로 실패한다. `kt00009`에서만 이 조합(`return_code` 20 + 메시지에 `관련자료가없습니다`)을 그날 그 매도·매수 구분의 빈 결과로 처리하고 연속조회를 멈춘다. 다른 `return_code`, 다른 api-id, 메시지가 다른 20은 지금처럼 오류다. 코드 주석에 이 근거(공식 명세 미기재, 실제 응답 관찰일)를 남긴다.
+- **`kt00009` 거래소 구분(2026-10-19 코디네이터 추가)**: 요청 `dmst_stex_tp`를 `"KRX"`에서 `"%"`(전체)로 바꾼다. 공식 명세의 값은 `%`(전체)·`KRX`·`NXT`(넥스트트레이드)·`SOR`(최선주문집행)이고, KRX만 조회하면 넥스트트레이드에서 체결된 거래가 매매일지에서 빠진다. 응답 행의 `dmst_stex_tp`(국내거래소구분)를 읽어 `external_id`를 정한다. 값이 비었거나 `KRX`이면 지금처럼 `{날짜}:{ord_no}:{cntr_no}`(이미 동기화한 KRX 체결이 다시 들어오지 않게 형식을 유지한다), 그 밖의 거래소면 끝에 `:{dmst_stex_tp}`를 붙인다. 종목코드는 접두어(A·J·Q)뿐 아니라 거래소 접미사(`_NX`·`_AL`)도 떼어 KRX 6자리로 맞춘다. 체결 없음 응답 처리와 연속조회는 그대로다. 잔고(`kt00018`)는 바꾸지 않는다.
 
 ### 4.4 TossBroker (`toss.py`)
 
@@ -288,6 +289,7 @@ class SnapshotSet:
 - API: 검색 순서, 상세(시세 실패 시 `quote: null`), 시세 50개 제한, 캔들 기간 제한, 연결 CRUD·검증 성공/실패, Mock 연결(개발 허용·운영 422), 응답에 원문 키 없음, 남의 연결 404
 - 토스 계좌 불러오기: respx로 토큰·`/api/v1/accounts` 고정, 응답에 `accountNo` 원문 없음(끝 4자리만), 키를 DB에 저장하지 않음·로그에 없음, 앱키·시크릿 빈 값 422, 403 → `BROKER_IP_NOT_ALLOWED`·401 → `BROKER_AUTH_FAILED`, 계좌 없음 빈 목록, 미인증 401
 - 토스 토큰 무효화: 캐시 토큰 401 → 한 번 재발급 후 성공, 재발급 토큰도 401이면 `BROKER_AUTH_FAILED`(재시도 한 번뿐)
+- 키움 `kt00009` 거래소 구분: 요청 본문 `dmst_stex_tp="%"`, KRX·빈 값 행의 `external_id` 형식 유지, NXT·SOR 행의 `:NXT`·`:SOR` 접미사, 같은 `ord_no`·`cntr_no`가 KRX와 NXT에 함께 있어도 두 건으로 남음, 종목코드 접두어·`_NX`·`_AL` 접미사 제거
 - 실제 외부 호출이 없음(respx `assert_all_mocked`)
 
 ### 프론트 (`frontend/tests/market/`, MSW)
@@ -468,3 +470,27 @@ class SnapshotSet:
 
 - 스펙과 다른 점: 없음. 의존성을 추가하지 않았다.
 - 남은 일: 수정 범위의 구현은 완료했다. 실제 토스 키·허용 IP로 하는 확인과 별도 검증·PR 검토·병합은 코디네이터가 진행한다.
+
+### 키움 체결 전체 거래소 조회
+
+- 검증 후 수정(2026-10-19): 체결 거래소를 `(row.get("dmst_stex_tp") or "").strip()`으로 정규화해 `KRX `·` KRX`·공백만 있는 값·빈 값은 기존 ID를 유지하고 ` NXT `는 `:NXT`를 붙이도록 했으며, 종목코드도 앞뒤 공백을 지운 뒤 접두어·거래소 접미사를 제거한다. respx `assert_all_mocked=True`로 같은 프로세스 TestClient에서 KRX 1건 저장 후 네 거래소 값으로 재동기화하면 `inserted=0`·`updated=0`·`unchanged=1`과 같은 거래 ID가 유지되는지 확인했다. 관련 테스트 63개·전체 `uv run pytest` 1,463개·`ruff check`·`ruff format --check` 모두 통과했고, 기존 Starlette TestClient 사용 중단 안내 1건 외 실패는 없다.
+- 발견 사항: `kt00009`의 `dmst_stex_tp="KRX"` 고정 요청으로 NXT 체결이 빠지고, 거래소가 다른 동일 주문번호·체결번호는 같은 `external_id`로 덮어썼다. 체결 종목코드의 `_NX`·`_AL` 접미사도 남았다.
+- 고친 내용: 요청을 `dmst_stex_tp="%"`로 바꿨다. 응답 행의 거래소가 KRX·빈 값(누락·null 포함)이면 기존 `{날짜}:{ord_no}:{cntr_no}`를 유지하고, 그 밖이면 `:{dmst_stex_tp}`를 붙인다. 체결 경로에서만 `_NX`·`_AL`을 제거한 뒤 기존 접두어(A·J·Q) 변환을 적용한다. 공용 코드 변환 함수·잔고 `kt00018`·체결 없음 응답 처리·매도수 필터·연속조회는 유지했다.
+- 근거: [키움 공식 `kiwoom_api_spec.json`](https://github.com/Kiwoom-Securities/Kiwoom-REST-API/blob/main/kiwoom/_data/kiwoom_api_spec.json)의 `kt00009` 요청 `dmst_stex_tp`는 `%`·`KRX`·`NXT`·`SOR`이고, 응답 행에도 `dmst_stex_tp`가 있다(2026-10-19 재확인). 같은 근거를 코드 주석에 남겼다.
+- 회귀 테스트: respx로 전체 거래소 요청, 누락·빈 값·null·KRX의 ID 유지, NXT·SOR 접미사, A·J·Q 및 `_NX`·`_AL` 코드 정리, 같은 주문·체결번호의 KRX·NXT·SOR가 연속조회 뒤에도 각각 남고 같은 KRX 행의 중복만 제거되는 것을 확인한다. 기존 체결 조회 테스트의 요청 단언도 `%`로 맞췄다.
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 08(8008·3008·finance_08) 준비 성공 |
+| 수정 전 새 회귀 테스트(`-k 'exchange_ids or exchange_collisions'`) | 8개 모두 `KRX` 고정 요청으로 실패하여 재현 확인 |
+| `uv run ruff check .` / `uv run ruff format --check .` | 통과, 307개 파일 포맷 확인 |
+| `uv run pytest tests/market/test_brokers.py tests/journal/test_sync.py -q` | 54개 통과 |
+| `uv run pytest -q` | 전체 1,454개 통과, 기존 Starlette TestClient 사용 중단 안내 1건 |
+| 실제 슬롯 08 uvicorn 서버: `POST /api/journal/sync` | 기존 KRX 1건 저장 → 전체 거래소 응답에서 3건 추가·기존 1건 유지 → 재동기화 0건 추가·4건 유지, 모두 HTTP 200 |
+| 같은 서버의 DB·요청 확인 | `20261016:1:2`, `:NXT`, `:SOR`와 빈 거래소 `20261016:3:2` 총 4건·코드 모두 `005930`. `kt00009` 전체 거래소·연속조회·다른 날짜 no-data, `kt00018` KRX 유지 확인 |
+| 같은 서버의 사용자 격리 | 다른 사용자가 같은 연결로 동기화하면 HTTP 404·`NOT_FOUND` |
+| 외부 호출·정리 | 저장소 밖 임시 `sitecustomize.py`에서 키움 HTTP 전송을 가짜 응답으로 대체하고 그 밖의 외부 HTTP를 차단. 실서비스 키·LLM·외부 IP 조회 미사용. 확인용 사용자 2명과 연결·거래 삭제, `scripts/stop.sh`로 백엔드 종료 |
+| 프론트·마이그레이션 검사 | 변경이 없어 생략. API·화면·DB 계약 변경 없음 |
+
+- 스펙과 다른 점: 없음. 의존성을 추가하지 않았고 소유 경로만 수정했다.
+- 남은 일: 수정 범위의 구현은 완료했다. 별도 검증·PR 검토·병합은 코디네이터가 진행한다.
