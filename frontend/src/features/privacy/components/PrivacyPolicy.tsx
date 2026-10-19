@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
 import { TriangleAlert } from "lucide-react";
+import { LogoMark } from "@/components/common/LogoMark";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { APP_NAME } from "@/lib/site";
 import { UNSET_TEXT, hasMissingValues, type PrivacyValues } from "../config";
@@ -118,7 +119,8 @@ export function PrivacyPolicy({ values }: { values: PrivacyValues }) {
     <div className="min-h-dvh bg-background text-foreground print:bg-white print:text-black">
       <header className="border-b print:border-b-0">
         <div className="mx-auto max-w-3xl px-4 py-4">
-          <Link href="/" className="text-lg font-semibold tracking-tight">
+          <Link href="/" className="inline-flex items-center gap-2 text-lg font-semibold tracking-tight">
+            <LogoMark className="size-6" />
             {APP_NAME}
           </Link>
         </div>
