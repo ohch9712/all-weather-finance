@@ -1,10 +1,13 @@
 import { screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { JournalImportPage } from "@/features/journal/components/JournalImportPage";
 import { JournalPage } from "@/features/journal/components/JournalPage";
 import type { ImportJob } from "@/features/imports";
 import { apiUrl, createTestQueryClient, renderWithProviders, server } from "../utils";
+
+// 매매일지 머리의 "증권사 동기화" 버튼이 연결 목록을 미리 불러온다.
+beforeEach(() => { server.use(http.get(apiUrl("/api/market/connections"), () => HttpResponse.json({ items: [] }))); });
 
 function setup(provider = "mock") {
   server.use(
