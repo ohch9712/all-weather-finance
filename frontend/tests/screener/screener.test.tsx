@@ -37,6 +37,7 @@ const results: ScreenResult = {
   source: "mock",
   total: 2,
   excludedForMissingData: 3,
+  universeCount: null,
   items: [
     item,
     {
@@ -560,6 +561,253 @@ describe("조건검색 화면", () => {
     expect(screen.queryByText("운영자 데이터")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("연결 선택")).not.toBeInTheDocument();
   });
+  it("검색 범위·그룹 선택을 요청에 담고 관심종목 N개 중 M개로 보여 준다", async () => {
+    const requested: ScreenFilter[] = [];
+    const watchlistRequests = vi.fn();
+    server.use(
+      http.get(apiUrl("/api/watchlist"), () => {
+        watchlistRequests();
+        return HttpResponse.json({
+          items: [],
+          groups: ["기본", "배당주"],
+          source: "mock",
+        });
+      }),
+      http.post(apiUrl("/api/screener/run"), async ({ request }) => {
+        const { filter } = (await request.json()) as { filter: ScreenFilter };
+        requested.push(filter);
+        return HttpResponse.json({
+          ...results,
+          universeCount: filter.universe === "watchlist" ? 5 : null,
+        });
+      }),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />);
+    const scope = await screen.findByLabelText("검색 범위");
+    expect(scope).toHaveValue("all");
+    expect(screen.queryByLabelText("관심종목 그룹")).not.toBeInTheDocument();
+    expect(watchlistRequests).not.toHaveBeenCalled();
+    await user.selectOptions(scope, "watchlist");
+    const group = screen.getByLabelText("관심종목 그룹");
+    await waitFor(() =>
+      expect(
+        within(group)
+          .getAllByRole("option")
+          .map((o) => o.textContent),
+      ).toEqual(["모든 그룹", "기본", "배당주"]),
+    );
+    const chips = within(screen.getByLabelText("조건 칩"));
+    expect(chips.getByText("관심종목")).toBeInTheDocument();
+    // 관심종목 범위에서 종류를 고르지 않으면 주식·ETF를 모두 본다.
+    expect(screen.getByLabelText("종류")).toHaveValue("all");
+    await user.selectOptions(group, "배당주");
+    expect(chips.getByText("관심종목: 배당주")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    expect(await screen.findByText("관심종목 5개 중 2개")).toBeInTheDocument();
+    expect(requested.at(-1)).toMatchObject({
+      universe: "watchlist",
+      watchlistGroup: "배당주",
+      kinds: null,
+    });
+    await user.selectOptions(screen.getByLabelText("종류"), "stock");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    await waitFor(() => expect(requested.at(-1)?.kinds).toEqual(["stock"]));
+    await user.selectOptions(screen.getByLabelText("검색 범위"), "all");
+    expect(screen.queryByLabelText("관심종목 그룹")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    expect(await screen.findByText("2개 종목")).toBeInTheDocument();
+    expect(requested.at(-1)).toMatchObject({
+      universe: "all",
+      watchlistGroup: null,
+    });
+    expect(screen.queryByText(/관심종목 \d+개 중/)).not.toBeInTheDocument();
+  });
+  it("자연어 해석 결과의 범위와 그룹을 선택에 반영한다", async () => {
+    server.use(
+      http.get(apiUrl("/api/watchlist"), () =>
+        HttpResponse.json({ items: [], groups: ["기본"], source: "mock" }),
+      ),
+      http.post(apiUrl("/api/screener/parse"), () =>
+        HttpResponse.json({
+          filter: {
+            ...parsedFilter,
+            universe: "watchlist",
+            watchlistGroup: "배당주",
+          },
+          explanation: "배당주 그룹 관심종목에서 찾아요.",
+          unsupported: [],
+          chips: [{ label: "관심종목: 배당주" }, { label: "코스피" }],
+        }),
+      ),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />);
+    await user.type(
+      await screen.findByLabelText("원하는 조건"),
+      "배당주 그룹 관심종목 중 PER 10 이하",
+    );
+    await user.click(screen.getByRole("button", { name: "조건 해석" }));
+    expect(
+      await screen.findByText("배당주 그룹 관심종목에서 찾아요."),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("검색 범위")).toHaveValue("watchlist");
+    // 내 그룹 목록에 없는 이름도 해석 결과 그대로 선택해 둔다.
+    await waitFor(() =>
+      expect(screen.getByLabelText("관심종목 그룹")).toHaveValue("배당주"),
+    );
+    const chips = within(screen.getByLabelText("조건 칩"));
+    expect(
+      chips.getAllByText(/관심종목|코스피/).map((c) => c.textContent),
+    ).toEqual(["관심종목: 배당주", "코스피"]);
+  });
+  it("관심종목이 없으면 결과 표 대신 안내와 링크를 보여 준다", async () => {
+    server.use(
+      http.get(apiUrl("/api/watchlist"), () =>
+        HttpResponse.json({ items: [], groups: [], source: "mock" }),
+      ),
+      http.post(apiUrl("/api/screener/run"), () =>
+        HttpResponse.json({
+          ...results,
+          total: 0,
+          items: [],
+          universeCount: 0,
+        }),
+      ),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />);
+    await user.selectOptions(
+      await screen.findByLabelText("검색 범위"),
+      "watchlist",
+    );
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    expect(
+      await screen.findByText(
+        "관심종목이 없습니다. 먼저 관심종목을 담아 주세요.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "관심종목 화면으로 가기" }),
+    ).toHaveAttribute("href", "/stocks/watchlist");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("조건에 맞는 종목이 없어요"),
+    ).not.toBeInTheDocument();
+  });
+  it("그룹을 고른 범위가 비어 있으면 그룹 안내를 보여 준다", async () => {
+    const filter: ScreenFilter = {
+      ...emptyFilter(),
+      universe: "watchlist",
+      watchlistGroup: "빈 그룹",
+    };
+    server.use(
+      http.get(apiUrl("/api/watchlist"), () =>
+        HttpResponse.json({ items: [], groups: ["기본"], source: "mock" }),
+      ),
+      http.post(apiUrl("/api/screener/run"), () =>
+        HttpResponse.json({
+          ...results,
+          total: 0,
+          items: [],
+          universeCount: 0,
+        }),
+      ),
+    );
+    renderWithProviders(<ScreenerPage />, {
+      route: `/stocks/screener?f=${encodeFilter(filter)}`,
+    });
+    expect(
+      await screen.findByText("이 그룹에 담긴 관심종목이 없습니다."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "관심종목 화면으로 가기" }),
+    ).toHaveAttribute("href", "/stocks/watchlist");
+  });
+  it("범위가 든 ?f= 진입과 저장·불러오기에서 범위를 유지한다", async () => {
+    const urlFilter: ScreenFilter = {
+      ...emptyFilter(),
+      universe: "watchlist",
+      watchlistGroup: "기본",
+    };
+    const savedFilter: ScreenFilter = {
+      ...emptyFilter(),
+      universe: "watchlist",
+      watchlistGroup: "배당주",
+    };
+    const requested: ScreenFilter[] = [];
+    let savedBody: { filter: ScreenFilter } | undefined;
+    server.use(
+      http.get(apiUrl("/api/watchlist"), () =>
+        HttpResponse.json({
+          items: [],
+          groups: ["기본", "배당주"],
+          source: "mock",
+        }),
+      ),
+      http.post(apiUrl("/api/screener/run"), async ({ request }) => {
+        const { filter } = (await request.json()) as { filter: ScreenFilter };
+        requested.push(filter);
+        return HttpResponse.json({ ...results, universeCount: 3 });
+      }),
+      http.get(apiUrl("/api/screener/saved"), () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: "scoped",
+              name: "배당 관심",
+              queryText: null,
+              filter: savedFilter,
+              createdAt: "2026-10-16T00:00:00Z",
+            },
+          ],
+        }),
+      ),
+      http.post(apiUrl("/api/screener/saved"), async ({ request }) => {
+        savedBody = (await request.json()) as { filter: ScreenFilter };
+        return HttpResponse.json(
+          {
+            id: "new",
+            name: "새 검색",
+            queryText: null,
+            filter: savedBody.filter,
+            createdAt: "2026-10-16T00:00:00Z",
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    const { user } = renderWithProviders(<ScreenerPage />, {
+      route: `/stocks/screener?f=${encodeFilter(urlFilter)}`,
+    });
+    expect(await screen.findByText("관심종목 3개 중 2개")).toBeInTheDocument();
+    expect(requested[0]).toMatchObject({
+      universe: "watchlist",
+      watchlistGroup: "기본",
+    });
+    expect(screen.getByLabelText("검색 범위")).toHaveValue("watchlist");
+    await waitFor(() =>
+      expect(screen.getByLabelText("관심종목 그룹")).toHaveValue("기본"),
+    );
+    await user.type(screen.getByLabelText("검색 이름"), "새 검색");
+    await user.click(screen.getByRole("button", { name: "이 조건 저장" }));
+    expect(await screen.findByText("검색을 저장했어요.")).toBeInTheDocument();
+    expect(savedBody?.filter).toMatchObject({
+      universe: "watchlist",
+      watchlistGroup: "기본",
+    });
+    const savedList = within(screen.getByLabelText("저장한 검색"));
+    expect(savedList.getByText("관심종목: 배당주")).toBeInTheDocument();
+    await user.click(savedList.getByRole("button", { name: "불러오기" }));
+    expect(screen.getByLabelText("관심종목 그룹")).toHaveValue("배당주");
+    await user.click(screen.getByRole("button", { name: "검색" }));
+    await waitFor(() =>
+      expect(requested.at(-1)).toMatchObject({
+        universe: "watchlist",
+        watchlistGroup: "배당주",
+      }),
+    );
+    expect(
+      screen.getByRole("link", { name: "이 조건 링크" }).getAttribute("href"),
+    ).toBe(`/stocks/screener?f=${encodeFilter(savedFilter)}`);
+  });
   it("미수집 데이터와 LLM 오류를 안내한다", async () => {
     server.use(
       http.post(apiUrl("/api/screener/run"), () =>
@@ -589,6 +837,19 @@ it("백엔드와 같은 UTF-8·소수·키 정렬 인코딩을 쓴다", () => {
   const filter = golden.filter as ScreenFilter;
   expect(encodeFilter(filter)).toBe(golden.encoded);
   expect(decodeFilter(golden.encoded)).toEqual(golden.canonical);
+  // 범위 필드가 없는 예전 링크는 전체 종목 검색으로 읽고, 다시 만들면 기본값이 붙는다.
+  const legacy = decodeFilter(golden.legacy.encoded);
+  expect(legacy).toEqual(golden.legacy.canonical);
+  expect(encodeFilter(legacy)).toBe(golden.legacy.reencoded);
+  expect(
+    encodeFilter({ ...filter, watchlistGroup: " 배당주 " } as ScreenFilter),
+  ).toBe(golden.encoded);
+  expect(() =>
+    decodeFilter(btoa('{"watchlistGroup":"x"}').replace(/=+$/, "")),
+  ).toThrow();
+  expect(() =>
+    decodeFilter(btoa('{"universe":"mine"}').replace(/=+$/, "")),
+  ).toThrow();
   for (const [value, expected] of [
     ["1e2", "1E+2"],
     ["001.2300", "1.2300"],

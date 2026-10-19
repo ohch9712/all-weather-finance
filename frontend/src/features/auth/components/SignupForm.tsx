@@ -74,7 +74,7 @@ export function SignupForm() {
               <FormControl>
                 <Input type="password" autoComplete="new-password" {...field} />
               </FormControl>
-              <FormDescription>8~128자로 입력해 주세요.</FormDescription>
+              <FormDescription>8~32자로 입력해 주세요.</FormDescription>
               <FormMessage />
             </FormItem>
           )}
@@ -114,7 +114,7 @@ export function SignupForm() {
           )}
         />
         <p className="text-xs leading-5 text-muted-foreground break-keep">
-          가입하면{" "}
+          가입 시{" "}
           <Link
             href="/privacy"
             target="_blank"

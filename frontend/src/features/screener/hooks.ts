@@ -63,3 +63,11 @@ export function useAddWatchlist() {
     onSuccess: () => client.invalidateQueries({ queryKey: ["watchlist"] }),
   });
 }
+// ["watchlist"]로 시작해 관심종목 담기 뒤 그룹 목록도 다시 불러온다.
+export const useWatchlistGroups = (enabled: boolean) =>
+  useQuery({
+    queryKey: ["watchlist", "screener-groups"],
+    queryFn: api.listWatchlistGroups,
+    select: (data) => data.groups,
+    enabled,
+  });

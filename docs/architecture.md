@@ -398,7 +398,7 @@ def add_item(db, user_id, code: str, *, group_name: str = "기본", memo: str | 
 
 # app/modules/screener/service.py  (13)
 def parse_query(llm: StructuredLLM, query: str) -> ParsedScreen
-def run_screen(db, screen_filter: ScreenFilter) -> ScreenResult
+def run_screen(db, screen_filter: ScreenFilter, *, user_id: UUID | None = None) -> ScreenResult   # user_id는 관심종목 범위(13 4.0)에 필요
 def get_filter_guide() -> str                 # 15의 screen_stocks 도구 설명에 사용
 def encode_filter(screen_filter: ScreenFilter) -> str   # /stocks/screener?f= 값
 

@@ -19,7 +19,7 @@ def parse(data: schemas.ParseRequest, user: CurrentUser, llm: LLM):
 
 @router.post("/run", response_model=schemas.ScreenResult, dependencies=[Depends(require_json)])
 def run(data: schemas.RunRequest, user: CurrentUser, db: DBSession):
-    return service.run_screen(db, data.filter)
+    return service.run_screen(db, data.filter, user_id=user.id)
 
 
 @router.get("/saved", response_model=schemas.SavedList)

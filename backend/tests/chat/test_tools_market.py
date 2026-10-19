@@ -110,13 +110,15 @@ def test_screen_stocks_runs_filter_and_links(auth_client, db, market, monkeypatc
     ctx = tool_ctx(db)
     result = run(ctx, "screen_stocks", {"filter": FILTER})
     (args, kwargs) = spy.calls[0]
-    assert args[0] is db and kwargs == {}
+    assert args[0] is db and kwargs == {"user_id": ctx.user.id}
     assert args[1] == ScreenFilter.model_validate(FILTER)
     screen = screener_service.run_screen(db, ScreenFilter.model_validate(FILTER))
     assert screen.total > 0
 
     content = result.content
     assert content["total"] == screen.total
+    assert content["universeCount"] is None
+    assert content["summary"].startswith("2026-10-16 스냅샷 기준 조건에 맞는 종목은")
     assert content["asOf"] == "2026-10-16" and content["source"] == "mock"
     assert content["shownCount"] == min(10, len(screen.items))
     assert [item["code"] for item in content["items"]] == [item.code for item in screen.items][:10]
@@ -133,6 +135,43 @@ def test_screen_stocks_runs_filter_and_links(auth_client, db, market, monkeypatc
     assert set(first) == STOCK_ITEM_KEYS
     assert first["price"].endswith("원") and first["changeRate"].endswith("%")
     assert first["extra"].startswith("코스피 · PER ")
+
+
+def test_screen_stocks_watchlist_scope_is_per_user(auth_client, other_auth_client, db, market):
+    run(tool_ctx(db), "add_to_watchlist", {"code": "005930"})
+    run(tool_ctx(db), "add_to_watchlist", {"code": "069500"})
+    run(tool_ctx(db, "second@example.com"), "add_to_watchlist", {"code": "000660"})
+    scoped = {**FILTER, "markets": None, "conditions": [], "universe": "watchlist"}
+    ctx = tool_ctx(db)
+    result = run(ctx, "screen_stocks", {"filter": scoped})
+    assert not result.is_error, result.content
+    content = result.content
+    # 이 사용자의 관심종목만, kinds가 없으면 담아 둔 ETF도 포함한다.
+    assert [item["code"] for item in content["items"]] == ["005930", "069500"]
+    assert content["universeCount"] == 2 and content["total"] == 2
+    assert content["summary"] == (
+        "관심종목 2개 중 조건에 맞는 종목은 2개입니다. 2026-10-16 스냅샷 기준입니다."
+    )
+    assert result.card["title"] == "관심종목 2개 중 2개"
+    encoded = result.card["href"].removeprefix("/stocks/screener?f=")
+    assert decode(encoded)["universe"] == "watchlist"
+    assert decode(encoded)["watchlistGroup"] is None
+
+    other = run(tool_ctx(db, "second@example.com"), "screen_stocks", {"filter": scoped})
+    assert [item["code"] for item in other.content["items"]] == ["000660"]
+    grouped = run(ctx, "screen_stocks", {"filter": {**scoped, "watchlistGroup": "배당주"}})
+    assert grouped.content["universeCount"] == 0 and grouped.content["items"] == []
+    assert grouped.content["summary"].startswith("관심종목 0개 중 조건에 맞는 종목은 0개입니다.")
+    assert "이 그룹에 담긴 관심종목이 없습니다." in grouped.content["summary"]
+
+
+def test_screen_stocks_empty_watchlist_and_scope_error(auth_client, db, market):
+    scoped = {**FILTER, "universe": "watchlist"}
+    result = run(tool_ctx(db), "screen_stocks", {"filter": scoped})
+    assert result.content["universeCount"] == 0
+    assert "관심종목이 없습니다. 먼저 관심종목을 담아 주세요." in result.content["summary"]
+    bad = run(tool_ctx(db), "screen_stocks", {"filter": {**FILTER, "watchlistGroup": "배당주"}})
+    assert bad.is_error and "INVALID_INPUT" in bad.content
 
 
 def test_screen_stocks_without_snapshot_is_status(auth_client, db, empty_market):

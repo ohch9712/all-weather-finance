@@ -12,9 +12,11 @@
       }
     ],
     "sort": null,
-    "limit": 30
+    "limit": 30,
+    "universe": "watchlist",
+    "watchlistGroup": "배당주"
   },
-  "encoded": "eyJjb25kaXRpb25zIjpbeyJmaWVsZCI6InBlciIsIm9wIjoiYmV0d2VlbiIsInZhbHVlIjoiMS4wMCIsInZhbHVlVG8iOiIxMC41MCJ9XSwia2luZHMiOlsic3RvY2siLCJldGYiXSwibGltaXQiOjMwLCJtYXJrZXRzIjpudWxsLCJzZWN0b3JzIjpbIuuwmOuPhOyytCJdLCJzb3J0IjpudWxsfQ",
+  "encoded": "eyJjb25kaXRpb25zIjpbeyJmaWVsZCI6InBlciIsIm9wIjoiYmV0d2VlbiIsInZhbHVlIjoiMS4wMCIsInZhbHVlVG8iOiIxMC41MCJ9XSwia2luZHMiOlsic3RvY2siLCJldGYiXSwibGltaXQiOjMwLCJtYXJrZXRzIjpudWxsLCJzZWN0b3JzIjpbIuuwmOuPhOyytCJdLCJzb3J0IjpudWxsLCJ1bml2ZXJzZSI6IndhdGNobGlzdCIsIndhdGNobGlzdEdyb3VwIjoi67Cw64u57KO8In0",
   "canonical": {
     "conditions": [
       {
@@ -28,6 +30,29 @@
     "limit": 30,
     "markets": null,
     "sectors": ["반도체"],
-    "sort": null
+    "sort": null,
+    "universe": "watchlist",
+    "watchlistGroup": "배당주"
+  },
+  "legacy": {
+    "encoded": "eyJjb25kaXRpb25zIjpbeyJmaWVsZCI6InBlciIsIm9wIjoiYmV0d2VlbiIsInZhbHVlIjoiMS4wMCIsInZhbHVlVG8iOiIxMC41MCJ9XSwia2luZHMiOlsic3RvY2siLCJldGYiXSwibGltaXQiOjMwLCJtYXJrZXRzIjpudWxsLCJzZWN0b3JzIjpbIuuwmOuPhOyytCJdLCJzb3J0IjpudWxsfQ",
+    "canonical": {
+      "conditions": [
+        {
+          "field": "per",
+          "op": "between",
+          "value": "1.00",
+          "valueTo": "10.50"
+        }
+      ],
+      "kinds": ["stock", "etf"],
+      "limit": 30,
+      "markets": null,
+      "sectors": ["반도체"],
+      "sort": null,
+      "universe": "all",
+      "watchlistGroup": null
+    },
+    "reencoded": "eyJjb25kaXRpb25zIjpbeyJmaWVsZCI6InBlciIsIm9wIjoiYmV0d2VlbiIsInZhbHVlIjoiMS4wMCIsInZhbHVlVG8iOiIxMC41MCJ9XSwia2luZHMiOlsic3RvY2siLCJldGYiXSwibGltaXQiOjMwLCJtYXJrZXRzIjpudWxsLCJzZWN0b3JzIjpbIuuwmOuPhOyytCJdLCJzb3J0IjpudWxsLCJ1bml2ZXJzZSI6ImFsbCIsIndhdGNobGlzdEdyb3VwIjpudWxsfQ"
   }
 }
