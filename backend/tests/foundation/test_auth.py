@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from app.api.deps import AdminUser, PageQuery
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.core.security import hash_token, verify_password
+from app.core.security import hash_password, hash_token, verify_password
 from app.modules.auth import cli, service
 from app.modules.auth.models import Session, User, UserProfile
 
@@ -49,11 +49,25 @@ def test_signup_cookie_normalization_and_storage(client, db):
     assert signup(client).json()["error"]["code"] == "EMAIL_ALREADY_EXISTS"
 
 
+def legacy_user(db, email, password):
+    # 이전 가입 규칙(8~128자)으로 만든 계정. 지금 가입 경로는 32자를 넘으면 거절하므로 직접 넣는다.
+    user = User(email=email, password_hash=hash_password(password))
+    db.add(user)
+    db.flush()
+    db.add(UserProfile(user_id=user.id))
+    db.commit()
+    return user
+
+
 @pytest.mark.parametrize(
     "overrides,field",
     [
         ({"email": "bad"}, "email"),
         ({"password": "short"}, "password"),
+        ({"password": "x" * 7}, "password"),
+        ({"password": "x" * 33}, "password"),
+        ({"password": "가" * 33}, "password"),
+        ({"password": "😀" * 33}, "password"),
         ({"password": "x" * 129}, "password"),
         ({"passwordConfirm": "different"}, "passwordConfirm"),
         ({"passwordConfirm": ""}, "passwordConfirm"),
@@ -69,7 +83,46 @@ def test_signup_validation(client, overrides, field):
     if field == "passwordConfirm":
         assert error["details"][0]["message"] == "비밀번호가 일치하지 않습니다."
     if field == "password":
-        assert len(error["details"]) == 1
+        assert error["details"] == [{"field": "password", "message": "길이를 확인해 주세요."}]
+
+
+# 가입 비밀번호는 8~32자이고 문자(코드 포인트) 수로 센다.
+# 이모지 32자는 UTF-16 64자, UTF-8 128바이트다.
+@pytest.mark.parametrize("password", ["x" * 8, "x" * 32, "가" * 32, "😀" * 32])
+def test_signup_password_length_boundary(client, password):
+    response = signup(client, password=password, passwordConfirm=password)
+    assert response.status_code == 201, response.text
+    login = client.post(
+        "/api/auth/login", json={"email": "potato@example.com", "password": password}
+    )
+    assert login.status_code == 200
+
+
+# 로그인은 이전 규칙(8~128자)으로 가입한 계정을 위해 128자까지 받는다.
+@pytest.mark.parametrize("password", ["x" * 33, "가" * 64, "x" * 128, "😀" * 128])
+def test_login_accepts_legacy_long_password(client, db, password):
+    legacy_user(db, "legacy@example.com", password)
+    response = client.post(
+        "/api/auth/login", json={"email": "legacy@example.com", "password": password}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["user"]["email"] == "legacy@example.com"
+    assert client.get("/api/auth/me").status_code == 200
+    wrong = client.post(
+        "/api/auth/login", json={"email": "legacy@example.com", "password": password[:-1] + "!"}
+    )
+    assert wrong.status_code == 401
+
+
+@pytest.mark.parametrize("password", ["x" * 7, "x" * 129])
+def test_login_password_length_still_8_to_128(client, db, password):
+    response = client.post(
+        "/api/auth/login", json={"email": "legacy@example.com", "password": password}
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["details"] == [
+        {"field": "password", "message": "길이를 확인해 주세요."}
+    ]
 
 
 def test_login_replaces_session_and_same_failure(client, db):
