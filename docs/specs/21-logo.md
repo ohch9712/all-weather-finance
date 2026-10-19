@@ -135,3 +135,16 @@
 
 - 실제 브라우저 탭 줄과 iOS 홈 화면 추가 모습은 사람이 한 번 눈으로 보면 좋다.
 - PWA manifest, 소셜 공유 이미지(OG), 워드마크는 범위 밖이다.
+
+### 서비스 이름 변경
+
+- 브랜치 `feature/21-logo-fix-1`(develop 436c62f에서 만듦), 10절대로 두 곳만 바꿨다: `frontend/src/lib/site.ts`의 `APP_NAME = "올웨더 자산관리"`, `backend/app/main.py`의 FastAPI `title="올웨더 자산관리 API"`. `APP_DESCRIPTION`·저장소·폴더 이름은 그대로다.
+- 저장소에서 "금융 프로젝트"를 찾아보니(`git grep`, docs 제외) 위 두 파일뿐이었다. 테스트는 모두 `APP_NAME` 상수를 불러 단언하므로 고친 테스트가 없다.
+- 확인
+  - 백엔드 `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 1490개 통과. 프론트 `npm run lint`·`npx tsc --noEmit`·`npm run test`(54개 파일, 541개)·`npm run build` 통과.
+  - 슬롯 21 서버(백엔드 8021, 프론트 3021)와 독립 Chrome 컨텍스트(Playwright, 새 컨텍스트, `/api/market/connections/egress-ip` 가로채기와 localhost 밖 요청 차단 설치, 외부 요청 0건): 화면에서 가입한 새 계정으로 로그인해 확인했다.
+  - 브라우저 제목: `로그인 | 올웨더 자산관리`, `가입 | 올웨더 자산관리`, `개인정보 처리방침 | 올웨더 자산관리`, `홈 | 올웨더 자산관리`.
+  - 이름 표시: 로그인·가입·`/privacy` 머리(360·768·1280px), 사이드바(1280px), 모바일 메뉴 제목과 대화상자 접근 이름(360·768px), 메뉴 항목이 없는 `/onboarding`의 모바일 상단 바(360·768px)에 새 이름이 보이고, 글자가 상자 안에 들어가며(잘림 없음) 페이지 가로 넘침이 0이다. 사이드바는 기존 `truncate` 그대로이고 이름 폭(약 98px)이 칸보다 좁아 말줄임 없이 보인다.
+  - OpenAPI JSON(`/openapi.json`)의 `info.title`이 `올웨더 자산관리 API`다.
+- 스펙과 다른 점: 없다. 10절의 `/api/docs`는 이 앱에서 404이고 문서는 `/docs`·`/openapi.json`에 있어, 10절이 허용한 OpenAPI JSON `info.title`로 확인했다.
+- 남은 일: 없다. docs에 남은 "금융 프로젝트"(`roadmap.md`의 워크트리 경로, `00-master-plan.md`의 폴더 이름, `01-foundation.md` 12.1·이 문서의 옛 이름 기록)는 서비스 이름이 아니라 경로·폴더 이름이거나 변경 이력이라 그대로 뒀다.
