@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     application = FastAPI(
-        title="금융 프로젝트 API",
+        title="올웨더 자산관리 API",
         lifespan=lifespan,
         openapi_tags=[
             {"name": name}
