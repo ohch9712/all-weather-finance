@@ -1,11 +1,12 @@
 """공식 OpenAPI 1.2.24: https://openapi.tossinvest.com/openapi-docs/latest/openapi.json
-issueOAuth2Token, getAccounts, listStocks, getStocks, getPrices, getCandles, getHoldings.
-확인되지 않은 재무지표·개별 체결은 추측하지 않는다.
+issueOAuth2Token, getAccounts, listStocks, getStocks, getPrices, getCandles, getHoldings, getOrders.
+체결은 주문별 누적 결과를 한 건으로 가져오고, 확인되지 않은 재무지표는 추측하지 않는다.
 """
 
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from hashlib import sha256
 
 import httpx
 
@@ -13,6 +14,7 @@ from app.core.time import KST, now_utc
 from app.integrations.brokers.base import (
     BrokerHolding,
     Candle,
+    Execution,
     Fundamentals,
     HoldingsSnapshot,
     Quote,
@@ -25,7 +27,7 @@ from app.integrations.brokers.parsing import parsed_response
 from app.integrations.brokers.ratelimit import TokenBucket, request_with_retry
 
 # OpenAPI 1.2.24는 그룹명만 명시한다. 명시적 한도가 없는 그룹은 작업 계약의
-# 시세 15회·계좌 1회로 제한하며, AUTH/CHART는 5/20회를 사용한다.
+# 시세 15회·계좌(ORDER_HISTORY 포함) 1회로 제한하며, AUTH/CHART는 5/20회를 사용한다.
 BUCKETS = {
     name: TokenBucket(rate)
     for name, rate in {
@@ -36,6 +38,7 @@ BUCKETS = {
         "STOCK_ALL": 15,
         "ASSET": 1,
         "ACCOUNT": 1,
+        "ORDER_HISTORY": 1,
     }.items()
 }
 
@@ -51,7 +54,7 @@ class TossAccount:
 class TossBroker(UnsupportedBroker):
     provider = "toss"
     capabilities = frozenset(
-        {"STOCK_LIST", "ETF_LIST", "FUNDAMENTALS", "QUOTES", "CANDLES", "HOLDINGS"}
+        {"STOCK_LIST", "ETF_LIST", "FUNDAMENTALS", "QUOTES", "CANDLES", "HOLDINGS", "EXECUTIONS"}
     )
     base_url = "https://openapi.tossinvest.com"
 
@@ -272,3 +275,79 @@ class TossBroker(UnsupportedBroker):
             None,
             now_utc(),
         )
+
+    @parsed_response
+    def get_executions(self, start, end):
+        # OpenAPI 1.2.24 getOrders / OrderExecution / OrderStatus:
+        # https://openapi.tossinvest.com/openapi-docs/latest/openapi.json
+        # from/to는 orderedAt(KST) 기준이다. 개별 체결 대신 주문별 누적 체결을 쓴다.
+        # CLOSED만 페이지 조회하고 OPEN은 전량 조회한다. 중복 주문은 CLOSED가 우선이다.
+        period = {"from": start.isoformat(), "to": end.isoformat()}
+        orders = {}
+        params = {**period, "status": "CLOSED", "limit": 100}
+        seen = set()
+        while True:
+            page = self._get("/api/v1/orders", "ORDER_HISTORY", params, account=True)
+            for row in page["orders"]:
+                orders.setdefault(row["orderId"], row)
+            if not page["hasNext"]:
+                break
+            cursor = page["nextCursor"]
+            if not cursor or cursor in seen:
+                raise BrokerError("BROKER_UNAVAILABLE")
+            seen.add(cursor)
+            params = {**params, "cursor": cursor}
+        for row in self._get(
+            "/api/v1/orders", "ORDER_HISTORY", {**period, "status": "OPEN"}, account=True
+        )["orders"]:
+            orders.setdefault(row["orderId"], row)
+
+        filled = []
+        for order_id, row in orders.items():
+            if (
+                row["status"] in {"CANCEL_REJECTED", "REPLACE_REJECTED"}
+                or row["side"] not in {"BUY", "SELL"}
+                or row["currency"] not in {"KRW", "USD"}
+            ):
+                continue
+            execution = row["execution"]
+            quantity = dec(execution["filledQuantity"])
+            if quantity is None or quantity <= 0:
+                continue
+            price = dec(execution.get("averageFilledPrice"))
+            if price is None:
+                amount = dec(execution.get("filledAmount"))
+                if amount is None:
+                    continue
+                price = amount / quantity
+            filled.append((order_id, row, execution, quantity, price))
+
+        # getStocks: STOCK 그룹, symbols 최대 200개. 응답에 없는 종목도 체결은 남긴다.
+        symbols = list(dict.fromkeys(row["symbol"].strip() for _, row, _, _, _ in filled))
+        stocks = {}
+        for offset in range(0, len(symbols), 200):
+            for stock in self._get(
+                "/api/v1/stocks", "STOCK", {"symbols": ",".join(symbols[offset : offset + 200])}
+            ):
+                stocks[stock["symbol"]] = stock
+        result = []
+        for order_id, row, execution, quantity, price in filled:
+            code = row["symbol"].strip()
+            stock = stocks.get(code, {})
+            market = stock.get("market")
+            result.append(
+                Execution(
+                    sha256(order_id.encode()).hexdigest() if len(order_id) > 64 else order_id,
+                    datetime.fromisoformat(execution.get("filledAt") or row["orderedAt"]),
+                    code,
+                    stock.get("name", code),
+                    market if market in {"KOSPI", "KOSDAQ", "NYSE", "NASDAQ", "AMEX"} else "OTHER",
+                    row["side"].lower(),
+                    quantity,
+                    price,
+                    dec(execution.get("commission")),
+                    dec(execution.get("tax")),
+                    row["currency"],
+                )
+            )
+        return result
