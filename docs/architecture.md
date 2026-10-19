@@ -132,6 +132,7 @@ flowchart LR
     ├── package.json, package-lock.json, 설정 파일들, .env.example          [01b]
     ├── src/
     │   ├── app/layout.tsx, providers.tsx, globals.css, not-found.tsx     [01b]
+    │   ├── app/icon.svg, apple-icon.png, favicon.ico, public/brand/      [21]  로고·앱 아이콘(components/common/LogoMark.tsx 포함)
     │   ├── app/(auth)/                       [01b]  login, signup
     │   ├── app/(app)/layout.tsx              [01b]  앱 셸
     │   ├── app/(app)/page.tsx                [01b 자리표시 → 16]
