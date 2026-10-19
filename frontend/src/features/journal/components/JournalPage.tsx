@@ -10,6 +10,7 @@ import { Disclaimer } from "@/components/common/Disclaimer";
 import { useNotes, usePositions, useTrades } from "../hooks";
 import type { Filters } from "../types";
 import { tradeAmount } from "../utils";
+import { BrokerSyncButton, BrokerSyncResult, useBrokerSync } from "./BrokerSync";
 import { JournalMoney } from "./JournalMoney";
 import { JournalStats } from "./JournalStats";
 import { NoteDialog } from "./NoteDialog";
@@ -54,11 +55,13 @@ export function JournalPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [adding, setAdding] = useState(false);
+  const brokerSync = useBrokerSync();
   const tabs = { records: "기록", positions: "보유", stats: "통계", notes: "노트" };
   const requested = searchParams.get("tab") ?? "records";
   const tab = Object.hasOwn(tabs, requested) ? requested : "records";
   function select(key: string) { const params = new URLSearchParams(searchParams.toString()); params.set("tab", key); router.replace(`/journal?${params}`, { scroll: false }); }
-  return <div className="min-w-0 space-y-5"><PageHeader title="매매일지" description="매매를 기록하고, 이동평균법으로 성과를 돌아보세요. 통화별로 따로 계산해요." actions={<><Button variant="outline" asChild><Link href="/journal/import">파일로 가져오기</Link></Button><Button onClick={() => setAdding(true)}>매매 추가</Button></>} />
+  return <div className="min-w-0 space-y-5"><PageHeader title="매매일지" description="매매를 기록하고, 이동평균법으로 성과를 돌아보세요. 통화별로 따로 계산해요." actions={<><BrokerSyncButton sync={brokerSync} /><Button variant="outline" asChild><Link href="/journal/import">파일로 가져오기</Link></Button><Button onClick={() => setAdding(true)}>매매 추가</Button></>} />
+    <BrokerSyncResult outcome={brokerSync.outcome} />
     <div role="tablist" aria-label="매매일지 메뉴" className="grid grid-cols-4 gap-1 rounded-xl bg-muted p-1">{Object.entries(tabs).map(([key, label]) => <button role="tab" aria-selected={tab === key} aria-controls={`panel-${key}`} id={`tab-${key}`} key={key} onClick={() => select(key)} className={`rounded-lg px-2 py-2 text-sm ${tab === key ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"}`}>{label}</button>)}</div>
     <section role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="min-w-0">{tab === "records" ? <Records /> : tab === "positions" ? <Holdings /> : tab === "stats" ? <JournalStats /> : <Notes />}</section>
     <Disclaimer variant="investment" />{adding && <TradeDialog onClose={() => setAdding(false)} />}

@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { JournalPage } from "@/features/journal/components/JournalPage";
 import { TradeDetailPage } from "@/features/journal/components/TradeDetailPage";
 import { NoteDialog } from "@/features/journal/components/NoteDialog";
@@ -9,6 +9,9 @@ import { PnlCalendar } from "@/features/journal/components/JournalStats";
 import type { Note, Trade, TradeInput, TradeStats } from "@/features/journal/types";
 import { todayKst, tradeAmount } from "@/features/journal/utils";
 import { apiUrl, renderWithProviders, server } from "../utils";
+
+// 매매일지 머리의 "증권사 동기화" 버튼이 연결 목록을 미리 불러온다.
+beforeEach(() => { server.use(http.get(apiUrl("/api/market/connections"), () => HttpResponse.json({ items: [] }))); });
 
 const trade: Trade = {
   id: "a1e524ad-b1bf-47b3-9d2d-873f91af63fe", tradedOn: "2026-09-03", tradedTime: "10:32", market: "KRX", currency: "KRW",
