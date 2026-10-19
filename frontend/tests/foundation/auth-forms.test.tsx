@@ -14,7 +14,7 @@ describe("SignupForm", () => {
     const { user } = renderWithProviders(<SignupForm />, { auth: null });
     await user.click(screen.getByRole("button", { name: "가입하기" }));
     expect(await screen.findByText("올바른 이메일 형식이 아닙니다.")).toBeInTheDocument();
-    expect(screen.getByText("비밀번호는 8~128자로 입력해 주세요.")).toBeInTheDocument();
+    expect(screen.getByText("비밀번호는 8~32자로 입력해 주세요.")).toBeInTheDocument();
     expect(screen.getByText("비밀번호를 한 번 더 입력해 주세요.")).toBeInTheDocument();
     expect(fieldInput("이메일")).toHaveAttribute("aria-invalid", "true");
   });
@@ -25,7 +25,7 @@ describe("SignupForm", () => {
     await user.type(fieldInput("비밀번호"), "short");
     await user.type(fieldInput("비밀번호 확인"), "different");
     await user.click(screen.getByRole("button", { name: "가입하기" }));
-    expect(await screen.findByText("비밀번호는 8~128자로 입력해 주세요.")).toBeInTheDocument();
+    expect(await screen.findByText("비밀번호는 8~32자로 입력해 주세요.")).toBeInTheDocument();
     expect(screen.queryByText("비밀번호가 일치하지 않습니다.")).not.toBeInTheDocument();
   });
 

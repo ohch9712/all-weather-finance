@@ -5,7 +5,7 @@ import { z } from "zod";
 export const authMessages = {
   email: "올바른 이메일 형식이 아닙니다.",
   passwordRequired: "비밀번호를 입력해 주세요.",
-  password: "비밀번호는 8~128자로 입력해 주세요.",
+  password: "비밀번호는 8~32자로 입력해 주세요.",
   passwordMismatch: "비밀번호가 일치하지 않습니다.",
   passwordConfirmRequired: "비밀번호를 한 번 더 입력해 주세요.",
   ageConfirmRequired: "만 14세 이상만 가입할 수 있습니다.",
@@ -30,9 +30,14 @@ function isValidEmail(value: string): boolean {
   return length >= 1 && length <= 254 && EMAIL_PATTERN.test(trimmed);
 }
 
+// 가입 비밀번호는 8~32자다(2026-10-19 사용자 결정으로 8~128자에서 줄였다, 스펙 01 7.3).
+// 로그인은 이전 규칙으로 가입한 계정을 위해 길이를 검사하지 않고 빈 값만 막는다(서버는 8~128자를 받는다).
+const SIGNUP_PASSWORD_MIN_LENGTH = 8;
+const SIGNUP_PASSWORD_MAX_LENGTH = 32;
+
 function isValidPassword(value: string): boolean {
   const length = charLength(value);
-  return length >= 8 && length <= 128;
+  return length >= SIGNUP_PASSWORD_MIN_LENGTH && length <= SIGNUP_PASSWORD_MAX_LENGTH;
 }
 
 export const loginSchema = z.object({
