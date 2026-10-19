@@ -259,3 +259,28 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 - 실제 슬롯 13 서버를 Kiwoom 실전 provider 설정(실제 자격증명 없이)으로 실행해 연결 없는 목록·실행의 422와 정확한 필드 오류를 확인했다. Mock 설정으로 재기동해 샘플 목록 2개·실행 200을 확인했다. 독립 Playwright 세션에서 로그인하고 연결 안내·설정 링크 이동·Mock 샘플 표시를 확인했으며, 안내와 샘플 화면 모두 360px·1280px에서 문서 가로 넘침이 없었다. `/api/market/connections/egress-ip`는 브라우저에서 가짜 응답으로 가로챘고 실제 외부 API·LLM은 호출하지 않았다. 확인 후 `scripts/stop.sh`로 서버를 종료했다.
 - 스펙과 다른 점: 없음. 소유 경로만 수정했으며 공유 파일·의존성·마이그레이션은 변경하지 않았다.
 - 남은 일: 별도 검증 워커의 PR 검증과 코디네이터 병합.
+
+### 관심종목 범위 조건검색
+
+- 백엔드: `ScreenFilter`에 `universe`(`all`·`watchlist`, 기본 `all`)와 `watchlistGroup`(앞뒤 공백 제거 후 1~20자, 기본 null)을 더했다. `universe=all`에 그룹이 있으면 Pydantic 검증으로 `422`(`watchlistGroup`, "관심종목 범위에서만 그룹을 고를 수 있습니다.")다. `run_screen(db, filter, *, user_id=None)`은 관심종목 범위면 12의 공개 함수 `watchlist.service.list_items(db, user_id, group=...)`의 종목코드 안에서만 평가하고, `kinds`가 없으면 주식·ETF를 모두 본다. `user_id` 없이 관심종목 범위를 부르면 `field_error("universe", "관심종목 범위는 로그인한 사용자만 쓸 수 있습니다.")`다. `ScreenResult.universe_count`(`universeCount`)는 관심종목 범위면 범위 종목 수(그룹 반영, 없는 그룹은 0), 전체 범위와 키움 조건식 실행이면 null이다. 라우터는 `user_id=user.id`를 넘긴다.
+- 칩은 관심종목 범위면 맨 앞에 "관심종목" 또는 "관심종목: {그룹}"을 둔다. `get_filter_guide()`(시스템 프롬프트·챗봇 도구 설명에 그대로 들어감)에 4.2의 범위 문장, 그룹 이름 속 단어를 조건으로 해석하지 않는다는 문장, 관심종목 내용은 알려 주지 않는다는 문장, 범위별 `kinds=null` 뜻을 더했다. 자연어 해석은 사용자 문장만 LLM에 보내고 관심종목 목록은 보내지 않는다.
+- 챗봇 `screen_stocks`는 `run_screen(ctx.db, filter, user_id=ctx.user.id)`로 부른다. 관심종목 범위면 요약이 "관심종목 {universeCount}개 중 조건에 맞는 종목은 {total}개입니다."로 시작하고 기준일 문장이 뒤따른다. 도구 설명에 `universe`·`watchlistGroup` 필드 설명을 더했다.
+- URL 인코딩: `encode_filter`·`encodeFilter`는 두 필드를 포함해 직렬화한다. 범위 필드가 없는 예전 필터·저장한 검색(jsonb)·`?f=` 값은 기본값(`all`, null)으로 읽는다. `frontend/tests/screener/encoding.json` 공용 고정값을 관심종목 범위(한국어 그룹 이름) 사례로 바꾸고 예전 링크 사례(`legacy`: 예전 값 → 기본값이 붙은 정규형 → 다시 만든 값)를 더했다. 백엔드 테스트도 이 파일을 직접 읽어 프론트와 같은 문자열인지 확인한다.
+- 프론트: `ScopeSelector`(조건 칩 위 "검색 범위" 전체 종목/내 관심종목, 관심종목이면 "관심종목 그룹" 모든 그룹 + 내 그룹), `features/screener/api.ts`의 `listWatchlistGroups`(`GET /api/watchlist`의 `groups`), 결과 머리 "관심종목 {universeCount}개 중 {total}개", `universeCount` 0이면 결과 표 대신 안내("관심종목이 없습니다. 먼저 관심종목을 담아 주세요." 또는 그룹을 골랐으면 "이 그룹에 담긴 관심종목이 없습니다.")와 `/stocks/watchlist` 링크를 붙였다. 자연어 해석 결과·저장한 검색 불러오기·`?f=` 진입은 범위와 그룹을 그대로 선택에 반영한다. 마이그레이션은 없다.
+
+#### 스펙에 없어 정한 것
+
+- 그룹 목록 조회는 범위가 관심종목일 때만 하고, 쿼리 키를 `["watchlist", "screener-groups"]`로 둬 결과의 "관심종목 담기" 뒤 함께 다시 불러온다. 자연어 해석·링크로 들어온 그룹 이름이 내 그룹 목록에 없어도 선택지에 더해 선택 상태를 그대로 보여 준다(결과는 빈 범위 안내).
+- 범위를 바꾸면 그룹은 "모든 그룹"(null)으로 돌린다. 관심종목 범위의 "종류" 선택은 `kinds=null`을 "주식·ETF"로 보여 주고, "주식"을 고르면 `["stock"]`을 보낸다(전체 범위는 지금처럼 "주식"=null).
+- 화면에서 관심종목 범위면 범위 아래에 "관심종목 목록은 AI로 보내지 않아요" 안내를, 저장한 검색 목록 이름 옆에 "관심종목"/"관심종목: {그룹}" 표시를 붙였다. 안내 링크 문구는 "관심종목 화면으로 가기"다.
+- 챗봇 결과 `content`에 `universeCount`를 더했고, 관심종목 범위 카드 제목은 "관심종목 {universeCount}개 중 {total}개"다. 범위 종목이 0개면 요약 끝에 화면과 같은 안내 문장을 붙인다.
+- `universe` 값 자체가 잘못되면 그 오류만 돌려주고 그룹 검증 오류를 겹치지 않는다.
+
+#### 검사 결과
+
+- 백엔드 `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 전체 **1,504개** 통과(screener **45개**, chat **278개**). 추가한 테스트: 내 관심종목만 평가·다른 사용자 격리, 그룹(공백 제거)·없는 그룹 빈 범위, `kinds=None`이면 ETF 포함·`kinds` 지정, 조건·시장·정렬 동일 규칙, `universeCount`, 스냅샷 없음, 범위 검증 422(그룹만, all+그룹, 빈 그룹, 21자, 잘못된 universe), `user_id` 없이 422·기존 호출 유지, 칩, 해석의 범위·그룹(FakeStructuredLLM)과 503, 시스템 프롬프트 범위 규칙과 관심종목 코드·이름 미전송, 예전 저장 검색(키 없는 jsonb)·범위가 든 저장 검색, 공용 인코딩 고정값·예전 링크, 챗봇 `screen_stocks`의 `user_id` 전달·사용자별 범위·요약·카드·빈 관심종목.
+- 프론트 `npm run lint`·`npx tsc --noEmit` 통과, `npm run test` 전체 **546개** 통과(screener **18개**), `npm run build` 성공. 추가한 테스트: 범위·그룹 선택과 요청 본문, "관심종목 N개 중 M개", 해석 결과 반영, 관심종목 없음·빈 그룹 안내와 링크, 범위가 든 `?f=` 진입과 저장·불러오기, 공용 인코딩·예전 링크·잘못된 범위 거부. 결과 머리와 종류 표시를 일부러 깨뜨리면 해당 테스트가 실패하는 것도 확인했다.
+- 슬롯 13 실제 서버(`seed-mock` 90종목, LLM general 꺼짐)에서 API 계약을 curl로 대조했다: 범위·그룹·없는 그룹·조건 결과, `universeCount`, 전체 범위 null, 다른 사용자 격리, 422 필드 오류, 401. 독립 Playwright Chrome 컨텍스트에서 UI로 로그인해 관심종목 5개(기본 3·반도체 2)로 전체 범위 80개 / 내 관심종목 5개 중 5개(ETF 배지 포함) / 반도체 2개 중 2개 / 기본+주식 3개 중 2개, 저장·불러오기, `?f=` 진입, 관심종목 없는 새 사용자의 안내·링크 이동, 없는 그룹 링크 안내를 확인했고 360·768·1280px에서 문서 가로 넘침이 없었다. pageerror·콘솔 오류는 없었다(로그인 전 `/api/auth/me` 401만 있음).
+- 자연어 흐름은 실제 Gemini 대신 `screener.parse`를 FakeStructuredLLM으로 바꾼 같은 백엔드(저장소 밖 임시 실행 스크립트, 포트 8013)로 확인했다: "반도체 그룹 관심종목 중 PER 30 이하" → 서버 칩 "관심종목: 반도체"·"PER > 0배"·"PER ≤ 30배", 범위·그룹 선택 반영, "관심종목 2개 중 2개". LLM에 간 내용은 문장 하나였고 관심종목 코드·이름은 없었다. `/api/market/connections/egress-ip`는 브라우저에서 가짜 응답으로 가로챘다. 확인 후 `scripts/stop.sh`와 임시 프로세스 종료로 서버를 모두 멈췄다.
+- 스펙과 다른 점: 없음. 소유 경로만 고쳤고 공유 파일·의존성·마이그레이션은 바꾸지 않았다.
+- 남은 일: 별도 검증 워커의 PR 검증과 코디네이터 병합. 실제 Gemini로 범위 문장 해석 품질은 확인하지 않았다.
