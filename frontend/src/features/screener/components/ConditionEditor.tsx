@@ -10,9 +10,26 @@ import {
   type ScreenFilter,
 } from "../types";
 import { conditionLabel, filterSchema } from "../utils";
+import { ScopeSelector } from "./ScopeSelector";
 
 const selectClass =
   "h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm";
+type KindOption = "stock" | "etf" | "all";
+// kinds가 없으면 전체 범위는 주식만, 관심종목 범위는 주식·ETF 모두다(4.0).
+function kindOption(filter: ScreenFilter): KindOption {
+  if (!filter.kinds) return filter.universe === "watchlist" ? "all" : "stock";
+  if (filter.kinds.length === 2) return "all";
+  return filter.kinds[0];
+}
+function kindsFor(
+  option: KindOption,
+  filter: ScreenFilter,
+): ScreenFilter["kinds"] {
+  const watchlist = filter.universe === "watchlist";
+  if (option === "etf") return ["etf"];
+  if (option === "all") return watchlist ? null : ["stock", "etf"];
+  return watchlist ? ["stock"] : null;
+}
 function Editor({
   condition,
   onSave,
@@ -109,28 +126,18 @@ export function ConditionEditor({
   const [editing, setEditing] = useState<number | null>(null);
   return (
     <div className="space-y-4">
+      <ScopeSelector filter={filter} onChange={onChange} />
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
         <label className="min-w-0 space-y-1 text-sm">
           종류
           <select
             aria-label="종류"
             className={selectClass}
-            value={
-              filter.kinds?.includes("etf")
-                ? filter.kinds.length === 2
-                  ? "all"
-                  : "etf"
-                : "stock"
-            }
+            value={kindOption(filter)}
             onChange={(event) =>
               onChange({
                 ...filter,
-                kinds:
-                  event.target.value === "all"
-                    ? ["stock", "etf"]
-                    : event.target.value === "etf"
-                      ? ["etf"]
-                      : null,
+                kinds: kindsFor(event.target.value as KindOption, filter),
               })
             }
           >
@@ -191,6 +198,13 @@ export function ConditionEditor({
         />
       </label>
       <div className="flex flex-wrap gap-2" aria-label="조건 칩">
+        {filter.universe === "watchlist" && (
+          <span className="max-w-full break-all rounded-full border px-3 py-1 text-sm">
+            {filter.watchlistGroup
+              ? `관심종목: ${filter.watchlistGroup}`
+              : "관심종목"}
+          </span>
+        )}
         {filter.kinds?.includes("etf") && (
           <span className="rounded-full border px-3 py-1 text-sm">
             {filter.kinds.length === 2 ? "주식·ETF" : "ETF"}

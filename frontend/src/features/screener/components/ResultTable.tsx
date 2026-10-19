@@ -108,7 +108,11 @@ export function ResultTable({
       aria-busy={isPending}
     >
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <strong>{result.total}개 종목</strong>
+        <strong>
+          {result.universeCount != null
+            ? `관심종목 ${result.universeCount}개 중 ${result.total}개`
+            : `${result.total}개 종목`}
+        </strong>
         <span>기준일 {result.asOf ?? "없음"}</span>
         {result.source === "mock" && <SampleDataBadge />}
       </div>
