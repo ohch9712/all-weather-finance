@@ -116,3 +116,49 @@ def sync_holdings(db, user_id, connection_id: UUID) -> HoldingSyncResult
 5. 출력·로그·응답에 비밀값·계좌번호·금액이 없다.
 6. crontab 일정과 README, 처리방침 5조 문장이 스펙과 같다.
 7. 소유 경로 밖 변경 없음, 실제 외부 호출 없음.
+
+## 구현 결과
+
+### 구현한 것
+
+- `market_0003`에 `auto_sync`(기본 false), 마지막 실행 시각·결과·첫 오류 코드와 상태 CHECK를 추가했다. 연결 응답에 같은 정보를 노출하고, 엄격한 불리언 한 필드만 받는 `PATCH /api/market/connections/{id}`를 추가했다. 샘플 연결은 422, 남의 연결·없는 연결은 404, 미인증은 401이며 끌 때 마지막 결과와 저장 자격증명은 보존한다.
+- `jobs auto-sync [--today YYYY-MM-DD]`는 켜진 키움·토스 연결을 생성 순서로 읽고, capabilities에 있는 잔고 → 체결 단계를 공개 서비스로 실행한다. 단계 실패 뒤 롤백하고 다음 단계·연결을 계속하며, 연결별 commit으로 `ok`·`partial`·`failed`와 첫 실패 코드를 저장한다. 연결 확인 상태는 바꾸지 않는다. 출력은 스펙의 연결별 한 줄과 합계이며 예외 로그에는 종류 이름만 기록한다. 개별 실패는 종료 0, 배치 자체 실패는 종료 1이다.
+- journal의 `sync_connection_trades`는 기존 `sync_trades`에 `SyncInput`을 전달하는 공개 래퍼다. 기존 검증·중복 판정·갱신·commit 로직은 변경하지 않았다. 배치의 다른 모듈 import는 함수 안에서 수행한다.
+- 키움·토스 카드에 서버 값으로 제어하는 자동 동기화 스위치, 일정·토스 토큰 안내, KST 마지막 실행 결과와 오류 안내를 추가했다. 요청 중 비활성화하고 성공 시 목록을 무효화하며 실패는 해당 카드에 표시한다. 샘플 카드에는 스위치가 없다.
+- 평일 20:30 crontab 한 줄과 README 7절 배치 설명, 개인정보 처리방침 5조 문장을 추가했다. 스펙 19와 화면의 5조가 달라 발생하던 privacy 기존 테스트 2건도 본문 수정으로 통과한다(테스트 원문은 변경하지 않음).
+
+### 세부 선택과 스펙 차이
+
+- 스펙과 다른 점과 의존성 추가는 없다. 연결 목록은 `(created_at, id)`로 정렬해 같은 생성 시각에도 순서를 고정한다. 대상은 ORM 객체 대신 식별값으로 읽어 단계별 commit·rollback 뒤에도 유지한다.
+- `autoSync`만 허용하고 공통 CamelModel의 Python 필드명 입력 허용을 이 요청에서 끈다. 문자열·숫자·null과 `auto_sync`도 422로 거른다.
+- capabilities가 빈 연결은 실행 단계가 없으므로 `ok`다. 공급자 어댑터는 수정하지 않았다. 이 브랜치의 토스 어댑터에는 `EXECUTIONS`가 없어 실제 서버 확인에서는 잔고만 수행하며, 체결 기능이 추가되면 같은 배치가 그 기능도 수행한다.
+
+### 실행한 검증
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh`, `uv run alembic upgrade heads` | 슬롯 20(8020·3020, `finance_20`) 준비 및 새 revision 적용 성공 |
+| `cd backend && uv run ruff check .` | 통과 |
+| `cd backend && uv run ruff format --check .` | 309개 파일 통과 |
+| `cd backend && uv run pytest` | 1,485개 통과(새 `test_auto_sync.py` 22개 포함), 기존 Starlette/httpx 사용 중단 경고 1개 |
+| 별도 빈 DB `finance_20_impl_verify`의 `upgrade heads` → `downgrade base` → `upgrade heads` | 모두 성공, 확인 뒤 DB 삭제 |
+| `cd frontend && npm run lint`, `npx tsc --noEmit` | 모두 통과 |
+| `cd frontend && npm run test` | 51개 파일·519개 통과(새 자동 동기화 7개 포함) |
+| `cd frontend && npm run build` | 통과 |
+| crontab 확인 | 로컬에 supercronic 없음. 백엔드 `test_cron_schedule`로 일정 한 줄을 정확히 단언하고 5개 일정 필드·`TZ=Asia/Seoul`·명령 경로를 수동 확인 |
+| `git diff --check`, `git diff --name-only develop...HEAD` | 통과, 변경 경로 모두 3절 소유 범위 |
+
+- 백엔드 테스트는 DB 기본값·CHECK, 연결 응답, 켜기·끄기·422·401·404와 사용자 격리, 대상 제외·순서·7일 기간, 성공·일부 실패·전체 실패·첫 오류, 예상 못 한 예외, 롤백, 다음 단계·연결 계속 실행, capabilities에 따른 단계 선택, 연결 확인 상태 보존, 배치 자체 종료 1과 안전한 출력·로그를 확인한다. 공개 래퍼의 삽입·갱신·변화 없음과 수동 API의 동일 결과, 실제 서비스로 같은 배치를 두 번 실행한 뒤 자산·체결 중복 없음과 다른 사용자 데이터 보존을 검증한다. 외부 HTTP 차단 공통 픽스처와 가짜 클라이언트를 사용한다.
+- 프론트 MSW 테스트는 키움·토스만 스위치 표시, 안내 문장, 정확한 PATCH 본문, 목록 재조회, 요청 중 비활성, 켜진 값·꺼진 값 각각 실패 시 서버 값 유지와 카드 오류, 마지막 결과 세 종류·KST 시각·오류 문구를 확인한다.
+- 실제 서버는 슬롯 20의 프론트와 저장소 밖 임시 실행기 백엔드로 확인했다. 백엔드 실행기 프로세스 전체를 respx(`assert_all_mocked=True`)로 감싸 키움 토큰·잔고·체결과 토스 토큰·계좌·잔고 응답을 고정했다. 같은 프로세스에서 `jobs.main(["auto-sync", "--today", "2026-10-19"])`를 실행했으며 실제 증권사·LLM·IP 조회 서비스는 호출하지 않았다.
+  - 독립 Playwright 세션으로 가입·인증하고 화면에서 키움 연결을 생성해 켰다. 미확인 상태 실행은 `failed BROKER_NOT_CONNECTED`이고 카드에 실패가 보였다.
+  - 화면에서 연결 확인 후 정상으로 바꾸고, 토스 연결도 화면에서 계좌 불러오기·저장·연결 확인·스위치 켜기를 수행했다. 배치는 두 연결 `ok`, 자산 화면에 잔고 2건과 매매일지에 키움 체결 1건이 반영됐다. 같은 기간 재실행 후에도 2건·1건으로 유지됐다.
+  - 키움 잔고 응답만 403으로 바꾸면 키움 `partial BROKER_IP_NOT_ALLOWED`·토스 `ok`, 키움 두 단계 모두 403이면 키움 `failed`·토스 `ok`였다. 카드의 일부 실패·실패·성공과 IP 오류 안내를 확인했다.
+  - 화면에서 두 연결을 끈 뒤 마지막 결과 보존을 확인했고 재실행 합계는 `total=0`이었다. 검증용 사용자는 삭제했다.
+  - `/settings/connections` 진입 전에 egress-ip 요청을 브라우저 가짜 응답으로 가로챘다. 360·768·1280px에서 `document.documentElement.scrollWidth === innerWidth`를 확인하고 360·1280px 캡처를 시각 검토했다.
+  - 임시 서버 로그에 가짜 키·시크릿·계좌·토큰 원문이 없음을 확인했다. 임시 백엔드와 브라우저를 종료하고 `scripts/stop.sh`로 슬롯 서버를 정리했다. 다른 슬롯 서버는 건드리지 않았다.
+
+### 남은 일
+
+- 코디네이터의 별도 검증과 PR 병합.
+- 토스 체결 어댑터는 별도 작업 `feature/08-market-fix-5`의 범위다. 이 작업에서는 capabilities에 따라 건너뛴다.
