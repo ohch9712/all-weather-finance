@@ -60,6 +60,7 @@
 
 - 언제 쓰는지, 무엇을 돌려주는지, 쓰지 말아야 할 때를 한국어로 적는다.
 - `screen_stocks` 설명에는 `screener.get_filter_guide()`의 내용을 그대로 붙인다(필드·단위·용어 기준). 모델이 필터를 직접 만든다.
+- `screen_stocks`는 `screener.run_screen(ctx.db, filter, user_id=ctx.user.id)`로 부른다(13 4.0 관심종목 범위, 2026-10-19). 관심종목 범위면 요약을 "관심종목 {universeCount}개 중 조건에 맞는 종목은 {total}개입니다."로 시작한다.
 - `add_to_watchlist`는 "사용자가 담아 달라고 분명히 말했을 때만" 쓴다고 적는다.
 - `estimate_gift_tax`·`plan_gifts`·`compare_estate_plans`는 결과가 참고용 추정이라고 적는다. `compare_estate_plans`는 사전 채움 재산이 없으면 오류 대신 "자산배분에 자산을 입력하거나 상속·증여 화면에서 재산을 입력해 주세요" 상태를 돌려준다.
 - `get_recommendation`은 "왜 이렇게 추천했어", "뭐부터 해야 해" 같은 질문에 쓴다고 적는다. 결과 `content`에는 방향·이유 문장을 그대로 담는다(모델이 새 수치를 만들지 않게).

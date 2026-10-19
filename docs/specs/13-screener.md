@@ -63,7 +63,20 @@ class ScreenFilter(CamelModel):
     limit: int = 30                           # 1~100
 ```
 
-### 4.1 필드와 단위
+### 4.0 검색 범위: 내 관심종목 (2026-10-19 사용자 요청)
+
+`ScreenFilter`에 두 필드를 더한다(기본값이 있어 예전 필터·저장한 검색·`?f=` 주소는 그대로 전체 종목 검색이다).
+
+```python
+    universe: Literal["all", "watchlist"] = "all"   # watchlist면 내 관심종목(12) 안에서만 찾는다
+    watchlist_group: str | None = None              # universe=watchlist일 때만. 앞뒤 공백 제거 후 1~20자. None이면 모든 그룹
+```
+
+- `universe="all"`인데 `watchlistGroup`이 있으면 `422`(`field_error("watchlistGroup", "관심종목 범위에서만 그룹을 고를 수 있습니다.")`, Pydantic 검증).
+- 범위 종목: `watchlist.service.list_items(db, user_id, group=watchlist_group)`의 종목코드(12의 공개 함수). 없는 그룹 이름이면 빈 범위다(오류 아님).
+- 관심종목 범위에서 `kinds`가 `None`이면 주식·ETF를 모두 본다(전체 범위의 "None이면 주식만" 규칙은 관심종목에 담은 ETF를 빼 버리므로 적용하지 않는다). `kinds`를 지정하면 그대로 따른다. 시장·업종·조건·정렬·limit 규칙은 같다.
+- 관심종목 내용(종목 목록)은 LLM에 보내지 않는다. 자연어 해석은 범위 지정 여부와 사용자가 말한 그룹 이름만 필터로 만든다.
+
 
 | 필드 | 뜻 | 단위 | 계산 |
 | --- | --- | --- | --- |
@@ -83,6 +96,8 @@ class ScreenFilter(CamelModel):
 - 평가는 `market.service.list_snapshot_rows()`가 주는 최신일 전 종목 목록(국내 약 2,500개 이하)을 파이썬에서 거른다. 먼저 `kinds`(없으면 `["stock"]`)와 `markets`·`sectors`로 거른 뒤 조건을 적용한다. 정렬 기본값은 `marketCap desc`. 정렬 필드 값이 null인 종목은 방향과 상관없이 맨 뒤에 두고, 같은 값끼리는 `code` 오름차순이다.
 
 ### 4.2 용어 기준표 (`get_filter_guide()`가 돌려주는 고정 문자열의 내용)
+
+- 범위(2026-10-19 추가): "내 관심종목 중"·"관심종목에서"·"관심종목 안에서" → `universe: "watchlist"`. "배당주 그룹 관심종목 중"처럼 그룹 이름을 말하면 `watchlistGroup`에 그 이름 그대로. 범위를 말하지 않으면 `universe: "all"`, `watchlistGroup: null`.
 
 | 표현 | 필터 |
 | --- | --- |
@@ -124,13 +139,14 @@ class ScreenFilter(CamelModel):
   "chips": [ { "label": "코스피" }, { "label": "시가총액 ≥ 10조원" }, { "label": "0 < PER ≤ 10" } ] }
 ```
 
-- `chips`는 서버가 필터에서 만든 표시용 문자열이다(LLM이 만들지 않는다). `kinds`가 `["etf"]`면 "ETF", `["stock", "etf"]`면 "주식·ETF" 칩을 맨 앞에 둔다(주식만이면 칩 없음).
+- `chips`는 서버가 필터에서 만든 표시용 문자열이다(LLM이 만들지 않는다). `kinds`가 `["etf"]`면 "ETF", `["stock", "etf"]`면 "주식·ETF" 칩을 맨 앞에 둔다(주식만이면 칩 없음). `universe=watchlist`면 그보다 앞에 "관심종목"(그룹이 있으면 "관심종목: {그룹}") 칩을 둔다.
 - 출력이 `ScreenFilter` 검증을 통과하지 못하면 `503 LLM_UNAVAILABLE`("조건을 이해하지 못했어요. 조금 다르게 말해 주세요."). 거절은 `422 LLM_REFUSED`, LLM 꺼짐 `503`.
 
 ## 6. 실행 `POST /api/screener/run`
 
 - 요청 `{"filter": ScreenFilter}`
-- 응답 `200`
+- `run_screen(db, data.filter, user_id=user.id)`로 부른다. `universe=watchlist`면 4.0절 범위 종목 안에서만 평가한다.
+- 응답 `200`. 응답에 `"universeCount": int | null`을 더한다: 관심종목 범위면 범위 종목 수(그룹 반영, 0 가능), 전체 범위면 `null`. 범위 종목 중 스냅샷에 없는 코드는 결과에 나오지 않고 따로 세지 않는다.
 
 ```json
 { "asOf": "2026-10-16", "source": "mock", "total": 7, "excludedForMissingData": 2,
@@ -159,19 +175,23 @@ class ScreenFilter(CamelModel):
 ```python
 # app/modules/screener/service.py
 def parse_query(llm: StructuredLLM, query: str) -> ParsedScreen
-def run_screen(db, screen_filter: ScreenFilter) -> ScreenResult
+def run_screen(db, screen_filter: ScreenFilter, *, user_id: UUID | None = None) -> ScreenResult
+    # user_id는 universe=watchlist일 때 필요하다(2026-10-19 추가, 기존 호출은 그대로 동작). 없으면 AppError(422, field "universe", "관심종목 범위는 로그인한 사용자만 쓸 수 있습니다.")
 def get_filter_guide() -> str              # 4.1·4.2 내용을 담은 고정 문자열(15의 도구 설명에 쓴다)
 def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 규칙
 ```
 
-- URL 인코딩 규칙: `ScreenFilter`를 camelCase JSON(키 정렬, 공백 없음)으로 직렬화 → UTF-8 → base64url(패딩 `=` 제거). 화면은 `/stocks/screener?f=<값>`을 열면 그 필터로 바로 실행한다. 프론트에도 같은 `encodeFilter`/`decodeFilter`를 둔다.
+- URL 인코딩 규칙: `ScreenFilter`(4.0의 `universe`·`watchlistGroup` 포함)를 camelCase JSON(키 정렬, 공백 없음)으로 직렬화 → UTF-8 → base64url(패딩 `=` 제거). 화면은 `/stocks/screener?f=<값>`을 열면 그 필터로 바로 실행한다. 프론트에도 같은 `encodeFilter`/`decodeFilter`를 둔다.
 
 ## 9. 화면 명세 (`/stocks/screener`)
 
 - 상단 AI 입력창: "원하는 조건을 말해 보세요", 예시 버튼 4개("코스피 중형주 중 PER 10 이하", "거래대금 많은 코스닥 종목", "ROE 15% 이상 저PBR", "오늘 3% 넘게 오른 종목"). LLM 꺼짐이면 입력창 대신 "직접 조건 추가"만. 입력창 옆에 `AiProviderBadge scope="general" compact`, 아래에 "조건 문장은 AI 공급자로 전송돼요. 개인정보는 적지 마세요." 안내.
 - 해석 결과: 설명 한 문단, 조건 칩(눌러서 필드·연산자·값 수정, 삭제, "조건 추가"), `unsupported` 경고 상자.
 - "검색" → 결과 표(정렬 가능한 열: 종목명, 시장, 현재가, 등락률, 시가총액, PER, PBR, ROE), 행의 "관심종목 담기"(12 API, 409면 "이미 있어요"), 종목명은 `/stocks/[code]` 링크, `kind=etf` 행에는 "ETF" 배지, null 지표는 "—", 기준일·`SampleDataBadge`, 지표 없는 종목 제외 수.
-- 저장한 검색 목록(불러오기·삭제), "이 조건 저장".
+- 저장한 검색 목록(불러오기·삭제), "이 조건 저장". 저장한 필터에는 검색 범위도 들어간다.
+- 검색 범위(4.0, 2026-10-19): 조건 칩 위에 "검색 범위" 선택 "전체 종목" / "내 관심종목"(기본 전체). "내 관심종목"이면 그룹 선택("모든 그룹" + 내 그룹 목록, 12의 `GET /api/watchlist` 응답 `groups`를 `features/screener/api.ts`에서 부른다)을 보여 준다. 자연어 해석 결과의 `universe`·`watchlistGroup`도 이 선택에 반영된다. 칩 맨 앞에 "관심종목" 또는 "관심종목: {그룹}" 칩(서버 `chips`).
+  - 결과 머리: 관심종목 범위면 "관심종목 {universeCount}개 중 {total}개"(전체 범위는 지금 문구 그대로).
+  - `universeCount`가 0이면 결과 표 대신 "관심종목이 없습니다. 먼저 관심종목을 담아 주세요."와 `/stocks/watchlist` 링크(그룹을 골랐으면 "이 그룹에 담긴 관심종목이 없습니다.").
 - "내 키움 조건식" 탭: 연결 선택, 조건식 목록, 실행 결과 표. 선택지는 사용자의 `active` 키움 연결만 보여 주고, 연결이 있으면 첫 연결을 기본으로 고른다. 연결이 없으면 `connectionId` 없이 목록을 요청해 `200`(Mock)이면 "샘플 조건식"으로 보여 주고, `422`면 "내 키움 증권사 연결이 필요합니다. 키움 HTS에서 만든 내 조건식만 실행할 수 있습니다."와 `/settings/connections` 링크를 보여 준다. "운영자 데이터" 선택지는 없앤다.
 - `?f=`가 있으면 그 필터를 칩으로 보여 주고 바로 실행.
 - `Disclaimer variant="investment"`.
@@ -187,10 +207,12 @@ def encode_filter(screen_filter: ScreenFilter) -> str   # 화면 URL용, 아래 
 - 저장 CRUD·20개 제한·이름 중복, 키움 조건식(Mock 2개, 미지원 501), `encode_filter` 왕복
 - 키움 조건식 운영자 키 보호: 운영자 클라이언트가 Kiwoom(가짜 클라이언트·respx)일 때 `connectionId` 없는 목록·실행이 422이고 운영자 클라이언트의 조건식 API를 부르지 않음, Mock이면 샘플 2개, 사용자 연결이 있으면 그 연결로 실행
 - 사용자 격리 404
+- 관심종목 범위(4.0): 내 관심종목만 평가(다른 사용자 관심종목이 섞이지 않음), 그룹 지정·없는 그룹 빈 범위, `kinds=None`이면 관심종목의 ETF 포함, `universeCount`, `universe=all`+`watchlistGroup` 422, `user_id` 없이 watchlist 422, 기본값 없는 예전 필터·저장한 검색·`encode_filter` 하위 호환, 해석 결과의 `universe`·`watchlistGroup`(FakeStructuredLLM)과 칩, 시스템 프롬프트에 범위 규칙이 들어가고 관심종목 목록은 LLM에 가지 않음, 챗봇 `screen_stocks` 도구가 관심종목 범위를 사용자 기준으로 실행
 
 ### 프론트
 
 - 자연어 → 칩 → 수정 → 실행 흐름(MSW), `?f=` 진입, 정렬, 관심종목 담기 409 처리, 키움 탭
+- 검색 범위 선택·그룹 선택과 요청 본문, 해석 결과 범위 반영, "관심종목 N개 중 M개", 관심종목 없음 안내와 링크, 범위가 든 `?f=` 진입과 저장·불러오기, 360px
 
 ## 11. 완료 기준
 

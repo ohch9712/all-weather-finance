@@ -228,7 +228,7 @@ Base URL(dev)은 `http://localhost:<백엔드 포트>`. 응답 예시는 필드 
 ### 7.3 `POST /api/auth/signup`
 
 - 요청: `{"email": "Potato@Example.com", "password": "gamja1234", "passwordConfirm": "gamja1234"}`
-- 검증: `email`은 이메일 형식, `password` 8~128자, `passwordConfirm`은 `password`와 완전히 같은 문자열(다르면 `details: [{"field": "passwordConfirm", "message": "비밀번호가 일치하지 않습니다."}]`, `password`가 규칙을 어기면 불일치 검사는 하지 않는다).
+- 검증: `email`은 이메일 형식, `password` 8~32자(2026-10-19 사용자 결정으로 8~128자에서 줄였다. 문자 수는 코드 포인트 기준. 로그인 7.4와 회원 탈퇴(19)의 비밀번호 확인은 이미 가입한 계정을 위해 지금처럼 8~128자를 받는다), `passwordConfirm`은 `password`와 완전히 같은 문자열(다르면 `details: [{"field": "passwordConfirm", "message": "비밀번호가 일치하지 않습니다."}]`, `password`가 규칙을 어기면 불일치 검사는 하지 않는다).
 - 성공 `201` + `Set-Cookie: finance_session=...` + 본문 `AuthPayload`
 - 실패: `409 EMAIL_ALREADY_EXISTS`("이미 가입된 이메일입니다."), `422 VALIDATION_ERROR`
 
@@ -472,7 +472,7 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 
 ### 12.2 `/login`, `/signup`
 
-- gamja-market 폼 구성을 따른다. 가입 폼: 이메일, 비밀번호, 비밀번호 확인. 클라이언트 검증은 7.3과 같은 규칙(zod).
+- gamja-market 폼 구성을 따른다. 가입 폼: 이메일, 비밀번호, 비밀번호 확인. 클라이언트 검증은 7.3과 같은 규칙(zod). 비밀번호 칸 안내 "8~32자로 입력해 주세요.", 오류 "비밀번호는 8~32자로 입력해 주세요."(2026-10-19). 가입 카드 설명은 "가입 시 바로 로그인되고, 출생연도를 입력하는 화면으로 이어져요."(2026-10-19, '가입하면' → '가입 시'). 로그인 폼은 비밀번호 길이를 검사하지 않는다(지금처럼 빈 값만).
 - 서버 에러 `details`를 해당 필드 아래에 보여 주고, 필드 없는 에러는 폼 위 `Alert`로 보여 준다.
 - 이미 로그인 상태로 접근하면 `/`로 보낸다.
 
