@@ -4,7 +4,7 @@ import { expect, it, vi } from "vitest";
 import { JournalImportPage } from "@/features/journal/components/JournalImportPage";
 import { JournalPage } from "@/features/journal/components/JournalPage";
 import type { ImportJob } from "@/features/imports";
-import { apiUrl, createTestQueryClient, errorResponse, renderWithProviders, server } from "../utils";
+import { apiUrl, createTestQueryClient, renderWithProviders, server } from "../utils";
 
 function setup(provider = "mock") {
   server.use(
@@ -40,12 +40,18 @@ it("추정 비용이 있는 동기화 결과에만 비용 안내를 보여 준�
   expect(screen.getByRole("link", { name: "수수료·세금 설정" })).toHaveAttribute("href", "/settings/trading-costs");
 });
 
-it("토스 미지원 오류를 안내한다", async () => {
-  setup("toss"); server.use(http.post(apiUrl("/api/journal/sync"), () => errorResponse(501, "BROKER_NOT_SUPPORTED", "미지원")));
+it("토스 연결 선택 시 주문 단위와 평균 체결가·시간외 종가 제외를 안내하고 불러온다", async () => {
+  setup("toss"); server.use(http.post(apiUrl("/api/journal/sync"), () => HttpResponse.json({ inserted: 1, updated: 0, unchanged: 0, skippedDuplicates: 0, costEstimated: 0, from: "2026-09-01", to: "2026-10-16", syncedAt: "2026-10-16T00:00:00Z" })));
   const { user } = renderWithProviders(<JournalImportPage />);
+  const notice = "토스증권은 주문 하나를 한 건으로 가져옵니다. 여러 번에 나눠 체결된 주문은 평균 체결가로 합치고, 시간외 종가 주문은 토스가 제공하지 않아 빠집니다.";
+  expect(screen.queryByText(notice)).not.toBeInTheDocument();
   await user.selectOptions(await screen.findByLabelText("증권사 연결"), "conn-1");
+  expect(screen.getByText(notice)).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "불러오기" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("토스증권은 개별 체결 조회를 지원하지 않아요");
+  expect(await screen.findByText("삽입 1건 · 갱신 0건 · 변화 없음 0건 · 건너뜀 0건")).toBeInTheDocument();
+  expect(screen.queryByText(/증권사가 수수료·세금을 주지 않아/)).not.toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("증권사 연결"), "");
+  expect(screen.queryByText(notice)).not.toBeInTheDocument();
 });
 
 it("파일 위저드 저장 후에도 매매일지 캐시를 갱신한다", async () => {

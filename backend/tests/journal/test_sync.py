@@ -8,10 +8,11 @@ from uuid import UUID
 
 import httpx
 import pytest
+import respx
 from sqlalchemy import select
 
 from app.core.errors import AppError
-from app.integrations.brokers import kiwoom
+from app.integrations.brokers import kiwoom, toss
 from app.integrations.brokers.errors import BrokerError
 from app.integrations.brokers.mock import MockBroker
 from app.modules.journal import service
@@ -401,3 +402,108 @@ def test_quotes_formula_disabled_missing_and_failure(auth_client, monkeypatch):
     monkeypatch.setattr(market, "get_quotes", failed)
     item = auth_client.get("/api/journal/positions").json()["items"][0]
     assert item["unrealizedPnl"] is None and item["costBasis"] == "20100"
+
+
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_toss_partial_order_sync_updates_same_trade(
+    auth_client, other_auth_client, respx_mock, monkeypatch
+):
+    # 로컬 API만 통과시키고 토스 요청은 전부 고정 응답으로 처리한다.
+    respx_mock.route(host="testserver").pass_through()
+    for bucket in toss.BUCKETS.values():
+        monkeypatch.setattr(bucket, "acquire", lambda: None)
+    respx_mock.post("https://openapi.tossinvest.com/oauth2/token").respond(
+        200, json={"access_token": "test-token", "expires_in": 86400}
+    )
+    respx_mock.get("https://openapi.tossinvest.com/api/v1/holdings").respond(
+        200, json={"result": {"items": []}}
+    )
+    row = {
+        "orderId": "partial-order",
+        "symbol": "AAPL",
+        "currency": "USD",
+        "side": "BUY",
+        "status": "PARTIAL_FILLED",
+        "orderedAt": "2026-10-01T23:00:00+09:00",
+        "execution": {
+            "filledQuantity": "1.25",
+            "averageFilledPrice": "200.25",
+            "filledAmount": "250.3125",
+            "commission": "0.5",
+            "tax": "0",
+            "filledAt": "2026-10-01T23:00:05+09:00",
+        },
+    }
+
+    def orders(request):
+        assert request.headers["X-Tossinvest-Account"] == "42"
+        rows = [row] if request.url.params["status"] == "OPEN" else []
+        return httpx.Response(200, json={"result": {"orders": rows, "hasNext": False}})
+
+    respx_mock.get("https://openapi.tossinvest.com/api/v1/orders").mock(side_effect=orders)
+    respx_mock.get("https://openapi.tossinvest.com/api/v1/stocks").respond(
+        200, json={"result": [{"symbol": "AAPL", "name": "애플", "market": "NASDAQ"}]}
+    )
+    response = auth_client.post(
+        "/api/market/connections",
+        json={
+            "provider": "toss",
+            "environment": "real",
+            "label": "토스 테스트",
+            "appKey": "fake",
+            "appSecret": "fake",
+            "accountNo": "42",
+        },
+    )
+    assert response.status_code == 201, response.text
+    cid = response.json()["id"]
+    assert (
+        auth_client.post(f"/api/market/connections/{cid}/verify", json={}).json()["status"]
+        == "active"
+    )
+    first = sync(auth_client, cid)
+    assert first.status_code == 200, first.text
+    assert (first.json()["inserted"], first.json()["costEstimated"]) == (1, 0)
+    trade = auth_client.get("/api/journal/trades").json()["items"][0]
+    assert (trade["source"], trade["broker"], trade["market"], trade["currency"]) == (
+        "toss",
+        "toss",
+        "US",
+        "USD",
+    )
+    assert (
+        trade["quantity"],
+        trade["price"],
+        trade["fee"],
+        trade["tax"],
+        trade["costEstimated"],
+    ) == ("1.25", "200.25", "0.50", "0.00", False)
+    row["execution"].update(
+        {
+            "filledQuantity": "3.5",
+            "averageFilledPrice": "201.5",
+            "filledAmount": "705.25",
+            "commission": "1.4",
+            "tax": "0.1",
+            "filledAt": "2026-10-02T00:10:00+09:00",
+        }
+    )
+    result = sync(auth_client, cid).json()
+    assert (
+        result["inserted"],
+        result["updated"],
+        result["unchanged"],
+        result["costEstimated"],
+    ) == (0, 1, 0, 0)
+    trades = auth_client.get("/api/journal/trades").json()["items"]
+    assert len(trades) == 1 and trades[0]["id"] == trade["id"]
+    assert (
+        trades[0]["quantity"],
+        trades[0]["price"],
+        trades[0]["fee"],
+        trades[0]["tax"],
+        trades[0]["costEstimated"],
+    ) == ("3.5", "201.50", "1.40", "0.10", False)
+    third = sync(auth_client, cid).json()
+    assert (third["inserted"], third["updated"], third["unchanged"]) == (0, 0, 1)
+    assert sync(other_auth_client, cid).status_code == 404
