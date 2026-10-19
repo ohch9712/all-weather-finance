@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Menu } from "lucide-react";
+import { LogoMark } from "@/components/common/LogoMark";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { APP_NAME } from "@/lib/site";
@@ -19,7 +20,10 @@ export function MobileNav() {
       </SheetTrigger>
       <SheetContent side="left" className="w-72 max-w-[85vw] gap-0 bg-sidebar p-0">
         <SheetHeader className="h-14 justify-center border-b px-5 py-0">
-          <SheetTitle>{APP_NAME}</SheetTitle>
+          <SheetTitle className="flex items-center gap-2">
+            <LogoMark />
+            {APP_NAME}
+          </SheetTitle>
           <SheetDescription className="sr-only">주 메뉴</SheetDescription>
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-4">
