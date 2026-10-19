@@ -128,7 +128,7 @@ def import_trades(db, user_id, rows: list[TradeImportRow], *, source: str, batch
 
 - `/journal/import`: 두 영역
   - "파일로 가져오기": `ImportWizard kind="journal_trades"`. 증권사 앱·HTS의 거래내역 내보내기 안내.
-  - "증권사에서 불러오기": 연결 선택(활성 연결만, 없으면 `/settings/connections` 안내. 연결 목록은 08의 `GET /api/market/connections`를 `features/journal/api.ts`에서 부른다), 기간(기본 최근 30일, 최대 90일), "불러오기" → 결과 요약(삽입·갱신·변화 없음·건너뜀), 연결별 마지막 동기화 시각. 토스 연결은 `501`이면 "토스증권은 개별 체결 조회를 지원하지 않아요" 안내. 수수료·세금을 추정한 행이 있으면(동기화 응답 `costEstimated > 0`) "증권사가 수수료·세금을 주지 않아 기본 요율로 추정했어요"와 `/settings/trading-costs` 링크. 0이면 안내하지 않는다.
+  - "증권사에서 불러오기": 연결 선택(활성 연결만, 없으면 `/settings/connections` 안내. 연결 목록은 08의 `GET /api/market/connections`를 `features/journal/api.ts`에서 부른다), 기간(기본 최근 30일, 최대 90일), "불러오기" → 결과 요약(삽입·갱신·변화 없음·건너뜀), 연결별 마지막 동기화 시각. 토스 연결을 고르면 "토스증권은 주문 하나를 한 건으로 가져옵니다. 여러 번에 나눠 체결된 주문은 평균 체결가로 합치고, 시간외 종가 주문은 토스가 제공하지 않아 빠집니다."를 보여 준다(2026-10-19 갱신, 08 4.4절 주문 단위 체결. 토스 전용 `501` 안내는 지운다. 그 밖의 `501`은 기존 오류 안내). 수수료·세금을 추정한 행이 있으면(동기화 응답 `costEstimated > 0`) "증권사가 수수료·세금을 주지 않아 기본 요율로 추정했어요"와 `/settings/trading-costs` 링크. 0이면 안내하지 않는다.
   - 저장 후 매매일지 쿼리(목록·보유·통계)를 무효화한다(10의 캐시 미갱신 지적과 같은 문제를 피한다).
 - `/journal` 보유 탭: 현재가, 평가금액, 평가손익(색 규칙), 수익률 열 추가. `quoteSource=mock`이면 `SampleDataBadge`. 시세가 없으면 "-".
 - 기록 탭: `source=mock` 거래에 "샘플" 배지(Mock 연결 동기화 결과).

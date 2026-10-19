@@ -36,7 +36,7 @@
 | 고정 IP | 백엔드·배치가 밖으로 나갈 때 쓰는 IP = VPS 고정 공인 IPv4. README에 앱의 증권사 연결 화면(나가는 IP 표시)과 `curl -4 https://ifconfig.me`로 확인하는 방법, 키움·토스 포털 등록 방법을 적는다 |
 | DB | Postgres 17, 볼륨, 호스트 포트를 열지 않는다. 앱 계정과 마이그레이션 계정은 `DATABASE_URL`·`MIGRATION_DATABASE_URL`로 넣는다 |
 | 마이그레이션 | `migrate` 서비스가 `uv run alembic upgrade heads`를 한 번 실행하고 끝난다. `backend`·`cron`은 `depends_on: migrate: condition: service_completed_successfully` |
-| 배치(KST) | 평일 16:30 `python -m app.modules.market.jobs refresh-snapshot --resume`, 매주 월 08:00 `... refresh-stocks`, 매일 04:00 `... prune-snapshots --keep-days 30`, 매시 05분 `python -m app.modules.imports.jobs purge-expired`. 실패(종료 코드 ≠ 0)는 로그에 남기고 다음 일정은 그대로 돈다 |
+| 배치(KST) | 평일 16:30 `python -m app.modules.market.jobs refresh-snapshot --resume`, 매주 월 08:00 `... refresh-stocks`, 매일 04:00 `... prune-snapshots --keep-days 30`, 매시 05분 `python -m app.modules.imports.jobs purge-expired`. 평일 20:30 `python -m app.modules.market.jobs auto-sync`(20이 추가, 2026-10-19). 실패(종료 코드 ≠ 0)는 로그에 남기고 다음 일정은 그대로 돈다 |
 | 만료 임포트 정리 | 지금은 사용자가 다시 접근할 때만 그 사용자의 만료 작업을 지운다. 업로드 원문 행(개인 데이터)이 남지 않도록 `imports.jobs purge-expired`(새 파일)가 `expires_at <= now_utc()`인 `import_jobs`를 모두 지우고 지운 건수만 출력한다 |
 | CSP | `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`. Next.js가 넣는 인라인 스크립트 때문에 `script-src`에 `'unsafe-inline'`을 둔다(nonce 방식은 범위 밖). 학습 글의 Markdown 이미지가 외부 https라서 `img-src https:`를 둔다. 리허설에서 핵심 화면과 학습 영상 글을 열어 CSP 위반이 콘솔에 없어야 한다 |
 | 관리자 | 배포 후 `python -m app.modules.auth.cli make-admin <email>`, 학습 시드 `python -m app.modules.learn.seed` |

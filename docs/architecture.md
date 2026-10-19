@@ -116,10 +116,10 @@ flowchart LR
 │   │       ├── allocation/                   [02, 14]
 │   │       ├── ledger/                       [03, 10]
 │   │       ├── imports/                      [04]
-│   │       ├── journal/                      [05, 05b, 11]
+│   │       ├── journal/                      [05, 05b, 11, 20(공개 함수 하나)]
 │   │       ├── estate/                       [06]
 │   │       ├── learn/                        [07]
-│   │       ├── market/                       [08]
+│   │       ├── market/                       [08, 20]
 │   │       ├── chat/                         [09, 15]
 │   │       ├── watchlist/                    [12]
 │   │       ├── screener/                     [13]
@@ -141,7 +141,7 @@ flowchart LR
     │   ├── app/(app)/journal/                [05, 05b, 11]
     │   ├── app/(app)/estate/                 [06]
     │   ├── app/(app)/learn/, admin/learn/    [07]
-    │   ├── app/(app)/settings/connections/   [08, 17]
+    │   ├── app/(app)/settings/connections/   [08, 17, 20]
     │   ├── app/(app)/settings/trading-costs/ [05b]
     │   ├── app/(app)/chat/                   [09, 15]
     │   ├── app/(app)/stocks/watchlist/, stocks/[code]/   [12]
@@ -322,6 +322,7 @@ features/<module>/
 | `screener_0001` | screener | 13 | saved_screens |
 | `allocation_0002` | allocation | 14 | holdings 컬럼 추가, source CHECK에 `mock` 추가 |
 | `connectors_0001` | connectors | 17 | connector_accounts, connector_syncs |
+| `market_0003` | market | 20 | broker_connections 자동 동기화 컬럼 |
 
 ## 8. 모듈 간 서비스 함수 (공개 인터페이스)
 
@@ -342,6 +343,7 @@ def get_asset_breakdown(db, user_id) -> AssetBreakdown            # 배분 대�
 def get_situation(db, user_id) -> SituationEnvelope               # 저장된 상황(없으면 situation=None). 16이 사용
 def list_goals(db, user_id) -> GoalList                           # 재무 목표 목록. 16이 사용
 def upsert_synced_holdings(db, user_id, *, source: str, connection_id: UUID, items: list[SyncedHolding]) -> HoldingSyncResult   # 14가 추가. flush까지(commit은 호출자)
+def sync_holdings(db, user_id, connection_id: UUID) -> HoldingSyncResult   # 14. POST /api/allocation/holdings/sync와 같다. commit까지. 20의 배치가 사용
 
 # app/modules/ledger/service.py  (03, 10)
 def get_monthly_summary(db, user_id, month: date) -> MonthlySummary   # month는 그 달 1일
@@ -355,11 +357,12 @@ def list_import_kinds() -> list[ImportKind]
 # app/modules/imports/service.py  (04)
 def create_job_from_table(db, user_id, *, kind_key: str, file_name: str, header: list[str], rows: list[list[str]]) -> ImportJobView   # 10의 PDF 추출이 사용
 
-# app/modules/journal/service.py  (05, 05b, 11)
+# app/modules/journal/service.py  (05, 05b, 11, 20)
 def get_positions(db, user_id, *, include_closed: bool = False, with_quotes: bool = False) -> list[Position]   # with_quotes는 11이 추가
 def get_trade_stats(db, user_id, start: date | None = None, end: date | None = None) -> TradeStats
 def import_trades(db, user_id, rows: list[TradeImportRow], *, source: str, batch_id: UUID | None = None) -> ImportResult   # 11이 추가
 def estimate_trade_costs(db, user_id, *, market, side, quantity: Decimal, price: Decimal, is_etf: bool = False) -> TradeCosts   # 05b가 추가. 사용자 요율로 수수료·세금 추정
+def sync_connection_trades(db, user_id, connection_id: UUID, start: date, end: date) -> SyncResult   # 20이 추가. POST /api/journal/sync와 같은 규칙·commit. 20의 배치가 사용
 
 # app/modules/estate/service.py  (06)
 def calc_gift_tax(req: GiftTaxInput) -> GiftTaxResult                  # 순수 함수

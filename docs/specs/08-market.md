@@ -89,7 +89,7 @@ class BrokerClient(Protocol):
 
 ### 4.1 호출 한도 (`ratelimit.py`)
 
-- 토큰 버킷. 그룹별 초당 한도. 키움은 그룹 하나 초당 4회(공식 한도를 확인하면 그 값으로 바꾸고 출처를 주석에 남긴다). 토스는 `AUTH` 5, `MARKET_DATA` 15, `MARKET_DATA_CHART` 20, `ACCOUNT` 1, `ORDER_INFO` 6(09:00~09:10 KST는 3).
+- 토큰 버킷. 그룹별 초당 한도. 키움은 그룹 하나 초당 4회(공식 한도를 확인하면 그 값으로 바꾸고 출처를 주석에 남긴다). 토스는 `AUTH` 5, `MARKET_DATA` 15, `MARKET_DATA_CHART` 20, `ACCOUNT` 1, `ORDER_INFO` 6(09:00~09:10 KST는 3). 주문 조회 `ORDER_HISTORY`는 공식 명세에 수치가 없어 계좌 계열과 같이 초당 1회로 둔다(2026-10-19 코디네이터 추가).
 - `429`면 `Retry-After`를 따르고 최대 3번 지수 백오프 후 `BROKER_RATE_LIMITED`.
 
 ### 4.2 MockBroker (`mock.py`)
@@ -136,6 +136,14 @@ class BrokerClient(Protocol):
 - 토스 어댑터는 조건검색(`CONDITIONS`)을 지원하지 않는다.
 - 계좌 목록: `GET /api/v1/accounts`(공식 명세 1.2.24 `getAccounts`, 계좌 헤더 없이 토큰만). 응답 `result[]`의 `accountNo`·`accountSeq`(정수)·`accountType`. 종합매매(`BROKERAGE`) 계좌만 온다. `TossBroker.list_accounts()`로 둔다(`BrokerClient` 프로토콜에는 넣지 않는다). `accountNo` 원문은 어댑터 밖으로 끝 4자리만 내보낸다.
 - 토큰 무효화: 토스는 같은 client로 토큰을 다시 받으면 이전 토큰이 무효가 된다(공식 OAuth2 안내). 연결 클라이언트는 프로세스 안에서 캐시되므로(`_make_client`), 다른 클라이언트가 같은 키로 토큰을 받으면 캐시된 토큰이 401이 된다. 캐시한 토큰으로 보낸 요청이 401이면 토큰을 버리고 한 번만 새로 받아 같은 요청을 다시 보낸다. 새로 받은 토큰으로도 401이면 지금처럼 `BROKER_AUTH_FAILED`다(2026-10-19 코디네이터 추가).
+- 체결(주문 단위, 2026-10-19 사용자 결정): 토스는 개별 체결 목록을 주지 않고 주문마다 누적 체결 결과(`execution`)를 준다. **주문 하나를 `Execution` 하나로** 만든다. 처음 구현 때 "주문 누적값으로 체결을 만들지 않는다"고 정했던 것을 사용자 결정으로 바꾼다. `capabilities`에 `EXECUTIONS`를 더한다.
+  - 호출: `GET /api/v1/orders`(공식 명세 1.2.24 `getOrders`, 계좌 헤더, 한도 그룹 `ORDER_HISTORY`)를 `status=CLOSED`(`limit=100`, `hasNext`가 false가 될 때까지 `nextCursor`를 `cursor`로)와 `status=OPEN`(전량 반환, `limit`·`cursor` 무시)으로 부른다. 둘 다 `from=start`, `to=end`(주문 생성일 `orderedAt` KST 기준)다. 같은 커서가 다시 오면 `BROKER_UNAVAILABLE`로 멈춘다. 주문 상세(`GET /api/v1/orders/{orderId}`)는 부르지 않는다(목록 행에 같은 `execution`이 있다).
+  - 포함: `execution.filledQuantity > 0`인 주문만. `status`가 `CANCEL_REJECTED`·`REPLACE_REJECTED`인 행은 취소·정정 요청이 거부된 기록(명세: 별도 레코드로 생기고 원주문은 이전 상태로 돌아간다)이므로 건너뛴다. `side`가 `BUY`·`SELL`이 아니거나 `currency`가 `KRW`·`USD`가 아니면 건너뛴다(명세가 알 수 없는 enum 값을 허용하라고 한다). 같은 `orderId`가 OPEN과 CLOSED에 함께 오면 CLOSED 행을 쓴다.
+  - 매핑: `external_id` = `orderId`(64자를 넘으면 `orderId`의 sha256 hex 64자. 매매일지 `trades.external_id`가 64자다), `executed_at` = `execution.filledAt`(최종 체결 시각, 오프셋 포함 ISO 8601. 없으면 `orderedAt`), `code` = `symbol`(앞뒤 공백 제거), `side` = `buy`·`sell`, `quantity` = `filledQuantity`, `price` = `averageFilledPrice`(없으면 `filledAmount ÷ filledQuantity`, 둘 다 없으면 건너뜀), `fee` = `commission`, `tax` = `tax`(값이 없으면 `None`이고 11이 요율로 추정한다), `currency` = `currency`. 금액·수량은 문자열 decimal 그대로 `Decimal`로 읽는다(반올림하지 않는다).
+  - 종목명·시장: 주문 행에 종목명이 없으므로 `GET /api/v1/stocks?symbols=`(`getStocks`, 한도 그룹 `STOCK`, 한 번에 최대 200개)로 받은 `name`·`market`을 쓴다. `market`은 `KOSPI`·`KOSDAQ`·`NYSE`·`NASDAQ`·`AMEX`면 그대로, `KR_ETC`·`US_ETC`·그 밖은 `OTHER`(11이 통화로 `KRX`·`US`를 정한다). 종목 정보가 오지 않은 심볼은 `name=symbol`, `market="OTHER"`다.
+  - 부분 체결 중인 주문(OPEN의 `PARTIAL_FILLED`)은 지금까지 체결된 수량·평균가·비용으로 넣는다. 다음 동기화에서 같은 `external_id`라 11의 갱신 규칙으로 수량·단가·비용이 바뀐다.
+  - 정정된 원주문(`REPLACED`)은 정정 전에 체결된 수량을 갖는다(명세 status 설명). 정정으로 생긴 새 주문은 별도 `orderId`로 따로 들어온다. 새 주문의 `execution`이 원주문 체결을 포함하는지는 명세에 없으므로 실제 응답으로 확인할 때까지 각각 넣는다(구현 결과에 남은 확인 사항으로 적는다).
+  - 범위 제한(명세): 장후시간외 종가·장전시간외 종가처럼 Open API로 주문할 수 없는 호가 유형의 주문은 토스가 목록·상세 어디에도 내려 주지 않는다. 이런 주문은 매매일지에 들어오지 않는다.
 - 주문 생성·정정·취소 경로는 호출하지 않는다(코드에 경로 문자열도 두지 않는다).
 
 ## 5. DB 스키마 (revision `market_0001`, `branch_labels=("market",)`)
@@ -289,6 +297,7 @@ class SnapshotSet:
 - API: 검색 순서, 상세(시세 실패 시 `quote: null`), 시세 50개 제한, 캔들 기간 제한, 연결 CRUD·검증 성공/실패, Mock 연결(개발 허용·운영 422), 응답에 원문 키 없음, 남의 연결 404
 - 토스 계좌 불러오기: respx로 토큰·`/api/v1/accounts` 고정, 응답에 `accountNo` 원문 없음(끝 4자리만), 키를 DB에 저장하지 않음·로그에 없음, 앱키·시크릿 빈 값 422, 403 → `BROKER_IP_NOT_ALLOWED`·401 → `BROKER_AUTH_FAILED`, 계좌 없음 빈 목록, 미인증 401
 - 토스 토큰 무효화: 캐시 토큰 401 → 한 번 재발급 후 성공, 재발급 토큰도 401이면 `BROKER_AUTH_FAILED`(재시도 한 번뿐)
+- 토스 체결(주문 단위): `status=CLOSED` 여러 페이지(`cursor`)와 `status=OPEN` 요청의 쿼리·계좌 헤더, 같은 커서 반복 시 멈춤, `filledQuantity=0`·`CANCEL_REJECTED`·`REPLACE_REJECTED`·알 수 없는 `side`·`currency` 제외, OPEN·CLOSED 중복 `orderId`는 CLOSED, 평균가 없을 때 `filledAmount ÷ filledQuantity`, `commission`·`tax` 그대로·없으면 None, 64자 초과 `orderId`의 sha256 ID, `getStocks` 200개씩 나눠 이름·시장 매핑과 못 받은 심볼 대체값, `filledAt` 없을 때 `orderedAt`, 국내(KRW)·미국(USD) 주문. 매매일지 동기화(`POST /api/journal/sync`)로 부분 체결 주문을 넣은 뒤 체결이 늘어난 응답으로 다시 부르면 같은 행이 `updated`로 바뀌고 새 행이 생기지 않음
 - 키움 `kt00009` 거래소 구분: 요청 본문 `dmst_stex_tp="%"`, KRX·빈 값 행의 `external_id` 형식 유지, NXT·SOR 행의 `:NXT`·`:SOR` 접미사, 같은 `ord_no`·`cntr_no`가 KRX와 NXT에 함께 있어도 두 건으로 남음, 종목코드 접두어·`_NX`·`_AL` 접미사 제거
 - 실제 외부 호출이 없음(respx `assert_all_mocked`)
 

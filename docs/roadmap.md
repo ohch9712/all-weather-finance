@@ -37,6 +37,7 @@ flowchart LR
   end
   T18[18 배포]
   T19[19 개인정보 처리방침·탈퇴]
+  T20[20 증권사 자동 동기화]
   W1 --> W2
   T03 --> T10
   T04 --> T10
@@ -58,6 +59,7 @@ flowchart LR
   T14 --> T17
   W4 --> T18
   T18 --> T19
+  T18 & T19 --> T20
 ```
 
 - 기본은 웨이브 단위로 진행한다. 앞 웨이브의 PR이 모두 병합되고 **웨이브 통합 검증**을 통과한 뒤 다음 웨이브를 시작한다.
@@ -90,6 +92,7 @@ flowchart LR
 | 17 | `feature/17-connectors` | `17-connectors.md` | codex | 10, 14 |
 | 18 | `feature/18-deploy` | `18-deploy.md` | codex | 전체, 호스팅 결정 |
 | 19 | `feature/19-privacy` | `19-privacy.md` | claude | 18 |
+| 20 | `feature/20-auto-sync` | `20-auto-sync.md` | codex | 08, 11, 14, 18, 19 |
 
 - 구현 워커는 모델을 지정하지 않는다(사용자 기본값). **검증은 모든 작업이 codex `gpt-6.1-sol` / effort `xhigh`**다.
 - 슬롯(포트·DB)은 브랜치 번호다(architecture 2.2). 01a·01b는 같은 `01`이지만 01b는 백엔드를 띄우지 않으므로 충돌하지 않는다(01b의 프론트 포트는 3001, 01a의 백엔드 포트는 8001).
