@@ -23,4 +23,5 @@ export const getCostEstimate = (data: CostEstimateInput) => apiFetch<CostEstimat
 
 export const getConnections = () => apiFetch<{ items: BrokerConnection[] }>("/api/market/connections");
 export const getSyncStatus = () => apiFetch<{ items: SyncStatusItem[] }>("/api/journal/sync/status");
-export const syncTrades = (data: SyncInput) => apiFetch<SyncResult>("/api/journal/sync", { method: "POST", body: JSON.stringify(data) });
+// 키움은 하루·매수/매도마다 한 번씩 초당 4회로 불러 30일이면 15초가 넘으므로 기본 10초 대신 120초를 기다린다(스펙 11 9절).
+export const syncTrades = (data: SyncInput) => apiFetch<SyncResult>("/api/journal/sync", { method: "POST", body: JSON.stringify(data), timeoutMs: 120_000 });

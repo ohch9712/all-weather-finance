@@ -1,12 +1,15 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { TradingCostsPage } from "@/features/journal/components/TradingCostsPage";
 import { TradeDialog } from "@/features/journal/components/TradeDialog";
 import { JournalPage } from "@/features/journal/components/JournalPage";
 import { TradeDetailPage } from "@/features/journal/components/TradeDetailPage";
 import type { CostSettings, Trade } from "@/features/journal/types";
 import { apiUrl, renderWithProviders, server } from "../utils";
+
+// 매매일지 머리의 "증권사 동기화" 버튼이 연결 목록을 미리 불러온다.
+beforeEach(() => { server.use(http.get(apiUrl("/api/market/connections"), () => HttpResponse.json({ items: [] }))); });
 
 const defaults: CostSettings = { krxCommissionRate: "0.015", krxSellTaxRate: "0.20", usCommissionRate: "0.25", isDefault: true, updatedAt: null };
 const trade: Trade = {

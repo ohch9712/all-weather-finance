@@ -17,7 +17,7 @@ import { ImportWizard } from "@/features/imports";
 import { getErrorMessage } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/format";
 import { useConnections, useSyncStatus, useSyncTrades } from "../hooks";
-import { todayKst } from "../utils";
+import { shiftDate, todayKst } from "../utils";
 import type { SyncResult } from "../types";
 
 const schema = z.object({ connectionId: z.string().min(1, "연결을 선택해 주세요."), from: z.string().min(1, "시작일을 선택해 주세요."), to: z.string().min(1, "종료일을 선택해 주세요.") }).superRefine((value, ctx) => {
@@ -25,7 +25,7 @@ const schema = z.object({ connectionId: z.string().min(1, "연결을 선택해 �
   if (!Number.isFinite(days) || days < 0 || days >= 90) ctx.addIssue({ code: "custom", path: ["from"], message: "조회 기간은 최대 90일로 선택해 주세요." });
   if (value.to > todayKst()) ctx.addIssue({ code: "custom", path: ["to"], message: "종료일은 오늘까지 선택해 주세요." });
 });
-function recentStart() { const date = new Date(`${todayKst()}T00:00:00Z`); date.setUTCDate(date.getUTCDate() - 29); return date.toISOString().slice(0, 10); }
+const recentStart = () => shiftDate(todayKst(), -29);
 
 export function JournalImportPage() {
   const connections = useConnections(); const status = useSyncStatus(); const sync = useSyncTrades();
