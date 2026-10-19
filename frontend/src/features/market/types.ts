@@ -7,6 +7,10 @@ export interface Connection {
   appKeyMasked: string | null;
   accountNoMasked: string | null;
   status: "unverified" | "active" | "error";
+  autoSync: boolean;
+  lastAutoSyncAt: string | null;
+  lastAutoSyncStatus: "ok" | "partial" | "failed" | null;
+  lastAutoSyncErrorCode: string | null;
   lastVerifiedAt: string | null;
   lastErrorCode: string | null;
   createdAt: string;

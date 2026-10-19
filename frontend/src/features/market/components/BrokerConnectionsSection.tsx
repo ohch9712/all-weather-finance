@@ -15,6 +15,7 @@ import { getErrorMessage } from "@/lib/api-client";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { brokerErrors } from "../errors";
 import { useConnectionActions, useConnections, useEgressIp, useSnapshotStatus } from "../hooks";
+import { AutoSyncSetting } from "./AutoSyncSetting";
 import { ConnectionForm } from "./ConnectionForm";
 
 const providers = { kiwoom: "키움증권", toss: "토스증권", mock: "샘플 증권사" };
@@ -99,6 +100,7 @@ export function BrokerConnectionsSection({ allowMock = false }: { allowMock?: bo
               <p className="break-all">계좌 {connection.accountNoMasked ?? "미입력"}</p>
               <p>마지막 확인 {connection.lastVerifiedAt ? formatDateTime(connection.lastVerifiedAt) : "아직 확인하지 않음"}</p>
               {connection.lastErrorCode && <p role="alert" className="break-keep text-destructive">{brokerErrors[connection.lastErrorCode] ?? "연결을 다시 확인해 주세요."}</p>}
+              {connection.provider !== "mock" && <AutoSyncSetting connection={connection} />}
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" disabled={busy} onClick={() => void verify(connection.id)}>{actions.verify.isPending && actions.verify.variables === connection.id ? "확인 중…" : "연결 확인"}</Button>
                 <ConfirmDialog title="증권사 연결을 삭제할까요?" description={`${connection.label} 연결과 저장한 자격증명을 삭제합니다.`} confirmLabel="연결 삭제" destructive trigger={<Button variant="ghost" disabled={busy}>삭제</Button>} onConfirm={() => remove(connection.id)} />

@@ -10,6 +10,7 @@ type User = ReturnType<typeof renderWithProviders>["user"];
 const initial: Connection = {
   id: "48ff6f66-e047-4dc3-a696-d9baaa433708", provider: "mock", environment: "mock", label: "샘플 계좌",
   appKeyMasked: "****1234", accountNoMasked: "****5678", status: "unverified",
+  autoSync: false, lastAutoSyncAt: null, lastAutoSyncStatus: null, lastAutoSyncErrorCode: null,
   lastVerifiedAt: null, lastErrorCode: null, createdAt: "2026-10-16T03:00:00Z",
 };
 
