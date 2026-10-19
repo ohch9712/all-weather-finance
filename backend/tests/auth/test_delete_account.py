@@ -9,8 +9,9 @@ from sqlalchemy import func, insert, select
 import app.db.models  # noqa: F401  모든 모듈의 테이블을 메타데이터에 올린다.
 from app.core.config import get_settings
 from app.core.crypto import encrypt_str
+from app.core.security import hash_password
 from app.db.base import Base
-from app.modules.auth.models import User
+from app.modules.auth.models import User, UserProfile
 from app.modules.auth.service import make_admin
 from tests.auth.conftest import CODEF_DELETE_URL, codef_response
 
@@ -325,6 +326,26 @@ def test_wrong_or_missing_password_is_422(auth_client, db, body, caplog):
     assert "set-cookie" not in response.headers
     if body.get("password"):
         assert body["password"] not in response.text + caplog.text
+
+
+@pytest.mark.parametrize("password", ["x" * 33, "가" * 64, "x" * 128, "😀" * 128])
+def test_legacy_long_password_can_delete(client, db, password):
+    # 가입은 8~32자로 줄었지만(스펙 01 7.3) 이전 규칙(8~128자)으로 가입한 계정도 탈퇴할 수 있다.
+    user = User(email="legacy@example.com", password_hash=hash_password(password))
+    db.add(user)
+    db.flush()
+    db.add(UserProfile(user_id=user.id))
+    db.commit()
+    login = client.post(
+        "/api/auth/login", json={"email": "legacy@example.com", "password": password}
+    )
+    assert login.status_code == 200, login.text
+    assert delete_me(client, {"password": password[:-1] + "!"}).status_code == 422
+    response = delete_me(client, {"password": password})
+    assert response.status_code == 204
+    db.expire_all()
+    assert db.get(User, user.id) is None
+    assert client.get("/api/auth/me").status_code == 401
 
 
 def test_password_must_be_string_and_json(auth_client):

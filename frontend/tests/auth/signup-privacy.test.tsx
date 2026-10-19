@@ -46,7 +46,7 @@ describe("가입 화면 만 14세 확인", () => {
 
   it("제출 버튼 위에 처리방침 안내와 새 창 링크가 있다", () => {
     renderWithProviders(<SignupForm />, { auth: null });
-    const notice = screen.getByText((_, element) => element?.tagName === "P" && element.textContent === "가입하면 개인정보 처리방침에 따라 개인정보가 처리됩니다.");
+    const notice = screen.getByText((_, element) => element?.tagName === "P" && element.textContent === "가입 시 개인정보 처리방침에 따라 개인정보가 처리됩니다.");
     const link = within(notice).getByRole("link", { name: "개인정보 처리방침" });
     expect(link).toHaveAttribute("href", "/privacy");
     expect(link).toHaveAttribute("target", "_blank");

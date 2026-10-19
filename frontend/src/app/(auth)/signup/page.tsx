@@ -12,7 +12,7 @@ export default function SignupPage() {
         <CardTitle>
           <h1 className="text-lg">가입하기</h1>
         </CardTitle>
-        <CardDescription>가입하면 바로 로그인되고, 출생연도를 입력하는 화면으로 이어져요.</CardDescription>
+        <CardDescription>가입 시 바로 로그인되고, 출생연도를 입력하는 화면으로 이어져요.</CardDescription>
       </CardHeader>
       <CardContent>
         <SignupForm />

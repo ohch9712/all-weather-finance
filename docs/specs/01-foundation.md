@@ -705,3 +705,34 @@ architecture 12.1절의 메뉴를 `NavItem { href, label, icon, group: "main" | 
 - 검사: `scripts/worktree-setup.sh` 성공(슬롯 01), 백엔드 `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 전체 **1,357개 통과**(기존 Starlette 경고 1건). 실제 외부 API·LLM 호출 없음.
 - 실제 서버: `scripts/start.sh backend`로 슬롯 01 서버를 띄우고 검증 전용 사용자로 가입·프로필·투자성향·자산을 입력했다. `GET /api/allocation/recommendation`이 200으로 `장기 투자 몫: 12,756억원`과 대출 안내의 `1,234.6억원`을 반환했다. 검증 데이터는 삭제하고 `scripts/stop.sh`로 서버를 종료했다.
 - 스펙과 다른 점·의존성 추가: 없음. 남은 일: 코디네이터의 별도 검증과 PR 병합.
+
+### 가입 비밀번호 길이와 문구
+
+2026-10-19 사용자 요청: 가입 비밀번호 8~128자 → 8~32자, 가입 화면 '가입하면' → '가입 시'(7.3·12.2, 스펙 19 5.2).
+
+#### 구현한 것
+
+- 백엔드(`modules/auth/schemas.py`): 이메일 필드와 정규화를 공통 바탕 `EmailRequest`로 빼고, `LoginRequest`와 `SignupRequest`가 따로 상속한다. `SignupRequest.password`는 8~`SIGNUP_PASSWORD_MAX_LENGTH`(32)자, `LoginRequest.password`는 이전 규칙으로 가입한 계정을 위해 지금처럼 8~`LOGIN_PASSWORD_MAX_LENGTH`(128)자다. 길이는 pydantic `str` 길이(코드 포인트)로 센다. 필드 순서(email → password → passwordConfirm)와 "비밀번호가 규칙을 어기면 불일치 검사를 하지 않는다"는 그대로이고, 422 형식도 그대로다(`details: [{"field": "password", "message": "길이를 확인해 주세요."}]`).
+- `modules/auth/service.py`: 회원 탈퇴 비밀번호 확인 상한 `MAX_PASSWORD_LENGTH`를 `LOGIN_PASSWORD_MAX_LENGTH`(128)로 두고 주석을 "로그인과 같은 128자, 이전 규칙 계정도 확인"으로 고쳤다. 동작(빈 값·128자 초과는 해시 검증 없이 "비밀번호가 맞지 않습니다.")은 바뀌지 않았다. 이 상수를 가져오려고 import 줄을 여러 줄로 바꿨다.
+- 프론트(`features/auth/validation.ts`): 가입 비밀번호 규칙을 문자 수 8~32자로, 메시지를 "비밀번호는 8~32자로 입력해 주세요."로 바꿨다. 로그인·탈퇴 폼은 지금처럼 빈 값만 막는다. `SignupForm` 비밀번호 안내 "8~32자로 입력해 주세요.", 처리방침 안내 "가입 시 개인정보 처리방침에 따라 개인정보가 처리됩니다.", `(auth)/signup/page.tsx` 카드 설명 "가입 시 바로 로그인되고, 출생연도를 입력하는 화면으로 이어져요."로 바꿨다. 다른 화면 문구는 바꾸지 않았다.
+- 테스트
+  - `backend/tests/foundation/test_auth.py`: 가입 422에 7자·33자·한글 33자·이모지 33자 추가(기존 `short`·129자 유지, 비밀번호 오류는 `details` 전체를 대조), 가입 성공 경계(8자·32자·한글 32자·이모지 32자 = UTF-8 128바이트) 후 로그인, 이전 규칙 계정(33자·한글 64자·128자·이모지 128자)을 DB에 직접 만들어 로그인 200·틀린 비밀번호 401, 로그인 7자·129자 422.
+  - `backend/tests/auth/test_delete_account.py`: 이전 규칙 계정(위 4가지)이 로그인 후 틀린 비밀번호 422, 맞는 비밀번호 204로 탈퇴한다.
+  - `frontend/tests/auth/signup-password.test.tsx`(새 파일, 14개): 가입 화면 새 문구 세 곳과 옛 문구 없음, 7자·33자·한글 33자·이모지 33자 클라이언트 거절(요청 없음, 불일치 오류 없음), 8자·32자·이모지 32자 가입 요청, 서버 422 비밀번호 오류를 칸 아래 표시, 로그인 폼은 7자·33자·128자·이모지 128자를 그대로 보내고 빈 값만 막는다.
+  - 기존 단언 수정: `frontend/tests/foundation/auth-forms.test.tsx`(오류 문구 두 곳), `frontend/tests/auth/signup-privacy.test.tsx`(처리방침 안내 문구). 32자를 넘는 비밀번호로 가입하는 다른 테스트 도우미는 없었다(챗봇 평가 시드의 `uuid4().hex`는 정확히 32자).
+
+#### 검사 결과
+
+- `scripts/worktree-setup.sh` 성공(슬롯 01, 8001·3001, `finance_01`).
+- 백엔드: `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 전체 **1,508개 통과**(기존 Starlette 경고 1건). 테스트는 외부 HTTP를 막은 채 돌고 실제 외부 API·LLM을 부르지 않는다.
+- 프론트: `npm run lint` 통과, `npx tsc --noEmit` 통과, `npm run test` **55 files / 555 tests 통과**, `npm run build` 통과.
+- 실제 서버(`scripts/start.sh`, 슬롯 01)에 curl: 가입 7자·33자·이모지 33자 → `422 VALIDATION_ERROR`(`password`, "길이를 확인해 주세요."), 32자·이모지 32자 → `201`. 이전 규칙 계정(기존 가입 서비스 함수 `service.signup`에 스키마 검사만 건너뛴 요청을 넘겨 만든 33자·이모지 128자) → 로그인 `200`, `/me` `200`, 틀린 비밀번호 탈퇴 `422`("비밀번호가 맞지 않습니다."), 맞는 비밀번호 탈퇴 `204`, 이후 `/me`·로그인 `401`. 로그인 129자 → `422`.
+- 독립 헤드리스 Chrome(새 user-data-dir, CDP)으로 `/signup`을 360·768·1280px에서 열어 새 문구 세 곳(카드 설명, 비밀번호 안내, 처리방침 안내)과 옛 문구 없음, 가로 스크롤 없음(`scrollWidth == clientWidth`)을 확인했다. 360px에서 7자·33자·이모지 33자는 "비밀번호는 8~32자로 입력해 주세요."를 보이고 가입 요청을 보내지 않았으며, 768px에서 32자 가입은 요청 1건 후 `/onboarding`으로 갔다. 이전 규칙 계정 64자(360px)·128자(1280px)가 로그인 폼으로 로그인하고 `/settings/account`에서 틀린 비밀번호는 거절, 맞는 비밀번호로 탈퇴해 `/login`에 "계정을 삭제했습니다."가 보였다. `/settings/connections`는 열지 않았고, 혹시 모를 `/api/market/connections/egress-ip` 요청은 브라우저에서 가짜 응답으로 가로채도록 해 두었다. 검증 계정은 모두 지웠고 `scripts/stop.sh`로 서버를 멈췄다.
+
+#### 스펙과 다른 점과 이유
+
+- 없음. `SignupRequest`가 더 이상 `LoginRequest`를 상속하지 않고 공통 바탕 `EmailRequest`를 상속하는 것은 내부 구조이고 API 계약은 같다. 의존성 추가 없음.
+
+#### 남은 일
+
+- 코디네이터의 별도 검증과 PR 병합.

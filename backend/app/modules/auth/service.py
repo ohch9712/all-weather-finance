@@ -19,12 +19,21 @@ from app.core.time import now_utc, today_kst
 from app.modules.auth import repository
 from app.modules.auth.models import Session as AuthSession
 from app.modules.auth.models import User, UserProfile
-from app.modules.auth.schemas import AuthPayload, ProfileOut, ProfileUpdate, SignupRequest, UserOut
+from app.modules.auth.schemas import (
+    LOGIN_PASSWORD_MAX_LENGTH,
+    AuthPayload,
+    ProfileOut,
+    ProfileUpdate,
+    SignupRequest,
+    UserOut,
+)
 
 # 만 14세 미만은 가입·이용할 수 없다(스펙 19 4.2). 나이는 기준연도 − 출생연도다.
 MIN_AGE = 14
-# 가입 비밀번호 최대 길이. 이보다 길면 맞을 수 없으므로 해시 검증 없이 거절한다.
-MAX_PASSWORD_LENGTH = 128
+# 회원 탈퇴 비밀번호 확인이 받는 최대 길이(로그인과 같은 128자). 가입은 32자로 줄었지만
+# (스펙 01 7.3) 이전 규칙(8~128자)으로 가입한 계정도 확인해야 한다. 이보다 길면 맞을 수
+# 없으므로 해시 검증 없이 거절한다.
+MAX_PASSWORD_LENGTH = LOGIN_PASSWORD_MAX_LENGTH
 
 
 @dataclass(frozen=True)

@@ -9,10 +9,15 @@ from app.core.domain import AgeBand
 from app.core.schemas import CamelModel
 from app.core.time import today_kst
 
+# 비밀번호 길이는 문자(코드 포인트) 수로 센다. 가입은 8~32자다(2026-10-19 사용자 결정으로
+# 8~128자에서 줄였다, 스펙 01 7.3). 로그인·회원 탈퇴의 비밀번호 확인은 이전 규칙으로 가입한
+# 계정을 위해 지금처럼 8~128자를 받는다.
+SIGNUP_PASSWORD_MAX_LENGTH = 32
+LOGIN_PASSWORD_MAX_LENGTH = 128
 
-class LoginRequest(CamelModel):
+
+class EmailRequest(CamelModel):
     email: Annotated[EmailStr, Field(max_length=254)]
-    password: Annotated[str, Field(strict=True, min_length=8, max_length=128)]
 
     @field_validator("email", mode="before")
     @classmethod
@@ -20,7 +25,14 @@ class LoginRequest(CamelModel):
         return value.strip().lower() if isinstance(value, str) else value
 
 
-class SignupRequest(LoginRequest):
+class LoginRequest(EmailRequest):
+    password: Annotated[str, Field(strict=True, min_length=8, max_length=LOGIN_PASSWORD_MAX_LENGTH)]
+
+
+class SignupRequest(EmailRequest):
+    password: Annotated[
+        str, Field(strict=True, min_length=8, max_length=SIGNUP_PASSWORD_MAX_LENGTH)
+    ]
     password_confirm: str = Field(strict=True)
 
     @field_validator("password_confirm")
