@@ -148,3 +148,25 @@ def prune_snapshots(db, before: date):
     result = db.execute(delete(StockSnapshot).where(StockSnapshot.as_of < before))
     db.commit()
     return result.rowcount
+
+
+def auto_sync_connections(db):
+    # 롤백·단계별 commit 뒤에도 대상 식별값을 보존한다.
+    return db.execute(
+        select(BrokerConnection.id, BrokerConnection.user_id)
+        .where(BrokerConnection.auto_sync, BrokerConnection.provider.in_(["kiwoom", "toss"]))
+        .order_by(BrokerConnection.created_at, BrokerConnection.id)
+    ).all()
+
+
+def record_auto_sync(db, user_id, connection_id, status, error_code):
+    db.execute(
+        update(BrokerConnection)
+        .where(BrokerConnection.id == connection_id, BrokerConnection.user_id == user_id)
+        .values(
+            last_auto_sync_at=now_utc(),
+            last_auto_sync_status=status,
+            last_auto_sync_error_code=error_code,
+        )
+    )
+    db.commit()

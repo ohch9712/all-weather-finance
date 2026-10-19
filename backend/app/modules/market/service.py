@@ -267,6 +267,15 @@ def create_connection(db, user_id, data: ConnectionCreate):
     return Connection.model_validate(row)
 
 
+def update_connection(db, user_id, connection_id, data):
+    row = _owned_connection(db, user_id, connection_id)
+    if row.provider == "mock":
+        raise field_error("autoSync", "샘플 연결은 자동 동기화를 쓸 수 없습니다.")
+    row.auto_sync = data.auto_sync
+    repository.save_connection(db, row)
+    return Connection.model_validate(row)
+
+
 def verify_connection(db, user_id, connection_id):
     row = _owned_connection(db, user_id, connection_id)
     row.last_verified_at = now_utc()

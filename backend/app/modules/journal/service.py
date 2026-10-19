@@ -596,6 +596,13 @@ def execution_match(trade):
     )
 
 
+def sync_connection_trades(db, user_id, connection_id: UUID, start: date, end: date):
+    """수동 동기화와 같은 검증·중복 판정·저장을 수행한다."""
+    from app.modules.journal.schemas import SyncInput
+
+    return sync_trades(db, user_id, SyncInput(connection_id=connection_id, start=start, end=end))
+
+
 def sync_trades(db, user_id, data):
     from dataclasses import asdict
 
