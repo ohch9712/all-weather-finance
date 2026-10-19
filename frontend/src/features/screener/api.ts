@@ -54,3 +54,6 @@ export const addWatchlist = (code: string) =>
     method: "POST",
     body: JSON.stringify({ code, groupName: "기본", memo: null }),
   });
+// 검색 범위의 그룹 선택지. 12의 관심종목 목록 응답에서 groups만 쓴다.
+export const listWatchlistGroups = () =>
+  apiFetch<{ groups: string[] }>("/api/watchlist");

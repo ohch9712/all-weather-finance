@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from app.core.schemas import CamelModel
 
@@ -57,12 +57,28 @@ class ScreenFilter(StrictModel):
     conditions: list[Condition] = Field(default_factory=list, max_length=10)
     sort: SortSpec | None = None
     limit: int = Field(default=30, ge=1, le=100)
+    # 검색 범위(4.0). 기본값이 있어 예전 필터·저장한 검색·?f= 주소는 그대로 전체 종목 검색이다.
+    universe: Literal["all", "watchlist"] = "all"
+    watchlist_group: str | None = Field(default=None, min_length=1, max_length=20)
 
     @field_validator("kinds")
     @classmethod
     def unique_kinds(cls, value):
         if value is not None and len(set(value)) != len(value):
             raise ValueError("종류는 중복 없이 선택해 주세요.")
+        return value
+
+    @field_validator("watchlist_group", mode="before")
+    @classmethod
+    def trim_group(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("watchlist_group")
+    @classmethod
+    def group_needs_watchlist(cls, value, info: ValidationInfo):
+        # universe 자체가 잘못됐으면 그 오류만 알린다.
+        if value is not None and info.data.get("universe", "watchlist") != "watchlist":
+            raise ValueError("관심종목 범위에서만 그룹을 고를 수 있습니다.")
         return value
 
 
@@ -119,6 +135,8 @@ class ScreenResult(CamelModel):
     total: int
     excluded_for_missing_data: int
     items: list[ScreenItem]
+    # 관심종목 범위면 범위 종목 수(그룹 반영, 0 가능), 전체 범위와 키움 조건식이면 null
+    universe_count: int | None = None
 
 
 class SavedCreate(StrictModel):

@@ -29,6 +29,7 @@ from app.modules.screener.schemas import (
     ScreenItem,
     ScreenResult,
 )
+from app.modules.watchlist.service import list_items as list_watchlist_items
 
 FIELD_INFO = {
     "price": ("현재가(스냅샷 종가)", "원", "price"),
@@ -56,8 +57,15 @@ low52wGapRate=(현재가−52주 최저가)/52주 최저가×100 (0 이상).
 소형주: marketCap lt 1000000000000. 거래대금 많은: tradingValue gte 100000000000.
 52주 신고가 근처: high52wGapRate gte -5. 52주 신저가 근처: low52wGapRate lte 5.
 급등: changeRate gte 5. 급락: changeRate lte -5. 외국인 많이 보유: foreignRatio gte 30.
+검색 범위: 내 관심종목 중·관심종목에서·관심종목 안에서 → universe "watchlist".
+배당주 그룹 관심종목 중처럼 그룹 이름을 말하면 watchlistGroup에 그 이름 그대로 넣는다.
+그룹 이름 안의 단어(예: 배당주)는 조건이나 unsupported로 해석하지 않는다.
+범위를 말하지 않으면 universe "all", watchlistGroup null.
+watchlistGroup은 universe "watchlist"일 때만 쓴다.
+관심종목에 담긴 종목은 알려 주지 않는다. 범위만 정하면 서버가 사용자의 관심종목 안에서 찾는다.
 코스피/코스닥: markets KOSPI/KOSDAQ. ETF: kinds ["etf"].
-주식과 ETF 모두, ETF 포함: kinds ["stock", "etf"]. 종류를 말하지 않으면 kinds=null (주식만).
+주식과 ETF 모두, ETF 포함: kinds ["stock", "etf"]. 종류를 말하지 않으면 kinds=null
+(전체 범위는 주식만, 관심종목 범위는 주식·ETF 모두).
 ETF 중에서 오늘 3% 넘게 오른 것: kinds ["etf"] + changeRate gte 3.
 ETF는 PER·PBR·ROE·EPS·BPS·외국인 비율이 null이다. 키움 ETF는 시가총액·거래대금·52주 지표도 null이다.
 ETF 중 PER 10 이하처럼 없는 지표를 요구해도 필터는 만든다.
@@ -133,6 +141,9 @@ def _display_value(field, value):
 
 def make_chips(screen_filter):
     labels = []
+    if screen_filter.universe == "watchlist":
+        group = screen_filter.watchlist_group
+        labels.append(f"관심종목: {group}" if group else "관심종목")
     if screen_filter.kinds == ["etf"]:
         labels.append("ETF")
     elif screen_filter.kinds and set(screen_filter.kinds) == {"stock", "etf"}:
@@ -176,12 +187,27 @@ def _item(row):
     return ScreenItem.model_validate(row)
 
 
-def run_screen(db, screen_filter: ScreenFilter) -> ScreenResult:
+def _watchlist_codes(db, screen_filter: ScreenFilter, user_id: UUID | None) -> set[str] | None:
+    """관심종목 범위의 종목코드(4.0). 전체 범위면 None. 없는 그룹이면 빈 범위다."""
+    if screen_filter.universe != "watchlist":
+        return None
+    if user_id is None:
+        raise field_error("universe", "관심종목 범위는 로그인한 사용자만 쓸 수 있습니다.")
+    items = list_watchlist_items(db, user_id, group=screen_filter.watchlist_group)
+    return {item.code for item in items}
+
+
+def run_screen(db, screen_filter: ScreenFilter, *, user_id: UUID | None = None) -> ScreenResult:
+    universe = _watchlist_codes(db, screen_filter, user_id)
+    # 관심종목 범위는 담아 둔 ETF도 보도록 kinds가 없으면 주식·ETF 모두다.
+    kinds = screen_filter.kinds or (["stock"] if universe is None else ["stock", "etf"])
     snapshots = list_snapshot_rows(db)
     matched = []
     excluded = 0
     for row in snapshots.rows:
-        if row.kind not in (screen_filter.kinds or ["stock"]):
+        if universe is not None and row.code not in universe:
+            continue
+        if row.kind not in kinds:
             continue
         if screen_filter.markets is not None and row.market not in screen_filter.markets:
             continue
@@ -211,6 +237,7 @@ def run_screen(db, screen_filter: ScreenFilter) -> ScreenResult:
         total=len(matched),
         excluded_for_missing_data=excluded,
         items=[_item(r) for r in matched[: screen_filter.limit]],
+        universe_count=None if universe is None else len(universe),
     )
 
 

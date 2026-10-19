@@ -11,6 +11,7 @@ import { ErrorState } from "@/components/common/ErrorState";
 import { AiProviderBadge } from "@/components/common/AiProviderBadge";
 import { Disclaimer } from "@/components/common/Disclaimer";
 import { SampleDataBadge } from "@/components/common/SampleDataBadge";
+import { EmptyState } from "@/components/common/EmptyState";
 import { useAiStatus } from "@/lib/ai-status";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import {
@@ -51,6 +52,25 @@ function initial(encoded: string | null) {
       error: "검색 링크가 올바르지 않습니다. 직접 조건을 추가해 주세요.",
     };
   }
+}
+// 관심종목 범위에 담긴 종목이 없을 때 결과 표 대신 보여 준다(9절).
+function WatchlistEmpty({ grouped }: { grouped: boolean }) {
+  return (
+    <section className="min-w-0" aria-label="검색 결과">
+      <EmptyState
+        title={
+          grouped
+            ? "이 그룹에 담긴 관심종목이 없습니다."
+            : "관심종목이 없습니다. 먼저 관심종목을 담아 주세요."
+        }
+        action={
+          <Link href="/stocks/watchlist" className="text-sm underline">
+            관심종목 화면으로 가기
+          </Link>
+        }
+      />
+    </section>
+  );
 }
 function BrokerResults({ connectionId }: { connectionId: string | null }) {
   const list = useBrokerConditions(connectionId, true);
@@ -178,6 +198,13 @@ function SavedSearches({ load }: { load: (screen: SavedScreen) => void }) {
           <li key={screen.id} className="flex flex-wrap items-center gap-2">
             <span className="min-w-0 flex-1 break-all text-sm">
               {screen.name}
+              {screen.filter.universe === "watchlist" && (
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {screen.filter.watchlistGroup
+                    ? `관심종목: ${screen.filter.watchlistGroup}`
+                    : "관심종목"}
+                </span>
+              )}
             </span>
             <Button size="sm" variant="outline" onClick={() => load(screen)}>
               불러오기
@@ -378,7 +405,10 @@ function ScreenWorkspace({ encoded }: { encoded: string | null }) {
           </section>
           {run.isPending && <p role="status">종목을 검색하고 있어요.</p>}
           {run.error && <ErrorState error={run.error} />}
-          {run.data && (
+          {run.data?.universeCount === 0 && (
+            <WatchlistEmpty grouped={filter.watchlistGroup !== null} />
+          )}
+          {run.data && run.data.universeCount !== 0 && (
             <ResultTable
               result={run.data}
               sort={filter.sort}

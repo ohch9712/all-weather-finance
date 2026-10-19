@@ -35,6 +35,9 @@ export interface ScreenFilter {
   conditions: Condition[];
   sort: { field: FilterField; direction: "asc" | "desc" } | null;
   limit: number;
+  // 검색 범위(스펙 13 4.0). watchlist면 내 관심종목 안에서만 찾는다.
+  universe: "all" | "watchlist";
+  watchlistGroup: string | null;
 }
 export interface ParsedScreen {
   filter: ScreenFilter;
@@ -62,6 +65,8 @@ export interface ScreenResult {
   total: number;
   excludedForMissingData: number;
   items: ScreenItem[];
+  // 관심종목 범위면 범위 종목 수(0 가능), 전체 범위·키움 조건식이면 null
+  universeCount: number | null;
 }
 export interface SavedScreen {
   id: string;

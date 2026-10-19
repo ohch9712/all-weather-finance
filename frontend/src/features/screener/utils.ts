@@ -50,8 +50,15 @@ export const filterSchema = z
       .nullable()
       .default(null),
     limit: z.number().int().min(1).max(100).default(30),
+    // 범위 필드가 없는 예전 필터·링크는 전체 종목 검색이다.
+    universe: z.enum(["all", "watchlist"]).default("all"),
+    watchlistGroup: z.string().trim().min(1).max(20).nullable().default(null),
   })
-  .strict();
+  .strict()
+  .refine((f) => f.universe === "watchlist" || f.watchlistGroup === null, {
+    message: "관심종목 범위에서만 그룹을 고를 수 있습니다.",
+    path: ["watchlistGroup"],
+  });
 export const emptyFilter = (): ScreenFilter => filterSchema.parse({});
 
 // Python Decimal의 JSON 문자열 표현을 따른다. 소수 끝의 0도 보존한다.

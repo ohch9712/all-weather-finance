@@ -37,12 +37,29 @@ def _extra(item) -> str | None:
 def screen_stocks(ctx: ToolContext, params: BaseModel) -> ToolOutput:
     assert isinstance(params, ScreenInput)
     screen_filter = params.filter
-    result = screener_service.run_screen(ctx.db, screen_filter)
+    # 관심종목 범위(13 4.0)는 이 사용자의 관심종목 안에서만 찾는다.
+    result = screener_service.run_screen(ctx.db, screen_filter, user_id=ctx.user.id)
     if result.as_of is None:
         return tool_output({"status": "no_snapshot", "message": NO_SNAPSHOT_MESSAGE})
     shown = result.items[:SHOWN_LIMIT]
     href = f"/stocks/screener?f={screener_service.encode_filter(screen_filter)}"
-    summary = f"{result.as_of.isoformat()} 스냅샷 기준 조건에 맞는 종목은 {result.total}개입니다."
+    if result.universe_count is None:
+        summary = (
+            f"{result.as_of.isoformat()} 스냅샷 기준 조건에 맞는 종목은 {result.total}개입니다."
+        )
+        title = f"조건검색 결과 {result.total}개"
+    else:
+        summary = (
+            f"관심종목 {result.universe_count}개 중 조건에 맞는 종목은 {result.total}개입니다. "
+            f"{result.as_of.isoformat()} 스냅샷 기준입니다."
+        )
+        if result.universe_count == 0:
+            summary += (
+                " 이 그룹에 담긴 관심종목이 없습니다."
+                if screen_filter.watchlist_group
+                else " 관심종목이 없습니다. 먼저 관심종목을 담아 주세요."
+            )
+        title = f"관심종목 {result.universe_count}개 중 {result.total}개"
     if result.excluded_for_missing_data:
         summary += f" 지표가 없어 제외한 종목은 {result.excluded_for_missing_data}개입니다."
     content = {
@@ -50,6 +67,7 @@ def screen_stocks(ctx: ToolContext, params: BaseModel) -> ToolOutput:
         "asOf": result.as_of.isoformat(),
         "source": result.source,
         "total": result.total,
+        "universeCount": result.universe_count,
         "excludedForMissingData": result.excluded_for_missing_data,
         "shownCount": len(shown),
         "items": [
@@ -63,7 +81,7 @@ def screen_stocks(ctx: ToolContext, params: BaseModel) -> ToolOutput:
     }
     card = {
         "type": "stock_list",
-        "title": f"조건검색 결과 {result.total}개",
+        "title": title,
         "asOf": result.as_of.strftime("%Y.%m.%d"),
         "source": result.source or "unknown",
         "items": [
@@ -85,12 +103,16 @@ DESCRIPTION = (
     "국내 주식·ETF를 지표 조건으로 골라 낸다(최신 종목 스냅샷 기준). '코스피 대형주 중 PER 10 이하 "
     "찾아줘', '오늘 5% 넘게 오른 ETF' 같은 조건검색 요청에 쓴다. 사용자의 문장을 아래 기준에 맞춰 "
     "filter로 직접 만든다. filter의 필드: markets(KOSPI·KOSDAQ 목록, 시장 제한 없으면 null), "
-    "kinds(stock·etf 목록, 말하지 않으면 null=주식만), sectors(업종명 목록 또는 null), "
+    "kinds(stock·etf 목록, 말하지 않으면 null=주식만, 관심종목 범위면 주식·ETF 모두), "
+    "sectors(업종명 목록 또는 null), "
     "conditions(field·op·value·valueTo 목록, 모두 AND, 최대 10개, op는 gt·gte·lt·lte·between, "
     "valueTo는 between에만 쓰고 나머지는 null, 값은 숫자), sort(field·direction 또는 null="
-    "시가총액 내림차순), limit(1~100, 보통 30). 결과의 total(전체 개수)과 상위 몇 종목만 말하고 "
-    "카드 링크로 전체를 보게 한다. status가 no_snapshot이면 스냅샷이 없다. 종목을 사라고 권하지 "
-    "않는다.\n\n필드·단위·용어 기준(조건검색 해석 기준과 같다):\n"
+    "시가총액 내림차순), limit(1~100, 보통 30), universe(all·watchlist, '내 관심종목 중'처럼 "
+    "관심종목 안에서 찾을 때만 watchlist, 기본 all), watchlistGroup(사용자가 말한 관심종목 그룹 "
+    "이름 또는 null, universe가 watchlist일 때만). 관심종목 범위면 도구가 이 사용자의 관심종목 "
+    "안에서만 찾고 universeCount(범위 종목 수)를 돌려준다. 결과의 total(전체 개수)과 상위 몇 "
+    "종목만 말하고 카드 링크로 전체를 보게 한다. status가 no_snapshot이면 스냅샷이 없다. 종목을 "
+    "사라고 권하지 않는다.\n\n필드·단위·용어 기준(조건검색 해석 기준과 같다):\n"
     + screener_service.get_filter_guide()
 )
 
