@@ -114,6 +114,17 @@ def verify_connection(connection_id: UUID, user: CurrentUser, db: DBSession):
     return service.verify_connection(db, user.id, connection_id)
 
 
+@router.patch(
+    "/connections/{connection_id}",
+    response_model=schemas.Connection,
+    dependencies=[Depends(require_json)],
+)
+def update_connection(
+    connection_id: UUID, data: schemas.ConnectionUpdate, user: CurrentUser, db: DBSession
+):
+    return service.update_connection(db, user.id, connection_id, data)
+
+
 @router.delete(
     "/connections/{connection_id}", status_code=204, dependencies=[Depends(require_json)]
 )

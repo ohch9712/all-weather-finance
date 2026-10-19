@@ -69,6 +69,10 @@ class BrokerConnection(Base):
         CheckConstraint("provider in ('mock','kiwoom','toss')", name="provider"),
         CheckConstraint("environment in ('real','mock')", name="environment"),
         CheckConstraint("status in ('unverified','active','error')", name="status"),
+        CheckConstraint(
+            "last_auto_sync_status in ('ok','partial','failed')",
+            name="last_auto_sync_status",
+        ),
         UniqueConstraint("user_id", "label", name="uq_broker_connections_user_label"),
         Index("ix_broker_connections_user_id", "user_id"),
     )
@@ -83,6 +87,10 @@ class BrokerConnection(Base):
     app_key_masked: Mapped[str | None] = mapped_column(String(30))
     account_no_masked: Mapped[str | None] = mapped_column(String(30))
     status: Mapped[str] = mapped_column(String(12), server_default="unverified")
+    auto_sync: Mapped[bool] = mapped_column(server_default=text("false"))
+    last_auto_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_auto_sync_status: Mapped[str | None] = mapped_column(String(8))
+    last_auto_sync_error_code: Mapped[str | None] = mapped_column(String(40))
     last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error_code: Mapped[str | None] = mapped_column(String(40))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

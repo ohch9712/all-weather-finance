@@ -16,6 +16,7 @@ export function useConnectionActions() {
   return {
     create: useMutation({ mutationFn: marketApi.create, onSuccess: refresh }),
     verify: useMutation({ mutationFn: marketApi.verify, onSuccess: refresh }),
+    update: useMutation({ mutationFn: marketApi.update, onSuccess: refresh }),
     remove: useMutation({ mutationFn: marketApi.remove, onSuccess: refresh }),
   };
 }
