@@ -3,3 +3,4 @@
 0 8 * * 1 cd /app && python -m app.modules.market.jobs refresh-stocks
 0 4 * * * cd /app && python -m app.modules.market.jobs prune-snapshots --keep-days 30
 5 * * * * cd /app && python -m app.modules.imports.jobs purge-expired
+30 20 * * 1-5 cd /app && python -m app.modules.market.jobs auto-sync

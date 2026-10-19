@@ -201,7 +201,7 @@ dc exec -T cron curl -4 https://ifconfig.me
 
 ## 7. 배치·로그
 
-`cron` 서비스는 [supercronic](https://github.com/aptible/supercronic)으로 `deploy/crontab`을 읽으며 `TZ=Asia/Seoul`이다. 평일 16:30 스냅샷 갱신(`--resume`), 월요일 08:00 종목 갱신, 매일 04:00 30일 이전 스냅샷 정리, 매시 05분 모든 사용자의 만료 임포트 정리를 실행한다. 실패는 종료 코드와 로그에 남고 다음 일정은 계속 실행된다. 만료 임포트 명령은 삭제 건수만 출력한다.
+`cron` 서비스는 [supercronic](https://github.com/aptible/supercronic)으로 `deploy/crontab`을 읽으며 `TZ=Asia/Seoul`이다. 평일 16:30 스냅샷 갱신(`--resume`), 월요일 08:00 종목 갱신, 매일 04:00 30일 이전 스냅샷 정리, 매시 05분 모든 사용자의 만료 임포트 정리를 실행한다. 평일 20:30에는 자동 동기화를 켠 키움·토스 연결의 잔고와 최근 7일 체결을 반영한다. 실패는 종료 코드와 로그에 남고 다음 일정은 계속 실행된다. 만료 임포트 명령은 삭제 건수만 출력한다.
 
 ```bash
 dc logs --tail=100 cron

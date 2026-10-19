@@ -3,6 +3,7 @@ import socket
 import threading
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from hashlib import sha256
 from types import SimpleNamespace
 
 import httpx
@@ -788,3 +789,222 @@ def test_kiwoom_holdings_no_data_still_fails(respx_mock, monkeypatch):
     with pytest.raises(BrokerError) as exc:
         kiwoom.KiwoomBroker("test-app", "test-secret").get_holdings()
     assert exc.value.code == "BROKER_UNAVAILABLE"
+
+
+def toss_order(order_id="closed", **changes):
+    row = {
+        "orderId": order_id,
+        "symbol": "005930",
+        "side": "BUY",
+        "status": "FILLED",
+        "currency": "KRW",
+        "orderedAt": "2026-10-01T09:30:00+09:00",
+        "execution": {
+            "filledQuantity": "2.5",
+            "averageFilledPrice": "70000.125",
+            "filledAmount": "175000.3125",
+            "commission": "26.2501",
+            "tax": "0",
+            "filledAt": "2026-10-02T09:31:15+09:00",
+        },
+    }
+    row.update(changes)
+    return row
+
+
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_toss_order_executions_pagination_closed_priority_and_mapping(respx_mock):
+    respx_mock.post("https://openapi.tossinvest.com/oauth2/token").respond(
+        200, json={"access_token": "test-token", "expires_in": 86400}
+    )
+    long_id = "long-order-" * 7
+    foreign = toss_order(
+        long_id,
+        symbol=" AAPL ",
+        side="SELL",
+        currency="USD",
+        status="PARTIAL_FILLED",
+        execution={
+            "filledQuantity": "1.25",
+            "averageFilledPrice": None,
+            "filledAmount": "250.3125",
+            "commission": None,
+            "tax": None,
+            "filledAt": None,
+        },
+    )
+
+    def orders(request):
+        params = request.url.params
+        assert params["from"] == "2026-09-01" and params["to"] == "2026-10-16"
+        assert request.headers["X-Tossinvest-Account"] == "42"
+        assert request.headers["Authorization"] == "Bearer test-token"
+        if params["status"] == "OPEN":
+            assert "cursor" not in params and "limit" not in params
+            return httpx.Response(
+                200,
+                json={"result": {"orders": [toss_order(execution={}), foreign], "hasNext": False}},
+            )
+        assert params["status"] == "CLOSED" and params["limit"] == "100"
+        if "cursor" not in params:
+            return httpx.Response(
+                200,
+                json={
+                    "result": {
+                        "orders": [toss_order()],
+                        "hasNext": True,
+                        "nextCursor": "page-two",
+                    }
+                },
+            )
+        assert params["cursor"] == "page-two"
+        return httpx.Response(
+            200,
+            json={
+                "result": {"orders": [toss_order("replaced", status="REPLACED")], "hasNext": False}
+            },
+        )
+
+    route = respx_mock.get("https://openapi.tossinvest.com/api/v1/orders").mock(side_effect=orders)
+    stocks = respx_mock.get("https://openapi.tossinvest.com/api/v1/stocks").respond(
+        200,
+        json={
+            "result": [
+                {"symbol": "005930", "name": "삼성전자", "market": "KOSPI"},
+                {"symbol": "AAPL", "name": "애플", "market": "NASDAQ"},
+            ]
+        },
+    )
+    broker = toss.TossBroker("test-client", "test-secret", "42")
+    result = broker.get_executions(date(2026, 9, 1), date(2026, 10, 16))
+    assert "EXECUTIONS" in broker.capabilities
+    assert route.call_count == 3
+    assert stocks.calls[0].request.url.params["symbols"] == "005930,AAPL"
+    assert "X-Tossinvest-Account" not in stocks.calls[0].request.headers
+    assert len(result) == 3
+    domestic, replaced, us = result
+    assert domestic.external_id == "closed" and replaced.external_id == "replaced"
+    assert (domestic.code, domestic.name, domestic.market, domestic.currency, domestic.side) == (
+        "005930",
+        "삼성전자",
+        "KOSPI",
+        "KRW",
+        "buy",
+    )
+    assert (domestic.quantity, domestic.price, domestic.fee, domestic.tax) == (
+        Decimal("2.5"),
+        Decimal("70000.125"),
+        Decimal("26.2501"),
+        Decimal(0),
+    )
+    assert domestic.executed_at == datetime.fromisoformat("2026-10-02T09:31:15+09:00")
+    assert us.external_id == sha256(long_id.encode()).hexdigest() and len(us.external_id) == 64
+    assert (us.code, us.name, us.market, us.currency, us.side) == (
+        "AAPL",
+        "애플",
+        "NASDAQ",
+        "USD",
+        "sell",
+    )
+    assert us.price == Decimal("200.25") and us.quantity == Decimal("1.25")
+    assert us.fee is None and us.tax is None
+    assert us.executed_at == datetime.fromisoformat(foreign["orderedAt"])
+
+
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_toss_order_executions_skip_unfilled_rejected_unknown_and_missing_price(respx_mock):
+    respx_mock.post("https://openapi.tossinvest.com/oauth2/token").respond(
+        200, json={"access_token": "test-token", "expires_in": 86400}
+    )
+    rows = [
+        toss_order("zero", execution={"filledQuantity": "0"}),
+        toss_order("cancel-rejected", status="CANCEL_REJECTED"),
+        toss_order("replace-rejected", status="REPLACE_REJECTED"),
+        toss_order("unknown-side", side="UNKNOWN"),
+        toss_order("unknown-currency", currency="EUR"),
+        toss_order(
+            "missing-price",
+            execution={"filledQuantity": "1", "averageFilledPrice": None, "filledAmount": None},
+        ),
+    ]
+    orders = respx_mock.get("https://openapi.tossinvest.com/api/v1/orders").respond(
+        200, json={"result": {"orders": rows, "hasNext": False}}
+    )
+    assert (
+        toss.TossBroker("test-client", "test-secret", "42").get_executions(
+            date(2026, 9, 1), date(2026, 10, 16)
+        )
+        == []
+    )
+    assert orders.call_count == 2
+
+
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_toss_order_executions_repeated_cursor_stops(respx_mock):
+    respx_mock.post("https://openapi.tossinvest.com/oauth2/token").respond(
+        200, json={"access_token": "test-token", "expires_in": 86400}
+    )
+    orders = respx_mock.get("https://openapi.tossinvest.com/api/v1/orders").respond(
+        200, json={"result": {"orders": [], "hasNext": True, "nextCursor": "same"}}
+    )
+    with pytest.raises(BrokerError) as exc:
+        toss.TossBroker("test-client", "test-secret", "42").get_executions(
+            date(2026, 9, 1), date(2026, 10, 16)
+        )
+    assert exc.value.code == "BROKER_UNAVAILABLE"
+    assert orders.call_count == 2
+
+
+@respx.mock(assert_all_mocked=True, using="httpx")
+def test_toss_order_executions_stocks_200_chunks_market_and_missing_symbol(respx_mock):
+    respx_mock.post("https://openapi.tossinvest.com/oauth2/token").respond(
+        200, json={"access_token": "test-token", "expires_in": 86400}
+    )
+    markets = ["KOSPI", "KOSDAQ", "NYSE", "NASDAQ", "AMEX", "KR_ETC", "US_ETC", "FUTURE"]
+    symbols = [f"S{i}" for i in range(201)]
+
+    def orders(request):
+        rows = [toss_order(str(i), symbol=code) for i, code in enumerate(symbols)]
+        if request.url.params["status"] == "OPEN":
+            return httpx.Response(200, json={"result": {"orders": [], "hasNext": False}})
+        offset = int(request.url.params.get("cursor", "0"))
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "orders": rows[offset : offset + 100],
+                    "hasNext": offset < 200,
+                    "nextCursor": str(offset + 100),
+                }
+            },
+        )
+
+    respx_mock.get("https://openapi.tossinvest.com/api/v1/orders").mock(side_effect=orders)
+
+    def stocks(request):
+        codes = request.url.params["symbols"].split(",")
+        assert len(codes) <= 200
+        return httpx.Response(
+            200,
+            json={
+                "result": [
+                    {
+                        "symbol": code,
+                        "name": f"이름 {code}",
+                        "market": markets[int(code[1:]) % len(markets)],
+                    }
+                    for code in codes
+                    if code != "S200"
+                ]
+            },
+        )
+
+    route = respx_mock.get("https://openapi.tossinvest.com/api/v1/stocks").mock(side_effect=stocks)
+    result = toss.TossBroker("test-client", "test-secret", "42").get_executions(
+        date(2026, 9, 1), date(2026, 10, 16)
+    )
+    assert len(result) == 201 and route.call_count == 2
+    assert [len(call.request.url.params["symbols"].split(",")) for call in route.calls] == [200, 1]
+    assert [r.market for r in result[:8]] == markets[:5] + ["OTHER"] * 3
+    assert result[0].name == "이름 S0"
+    assert (result[-1].name, result[-1].market) == ("S200", "OTHER")

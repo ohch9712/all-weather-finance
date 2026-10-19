@@ -9,5 +9,6 @@ export const marketApi = {
   tossAccounts: (keys: Pick<ConnectionInput, "appKey" | "appSecret">) =>
     apiFetch<{ items: TossAccount[] }>("/api/market/connections/toss-accounts", { method: "POST", body: JSON.stringify(keys), timeoutMs: 30_000 }),
   verify: (id: string) => apiFetch<Connection>(`/api/market/connections/${id}/verify`, { method: "POST", timeoutMs: 60_000 }),
+  update: ({ id, autoSync }: { id: string; autoSync: boolean }) => apiFetch<Connection>(`/api/market/connections/${id}`, { method: "PATCH", body: JSON.stringify({ autoSync }) }),
   remove: (id: string) => apiFetch<void>(`/api/market/connections/${id}`, { method: "DELETE" }),
 };

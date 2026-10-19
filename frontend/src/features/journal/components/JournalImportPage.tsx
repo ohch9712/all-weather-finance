@@ -14,7 +14,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { Disclaimer } from "@/components/common/Disclaimer";
 import { SampleDataBadge } from "@/components/common/SampleDataBadge";
 import { ImportWizard } from "@/features/imports";
-import { getErrorMessage, isApiError } from "@/lib/api-client";
+import { getErrorMessage } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/format";
 import { useConnections, useSyncStatus, useSyncTrades } from "../hooks";
 import { todayKst } from "../utils";
@@ -47,11 +47,12 @@ export function JournalImportPage() {
       {active.length > 0 && <form className="min-w-0 space-y-4" onSubmit={form.handleSubmit(async values => {
         setMessage(""); setResult(null);
         try { setResult(await sync.mutateAsync(values)); invalidate(); }
-        catch (error) { setMessage(selected?.provider === "toss" && isApiError(error) && error.status === 501 ? "토스증권은 개별 체결 조회를 지원하지 않아요" : getErrorMessage(error)); }
+        catch (error) { setMessage(getErrorMessage(error)); }
       })}>
         <div className="space-y-2"><Label htmlFor="sync-connection">증권사 연결</Label><select id="sync-connection" className="w-full min-w-0 rounded-md border bg-background p-2 text-sm" {...form.register("connectionId")}><option value="">연결 선택</option>{active.map(c => <option key={c.id} value={c.id}>{c.label} ({c.provider === "mock" ? "샘플" : c.provider === "kiwoom" ? "키움" : "토스"})</option>)}</select>{form.formState.errors.connectionId && <p role="alert">{form.formState.errors.connectionId.message}</p>}</div>
         <div className="grid min-w-0 gap-4 sm:grid-cols-2">{(["from", "to"] as const).map(key => <div className="min-w-0 space-y-2" key={key}><Label htmlFor={`sync-${key}`}>{key === "from" ? "시작일" : "종료일"}</Label><Input id={`sync-${key}`} className="min-w-0 max-w-full" type="date" max={todayKst()} {...form.register(key)} />{form.formState.errors[key] && <p role="alert">{form.formState.errors[key]?.message}</p>}</div>)}</div>
         <p className="text-xs text-muted-foreground">최대 90일의 체결 내역을 조회합니다.</p>
+        {selected?.provider === "toss" && <p className="text-sm text-muted-foreground">토스증권은 주문 하나를 한 건으로 가져옵니다. 여러 번에 나눠 체결된 주문은 평균 체결가로 합치고, 시간외 종가 주문은 토스가 제공하지 않아 빠집니다.</p>}
         {selected?.provider === "mock" && <><SampleDataBadge /><Disclaimer variant="sample" /></>}
         <Button type="submit" disabled={sync.isPending}>{sync.isPending ? "불러오는 중…" : "불러오기"}</Button>
       </form>}

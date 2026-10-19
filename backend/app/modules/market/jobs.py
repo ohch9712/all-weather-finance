@@ -3,12 +3,66 @@
 import argparse
 import logging
 from datetime import date, timedelta
+from functools import partial
 
 from app.core.config import get_settings
+from app.core.errors import AppError
 from app.core.time import today_kst
 from app.db.session import SessionLocal
 from app.integrations.brokers.errors import BrokerError
-from app.modules.market import service
+from app.modules.market import repository, service
+
+
+def auto_sync(db, today):
+    # 공개 서비스는 함수 안에서 가져와 모듈 사이 순환 import를 피한다.
+    from app.modules.allocation.service import sync_holdings
+    from app.modules.journal.service import sync_connection_trades
+
+    counts = {"ok": 0, "partial": 0, "failed": 0}
+    for connection_id, user_id in repository.auto_sync_connections(db):
+        outcomes = []
+        errors = []
+        try:
+            client = service.get_user_broker_client(db, user_id, connection_id)
+        except Exception as exc:
+            db.rollback()
+            outcomes = [False, False]
+            errors.append(exc.code if isinstance(exc, AppError) else "INTERNAL_ERROR")
+            logging.getLogger(__name__).warning("자동 동기화 예외: %s", type(exc).__name__)
+        else:
+            for capability, run in (
+                ("HOLDINGS", partial(sync_holdings, db, user_id, connection_id)),
+                (
+                    "EXECUTIONS",
+                    partial(
+                        sync_connection_trades,
+                        db,
+                        user_id,
+                        connection_id,
+                        start=today - timedelta(days=6),
+                        end=today,
+                    ),
+                ),
+            ):
+                if capability not in client.capabilities:
+                    continue
+                try:
+                    run()
+                    outcomes.append(True)
+                except Exception as exc:
+                    db.rollback()
+                    outcomes.append(False)
+                    errors.append(exc.code if isinstance(exc, AppError) else "INTERNAL_ERROR")
+                    logging.getLogger(__name__).warning("자동 동기화 예외: %s", type(exc).__name__)
+        status = "ok" if all(outcomes) else "partial" if any(outcomes) else "failed"
+        error_code = errors[0] if errors else None
+        repository.record_auto_sync(db, user_id, connection_id, status, error_code)
+        counts[status] += 1
+        print(f"auto-sync {connection_id} {status} {error_code or '-'}")
+    print(
+        f"auto-sync done total={sum(counts.values())} "
+        f"ok={counts['ok']} partial={counts['partial']} failed={counts['failed']}"
+    )
 
 
 def main(argv=None):
@@ -24,6 +78,8 @@ def main(argv=None):
     prune = commands.add_parser("prune-snapshots")
     prune.add_argument("--keep-days", type=int, default=30)
     commands.add_parser("seed-mock")
+    automatic = commands.add_parser("auto-sync")
+    automatic.add_argument("--today", type=date.fromisoformat, default=None)
     args = parser.parse_args(argv)
     if getattr(args, "limit", None) is not None and args.limit < 1:
         parser.error("--limit는 1 이상이어야 합니다.")
@@ -31,6 +87,14 @@ def main(argv=None):
         parser.error("--keep-days는 1 이상이어야 합니다.")
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
+    if args.command == "auto-sync":
+        try:
+            with SessionLocal() as db:
+                auto_sync(db, args.today or today_kst())
+            return 0
+        except Exception as exc:
+            logger.error("자동 동기화 배치 실패: %s", type(exc).__name__)
+            return 1
     settings = get_settings()
     provider = (
         "mock"

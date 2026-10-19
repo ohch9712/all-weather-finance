@@ -89,7 +89,7 @@ class BrokerClient(Protocol):
 
 ### 4.1 호출 한도 (`ratelimit.py`)
 
-- 토큰 버킷. 그룹별 초당 한도. 키움은 그룹 하나 초당 4회(공식 한도를 확인하면 그 값으로 바꾸고 출처를 주석에 남긴다). 토스는 `AUTH` 5, `MARKET_DATA` 15, `MARKET_DATA_CHART` 20, `ACCOUNT` 1, `ORDER_INFO` 6(09:00~09:10 KST는 3).
+- 토큰 버킷. 그룹별 초당 한도. 키움은 그룹 하나 초당 4회(공식 한도를 확인하면 그 값으로 바꾸고 출처를 주석에 남긴다). 토스는 `AUTH` 5, `MARKET_DATA` 15, `MARKET_DATA_CHART` 20, `ACCOUNT` 1, `ORDER_INFO` 6(09:00~09:10 KST는 3). 주문 조회 `ORDER_HISTORY`는 공식 명세에 수치가 없어 계좌 계열과 같이 초당 1회로 둔다(2026-10-19 코디네이터 추가).
 - `429`면 `Retry-After`를 따르고 최대 3번 지수 백오프 후 `BROKER_RATE_LIMITED`.
 
 ### 4.2 MockBroker (`mock.py`)
@@ -136,6 +136,14 @@ class BrokerClient(Protocol):
 - 토스 어댑터는 조건검색(`CONDITIONS`)을 지원하지 않는다.
 - 계좌 목록: `GET /api/v1/accounts`(공식 명세 1.2.24 `getAccounts`, 계좌 헤더 없이 토큰만). 응답 `result[]`의 `accountNo`·`accountSeq`(정수)·`accountType`. 종합매매(`BROKERAGE`) 계좌만 온다. `TossBroker.list_accounts()`로 둔다(`BrokerClient` 프로토콜에는 넣지 않는다). `accountNo` 원문은 어댑터 밖으로 끝 4자리만 내보낸다.
 - 토큰 무효화: 토스는 같은 client로 토큰을 다시 받으면 이전 토큰이 무효가 된다(공식 OAuth2 안내). 연결 클라이언트는 프로세스 안에서 캐시되므로(`_make_client`), 다른 클라이언트가 같은 키로 토큰을 받으면 캐시된 토큰이 401이 된다. 캐시한 토큰으로 보낸 요청이 401이면 토큰을 버리고 한 번만 새로 받아 같은 요청을 다시 보낸다. 새로 받은 토큰으로도 401이면 지금처럼 `BROKER_AUTH_FAILED`다(2026-10-19 코디네이터 추가).
+- 체결(주문 단위, 2026-10-19 사용자 결정): 토스는 개별 체결 목록을 주지 않고 주문마다 누적 체결 결과(`execution`)를 준다. **주문 하나를 `Execution` 하나로** 만든다. 처음 구현 때 "주문 누적값으로 체결을 만들지 않는다"고 정했던 것을 사용자 결정으로 바꾼다. `capabilities`에 `EXECUTIONS`를 더한다.
+  - 호출: `GET /api/v1/orders`(공식 명세 1.2.24 `getOrders`, 계좌 헤더, 한도 그룹 `ORDER_HISTORY`)를 `status=CLOSED`(`limit=100`, `hasNext`가 false가 될 때까지 `nextCursor`를 `cursor`로)와 `status=OPEN`(전량 반환, `limit`·`cursor` 무시)으로 부른다. 둘 다 `from=start`, `to=end`(주문 생성일 `orderedAt` KST 기준)다. 같은 커서가 다시 오면 `BROKER_UNAVAILABLE`로 멈춘다. 주문 상세(`GET /api/v1/orders/{orderId}`)는 부르지 않는다(목록 행에 같은 `execution`이 있다).
+  - 포함: `execution.filledQuantity > 0`인 주문만. `status`가 `CANCEL_REJECTED`·`REPLACE_REJECTED`인 행은 취소·정정 요청이 거부된 기록(명세: 별도 레코드로 생기고 원주문은 이전 상태로 돌아간다)이므로 건너뛴다. `side`가 `BUY`·`SELL`이 아니거나 `currency`가 `KRW`·`USD`가 아니면 건너뛴다(명세가 알 수 없는 enum 값을 허용하라고 한다). 같은 `orderId`가 OPEN과 CLOSED에 함께 오면 CLOSED 행을 쓴다.
+  - 매핑: `external_id` = `orderId`(64자를 넘으면 `orderId`의 sha256 hex 64자. 매매일지 `trades.external_id`가 64자다), `executed_at` = `execution.filledAt`(최종 체결 시각, 오프셋 포함 ISO 8601. 없으면 `orderedAt`), `code` = `symbol`(앞뒤 공백 제거), `side` = `buy`·`sell`, `quantity` = `filledQuantity`, `price` = `averageFilledPrice`(없으면 `filledAmount ÷ filledQuantity`, 둘 다 없으면 건너뜀), `fee` = `commission`, `tax` = `tax`(값이 없으면 `None`이고 11이 요율로 추정한다), `currency` = `currency`. 금액·수량은 문자열 decimal 그대로 `Decimal`로 읽는다(반올림하지 않는다).
+  - 종목명·시장: 주문 행에 종목명이 없으므로 `GET /api/v1/stocks?symbols=`(`getStocks`, 한도 그룹 `STOCK`, 한 번에 최대 200개)로 받은 `name`·`market`을 쓴다. `market`은 `KOSPI`·`KOSDAQ`·`NYSE`·`NASDAQ`·`AMEX`면 그대로, `KR_ETC`·`US_ETC`·그 밖은 `OTHER`(11이 통화로 `KRX`·`US`를 정한다). 종목 정보가 오지 않은 심볼은 `name=symbol`, `market="OTHER"`다.
+  - 부분 체결 중인 주문(OPEN의 `PARTIAL_FILLED`)은 지금까지 체결된 수량·평균가·비용으로 넣는다. 다음 동기화에서 같은 `external_id`라 11의 갱신 규칙으로 수량·단가·비용이 바뀐다.
+  - 정정된 원주문(`REPLACED`)은 정정 전에 체결된 수량을 갖는다(명세 status 설명). 정정으로 생긴 새 주문은 별도 `orderId`로 따로 들어온다. 새 주문의 `execution`이 원주문 체결을 포함하는지는 명세에 없으므로 실제 응답으로 확인할 때까지 각각 넣는다(구현 결과에 남은 확인 사항으로 적는다).
+  - 범위 제한(명세): 장후시간외 종가·장전시간외 종가처럼 Open API로 주문할 수 없는 호가 유형의 주문은 토스가 목록·상세 어디에도 내려 주지 않는다. 이런 주문은 매매일지에 들어오지 않는다.
 - 주문 생성·정정·취소 경로는 호출하지 않는다(코드에 경로 문자열도 두지 않는다).
 
 ## 5. DB 스키마 (revision `market_0001`, `branch_labels=("market",)`)
@@ -289,6 +297,7 @@ class SnapshotSet:
 - API: 검색 순서, 상세(시세 실패 시 `quote: null`), 시세 50개 제한, 캔들 기간 제한, 연결 CRUD·검증 성공/실패, Mock 연결(개발 허용·운영 422), 응답에 원문 키 없음, 남의 연결 404
 - 토스 계좌 불러오기: respx로 토큰·`/api/v1/accounts` 고정, 응답에 `accountNo` 원문 없음(끝 4자리만), 키를 DB에 저장하지 않음·로그에 없음, 앱키·시크릿 빈 값 422, 403 → `BROKER_IP_NOT_ALLOWED`·401 → `BROKER_AUTH_FAILED`, 계좌 없음 빈 목록, 미인증 401
 - 토스 토큰 무효화: 캐시 토큰 401 → 한 번 재발급 후 성공, 재발급 토큰도 401이면 `BROKER_AUTH_FAILED`(재시도 한 번뿐)
+- 토스 체결(주문 단위): `status=CLOSED` 여러 페이지(`cursor`)와 `status=OPEN` 요청의 쿼리·계좌 헤더, 같은 커서 반복 시 멈춤, `filledQuantity=0`·`CANCEL_REJECTED`·`REPLACE_REJECTED`·알 수 없는 `side`·`currency` 제외, OPEN·CLOSED 중복 `orderId`는 CLOSED, 평균가 없을 때 `filledAmount ÷ filledQuantity`, `commission`·`tax` 그대로·없으면 None, 64자 초과 `orderId`의 sha256 ID, `getStocks` 200개씩 나눠 이름·시장 매핑과 못 받은 심볼 대체값, `filledAt` 없을 때 `orderedAt`, 국내(KRW)·미국(USD) 주문. 매매일지 동기화(`POST /api/journal/sync`)로 부분 체결 주문을 넣은 뒤 체결이 늘어난 응답으로 다시 부르면 같은 행이 `updated`로 바뀌고 새 행이 생기지 않음
 - 키움 `kt00009` 거래소 구분: 요청 본문 `dmst_stex_tp="%"`, KRX·빈 값 행의 `external_id` 형식 유지, NXT·SOR 행의 `:NXT`·`:SOR` 접미사, 같은 `ord_no`·`cntr_no`가 KRX와 NXT에 함께 있어도 두 건으로 남음, 종목코드 접두어·`_NX`·`_AL` 접미사 제거
 - 실제 외부 호출이 없음(respx `assert_all_mocked`)
 
@@ -494,3 +503,31 @@ class SnapshotSet:
 
 - 스펙과 다른 점: 없음. 의존성을 추가하지 않았고 소유 경로만 수정했다.
 - 남은 일: 수정 범위의 구현은 완료했다. 별도 검증·PR 검토·병합은 코디네이터가 진행한다.
+
+### 토스 체결 주문 단위 가져오기
+
+- 공식 [OpenAPI JSON](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json)을 직접 내려받아 `getOrders`, `getStocks`, `OrderExecution`, `OrderStatus`를 확인했다. 확인한 버전은 **1.2.24**로 계약과 같다. 위 기존 구현 표의 **「토스 | 개별 체결 | 미지원」 행은 이번 수정으로 주문 단위 체결 지원으로 바뀐다**. 개별 체결을 복원하는 대신 주문 하나의 누적 체결 결과를 `Execution` 하나로 만든다.
+- `TossBroker`에 `EXECUTIONS` 능력과 초당 1회 `ORDER_HISTORY` 버킷을 추가했다. 계좌 헤더·`from`/`to`와 함께 CLOSED를 `limit=100`·`nextCursor`로 끝까지 조회한 뒤 OPEN을 전량 조회한다. 반복 커서·누락된 다음 커서는 `BROKER_UNAVAILABLE`로 멈추고, 같은 주문이 겹치면 CLOSED를 쓴다. 주문 상세나 주문 생성·정정·취소 경로는 추가하지 않았다.
+- 체결 수량이 양수인 주문만 가져오고 취소·정정 거부 레코드와 알 수 없는 매매 방향·통화는 제외한다. 최종 체결 시각(없으면 주문 시각), 수량, 평균 체결가(없으면 체결금액÷수량), 수수료·세금(미제공은 `None`)을 매핑한다. 어댑터는 decimal을 반올림하지 않으며, 매매일지 저장·표시에는 기존 모듈의 통화별 금액 규칙이 적용된다. 64자를 넘는 주문 ID는 sha256 hex 64자로 바꾼다.
+- 중복을 제거한 종목코드를 `getStocks`에 최대 200개씩 보내 이름·시장을 보정한다. 미지원 시장은 `OTHER`, 정보가 없는 종목은 코드 자체를 이름으로 쓴다. `/journal/import`에서 토스 연결을 선택하면 11 9절의 주문 단위·평균 체결가·시간외 종가 제외 문구를 표시하며 토스 전용 501 안내는 제거했다.
+- 회귀 테스트는 CLOSED 여러 페이지·OPEN의 쿼리와 계좌 헤더, 반복 커서 중단, 제외 조건, CLOSED 중복 우선, 국내·미국 주문, 평균가 대체 계산, 제공·미제공 비용, 긴 ID, 종목 201개의 분할 조회·시장 변환·미제공 대체값·시각 대체를 검증한다. 실제 토스 연결을 사용하는 동기화 API 테스트는 부분 체결의 수량·평균가·비용 증가가 같은 거래를 `updated=1`로 바꾸고 재실행은 `unchanged=1`이며 다른 사용자의 연결 접근은 404임을 확인한다. 외부 응답은 모두 `respx(assert_all_mocked=True)`로 고정했다.
+
+검증 결과:
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `scripts/worktree-setup.sh` | 슬롯 08(8008·3008·`finance_08`) 준비·마이그레이션 적용 성공, 의존성 추가 없음 |
+| `uv run ruff check .` / `uv run ruff format --check .` | 통과 |
+| `uv run pytest` | 전체 **1,468개 통과**, 기존 Starlette TestClient 사용 중단 안내 1건 |
+| `npm run lint` / `npx tsc --noEmit` / `npm run build` | 통과 |
+| `npm run test -- tests/journal/import-sync.test.tsx` | 5개 통과 |
+| `npm run test` | 510개 통과, **develop 기준 기존 실패 2건**(`tests/privacy/privacy.test.tsx:71,130`, 원인 스펙 19 7절 5조 갱신, 작업 20이 수정). 코디네이터 확인 후 소유 범위 밖 파일은 변경하지 않음. 그 밖의 실패 없음 |
+| 독립 Playwright Chrome context와 슬롯 08 서버 | 확인용 계정으로 가입·자동 로그인·출생연도 입력 → 토스 계좌 불러오기·저장·연결 확인 → 매매일지 가져오기 성공. 저장소 밖 임시 실행기에서 httpx를 respx로 가로채 토큰·계좌·잔고·CLOSED 2페이지·OPEN 부분 체결·종목 응답을 고정. 국내·미국 주문 3건 삽입, CANCEL_REJECTED 제외, 기록 탭의 평균 단가·제공 비용과 추정 배지 없음 확인 |
+| 부분 체결 증가 후 화면 재동기화 | 애플 1.25주×200.25달러 → 3.5주×201.50달러, 수수료 0.50→1.40달러. 응답 **삽입 0·갱신 1·변화 없음 2**, 전체 3건과 거래 ID 유지 |
+| `/journal/import` 360·768·1280px | `document.documentElement.scrollWidth` 각각 360·768·1280, 안내 문구·결과 요약·투자 고지 확인. 360px 전체 화면 이미지도 확인 |
+| 외부 호출·소유 경로 | 실제 토스·LLM 호출 없음. 공인 IP 요청은 브라우저에서 가짜 응답으로 가로채도록 설정. 변경은 지정한 6개 파일뿐이며 마이그레이션 추가 없음 |
+| 정리 | 확인용 계정 삭제 API 204, 독립 브라우저 종료, `scripts/stop.sh`로 슬롯 08 frontend·backend 종료 |
+
+스펙과 다른 점: 없음. 기존 토스 미지원 동작을 사용자 결정에 따른 주문 단위 규칙으로 교체했다.
+
+남은 확인 사항: 정정된 원주문과 새 주문은 각각의 `orderId`로 저장한다. 새 주문의 누적 체결이 원주문 체결까지 포함하는지는 공식 명세에 없어 실제 응답 확인이 필요하며, 장전·장후 시간외 종가 주문은 토스 목록에서 제공하지 않아 가져오지 못한다. 실키 검증은 하지 않았고, 코디네이터의 별도 검증과 PR 병합이 남아 있다.
