@@ -53,6 +53,8 @@ __all__ = [
     "get_deduction_status",
     "list_members",
     "build_compare_input",
+    "calc_deduction_status",
+    "replay_gift_deductions",
 ]
 
 
@@ -211,6 +213,20 @@ def get_deduction_status(
     return deduction_status(
         member_recipient(db, user_id, member_id), prior_gifts(db, user_id, member_id), as_of
     )
+
+
+def calc_deduction_status(
+    recipient: Recipient, gifts: list[PriorGift], as_of: date
+) -> DeductionStatus:
+    """06 6절 공제 현황. DB 없이 수증자와 기록만으로 계산하는 순수 함수(22가 사용)."""
+    return deduction_status(recipient, gifts, as_of)
+
+
+def replay_gift_deductions(
+    recipient: Recipient, gifts: list[PriorGift]
+) -> list[tuple[PriorGift, int]]:
+    """06 6절 재생. 날짜순(같은 날은 입력 순서)으로 (기록, 적용된 증여재산공제)를 돌려준다."""
+    return [(row.gift, row.deduction) for row in replay_gifts(recipient, gifts)]
 
 
 def resolve_gift_input(db: Session, user_id: UUID, req: GiftTaxRequest) -> GiftTaxInput:

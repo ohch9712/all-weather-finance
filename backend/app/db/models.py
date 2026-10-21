@@ -12,4 +12,5 @@ from app.modules.learn import models as learn_models  # noqa: F401
 from app.modules.ledger import models as ledger_models  # noqa: F401
 from app.modules.market import models as market_models  # noqa: F401
 from app.modules.screener import models as screener_models  # noqa: F401
+from app.modules.succession import models as succession_models  # noqa: F401
 from app.modules.watchlist import models as watchlist_models  # noqa: F401
