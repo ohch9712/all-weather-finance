@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { ShieldCheck } from "lucide-react";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ interface ConsentBoxProps {
 }
 
 export function ConsentBox({ checks, onChange, consentAt, onWithdraw }: ConsentBoxProps) {
+  const id = useId();
   return (
     <div className="min-w-0 space-y-3 rounded-xl border border-dashed bg-muted/30 p-4" role="group" aria-label="민감정보 동의">
       <p className="flex items-center gap-2 text-sm font-semibold">
@@ -34,11 +36,17 @@ export function ConsentBox({ checks, onChange, consentAt, onWithdraw }: ConsentB
           type="checkbox"
           className="mt-0.5 size-4 shrink-0 accent-primary"
           checked={checks.agree}
+          aria-labelledby={`${id}-agree`}
+          aria-describedby={`${id}-detail`}
           onChange={(event) => onChange({ ...checks, agree: event.target.checked })}
         />
         <span className="space-y-1">
-          <span className="block font-medium">{CONSENT_LABEL}</span>
-          <span className="block text-xs text-muted-foreground">{CONSENT_DETAIL}</span>
+          <span id={`${id}-agree`} className="block font-medium">
+            {CONSENT_LABEL}
+          </span>
+          <span id={`${id}-detail`} className="block text-xs text-muted-foreground">
+            {CONSENT_DETAIL}
+          </span>
         </span>
       </label>
       <label className="flex items-start gap-2 text-sm break-keep">

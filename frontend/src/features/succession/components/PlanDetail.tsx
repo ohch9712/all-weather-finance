@@ -9,9 +9,9 @@ const won = formatKRW;
 export function PlanDetail({ plan, names }: { plan: Plan; names: Record<string, string> }) {
   const inheritance = plan.inheritance;
   return (
-    <div className="min-w-0 space-y-5 text-sm">
+    <div className="min-w-0 space-y-5 text-sm print:space-y-3 print:text-[11px]">
       <div className="space-y-2 break-inside-avoid">
-        <h4 className="font-semibold">이전 일정</h4>
+        <h4 className="font-semibold print:break-after-avoid">이전 일정</h4>
         <DataTable
           caption={`${plan.label} 이전 일정`}
           breakpoint="xl"
@@ -41,7 +41,7 @@ export function PlanDetail({ plan, names }: { plan: Plan; names: Record<string, 
       </div>
       {plan.sales.length > 0 && (
         <div className="space-y-2">
-          <h4 className="font-semibold">매각 내역(부모님이 지금 팔 때 양도소득세)</h4>
+          <h4 className="font-semibold print:break-after-avoid">매각 내역(부모님이 지금 팔 때 양도소득세)</h4>
           <div className="grid min-w-0 gap-3 md:grid-cols-2 print:grid-cols-2">
             {plan.sales.map((sale) => (
               <div key={sale.assetId} className="min-w-0 rounded-lg border p-3 break-inside-avoid">
@@ -71,7 +71,7 @@ export function PlanDetail({ plan, names }: { plan: Plan; names: Record<string, 
       )}
       <div className="grid min-w-0 gap-4 md:grid-cols-2 print:grid-cols-2">
         <div className="min-w-0 space-y-2 break-inside-avoid">
-          <h4 className="font-semibold">상속 요약({inheritance.on})</h4>
+          <h4 className="font-semibold print:break-after-avoid">상속 요약({inheritance.on})</h4>
           <KeyValueTable
             caption={`${plan.label} 상속 요약`}
             rows={[
@@ -88,7 +88,7 @@ export function PlanDetail({ plan, names }: { plan: Plan; names: Record<string, 
           />
         </div>
         <div className="min-w-0 space-y-3 break-inside-avoid">
-          <h4 className="font-semibold">자녀 주택 수 영향</h4>
+          <h4 className="font-semibold print:break-after-avoid">자녀 주택 수 영향</h4>
           {plan.childImpacts.length === 0 ? (
             <p className="text-muted-foreground">이 방안에서 부동산을 그대로 받는 자녀가 없어요.</p>
           ) : (

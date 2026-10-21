@@ -31,7 +31,11 @@ export function FieldShell({ id, label, error, hint, required, className, childr
     <div className={cn("min-w-0 space-y-1.5", className)}>
       <label htmlFor={id} className="block text-sm font-medium break-keep">
         {label}
-        {required && <span className="ml-1 text-destructive">*</span>}
+        {required && (
+          <span aria-hidden="true" className="ml-1 text-destructive">
+            *
+          </span>
+        )}
       </label>
       {children}
       <div id={`${id}-help`} className="space-y-0.5 text-xs text-muted-foreground break-keep">
@@ -70,6 +74,7 @@ export function TextField({ name, label, type = "text", numeric, decimal, hint, 
         inputMode={decimal ? "decimal" : numeric ? "numeric" : undefined}
         autoComplete="off"
         placeholder={placeholder}
+        aria-required={required || undefined}
         aria-invalid={Boolean(error)}
         aria-describedby={`${id}-help`}
         {...register(name)}
@@ -114,6 +119,7 @@ export function MoneyField({ name, label, hint, required, className }: Omit<Text
                 inputMode="numeric"
                 autoComplete="off"
                 className="pr-7 text-right tabular-nums"
+                aria-required={required || undefined}
                 aria-invalid={Boolean(error)}
                 aria-describedby={`${id}-help`}
                 value={amount === null ? String(field.value ?? "") : amount.toLocaleString("ko-KR")}

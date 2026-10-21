@@ -17,7 +17,7 @@ const yes = (value: boolean) => (value ? "예" : "아니요");
 function Block({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="min-w-0 space-y-3 rounded-xl border bg-card p-4 sm:p-6 print:rounded-none print:border-0 print:p-0" aria-label={title}>
-      <h2 className="text-lg font-semibold break-keep print:text-sm">{title}</h2>
+      <h2 className="text-lg font-semibold break-keep print:break-after-avoid print:text-sm">{title}</h2>
       {children}
     </section>
   );
@@ -60,7 +60,7 @@ function InputTables({ input, result }: { input: SuccessionInput; result: Succes
         </div>
       </div>
       <div className="space-y-2">
-        <h3 className="font-semibold">부모님 재산</h3>
+        <h3 className="font-semibold print:break-after-avoid">부모님 재산</h3>
         <div className="grid min-w-0 gap-3 md:grid-cols-2 print:grid-cols-2">
           {input.assets.map((asset) => (
             <div key={asset.id} className="min-w-0 rounded-lg border p-3 break-inside-avoid">
@@ -97,7 +97,7 @@ function InputTables({ input, result }: { input: SuccessionInput; result: Succes
         </div>
       </div>
       <div className="space-y-2">
-        <h3 className="font-semibold">나와 형제자매</h3>
+        <h3 className="font-semibold print:break-after-avoid">나와 형제자매</h3>
         <div className="grid min-w-0 gap-3 md:grid-cols-2 print:grid-cols-2">
           {input.children.map((child) => (
             <div key={child.id} className="min-w-0 rounded-lg border p-3 break-inside-avoid">
@@ -217,10 +217,10 @@ export function ReviewSummary({ result, input }: { result: SuccessionResult; inp
         <div className="space-y-6">
           {result.plans.map((plan) => (
             <div key={plan.key} className="space-y-2 print:break-before-auto">
-              <h3 className="font-semibold break-keep">
+              <h3 className="font-semibold break-keep print:break-after-avoid">
                 {plan.rank}위 {plan.label}
               </h3>
-              <ul className="list-disc space-y-0.5 pl-5 text-sm">
+              <ul className="list-disc space-y-0.5 pl-5 text-sm print:text-[11px]">
                 {plan.reasons.map((reason) => (
                   <li key={reason} className="break-keep">
                     {reason}

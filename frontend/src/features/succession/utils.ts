@@ -24,10 +24,10 @@ export const SALE_CASE_LABELS: Record<Sale["case"], string> = {
   general: "일반 과세",
 };
 export const ACQUISITION_LABELS: Record<NonNullable<Transfer["acquisitionTaxCode"]>, string> = {
-  gift: "증여 일반",
-  gift_heavy: "증여 중과(12%)",
-  inherit: "상속 일반",
-  inherit_first_home: "무주택 상속 특례",
+  gift: "취득세 일반",
+  gift_heavy: "취득세 중과(12%)",
+  inherit: "취득세 일반",
+  inherit_first_home: "취득세 무주택 특례(0.8%)",
 };
 export const TIER_LABELS = ["최선안", "차선안 1", "차선안 2"] as const;
 export const SHORT_PLAN_LABELS: Record<PlanKey, string> = {
