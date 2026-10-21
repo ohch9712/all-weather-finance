@@ -979,4 +979,3 @@ def calculate_plans(req: SuccessionInput) -> SuccessionResult:
         assumptions=calc.assumption_lines(),
         sources=[Source(label=label, url=url) for label, url in RULES.sources],
     )
-
