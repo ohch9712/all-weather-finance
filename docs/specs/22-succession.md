@@ -42,6 +42,7 @@
 - `backend/app/modules/succession/**`(규칙 파일 `succession/rules/**` 포함)
 - `backend/alembic/versions/succession_0001_*.py`
 - `backend/tests/succession/**`
+- `backend/tests/auth/test_delete_account.py`: 계정 삭제 테스트의 시드와 기대 테이블 집합에 `succession_cases` 두 줄만
 - `backend/app/api/router.py`: `succession` 라우터 import·등록 두 줄만
 - `backend/app/db/models.py`: `succession` 모델 import 한 줄만
 - `backend/app/modules/estate/service.py`: 10절의 공개 함수 두 개와 `__all__` 항목만 추가(기존 함수·동작은 바꾸지 않는다)
