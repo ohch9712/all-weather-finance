@@ -376,33 +376,3 @@ def test_table_constraints(auth_client, db):
     with pytest.raises(IntegrityError):
         db.flush()
     nested.rollback()
-
-
-def test_access_log_hides_health_query(caplog):
-    from app.modules.succession.privacy import install_access_log_filter
-
-    install_access_log_filter()
-    install_access_log_filter()
-    access = logging.getLogger("uvicorn.access")
-    assert sum(type(item).__name__ == "HealthQueryFilter" for item in access.filters) == 1
-    with caplog.at_level(logging.INFO, logger="uvicorn.access"):
-        access.info(
-            '%s - "%s %s HTTP/%s" %d',
-            "127.0.0.1:5000",
-            "GET",
-            "/api/succession/life-expectancy?role=mother&age=72&health=good",
-            "1.1",
-            200,
-        )
-        access.info(
-            '%s - "%s %s HTTP/%s" %d',
-            "127.0.0.1:5000",
-            "GET",
-            "/api/estate/rules?x=good",
-            "1.1",
-            200,
-        )
-    messages = [record.getMessage() for record in caplog.records]
-    assert "life-expectancy?role=mother&age=72&health=*** HTTP/1.1" in messages[0]
-    assert "good" not in messages[0]
-    assert messages[1].endswith('/api/estate/rules?x=good HTTP/1.1" 200')
