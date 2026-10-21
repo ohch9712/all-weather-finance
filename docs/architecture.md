@@ -117,7 +117,8 @@ flowchart LR
 │   │       ├── ledger/                       [03, 10]
 │   │       ├── imports/                      [04]
 │   │       ├── journal/                      [05, 05b, 11, 20(공개 함수 하나)]
-│   │       ├── estate/                       [06]
+│   │       ├── estate/                       [06, 22(공개 순수 함수 두 개)]
+│   │       ├── succession/                   [22]
 │   │       ├── learn/                        [07]
 │   │       ├── market/                       [08, 20]
 │   │       ├── chat/                         [09, 15]
@@ -141,6 +142,7 @@ flowchart LR
     │   ├── app/(app)/ledger/                 [03, 10]
     │   ├── app/(app)/journal/                [05, 05b, 11]
     │   ├── app/(app)/estate/                 [06]
+    │   ├── app/(app)/succession/             [22]
     │   ├── app/(app)/learn/, admin/learn/    [07]
     │   ├── app/(app)/settings/connections/   [08, 17, 20]
     │   ├── app/(app)/settings/trading-costs/ [05b]
@@ -274,6 +276,7 @@ features/<module>/
 | screener | `saved_screens` | id, user_id, name, query_text, filter(JSONB), created_at | 13 |
 | connectors | `connector_accounts` | id, user_id, provider, kind, organization, label, connected_id_enc, created_at | 17 |
 | connectors | `connector_syncs` | id, user_id, account_id, kind, status, range_start, range_end, started_at, finished_at, summary(JSONB), error_code | 17 |
+| succession | `succession_cases` | id, user_id(unique), data(JSONB, 건강 상태 제외), health_enc(민감정보, 동의 시에만), sensitive_consent_at, created_at, updated_at | 22 |
 
 공통 규칙
 
@@ -324,6 +327,7 @@ features/<module>/
 | `allocation_0002` | allocation | 14 | holdings 컬럼 추가, source CHECK에 `mock` 추가 |
 | `connectors_0001` | connectors | 17 | connector_accounts, connector_syncs |
 | `market_0003` | market | 20 | broker_connections 자동 동기화 컬럼 |
+| `succession_0001` | succession | 22 | succession_cases |
 
 ## 8. 모듈 간 서비스 함수 (공개 인터페이스)
 
@@ -376,6 +380,8 @@ def build_compare_input(db, user_id, *, base_date: date, horizon_years: int, gro
 def compare_estate_plans(req: EstateCompareInput) -> EstateCompareResult   # 순수 함수. 상속·증여 방향 비교(06 8.1)
 def resolve_gift_input(db, user_id, req: GiftTaxRequest) -> GiftTaxInput   # 가족·증여 기록으로 계산 입력을 만든다. 15가 사용
 def member_recipient(db, user_id, member_id: UUID) -> Recipient          # NOT_FOUND. 15가 사용
+def calc_deduction_status(recipient: Recipient, gifts: list[PriorGift], as_of: date) -> DeductionStatus   # 순수 함수. 22가 추가·사용
+def replay_gift_deductions(recipient: Recipient, gifts: list[PriorGift]) -> list[tuple[PriorGift, int]]   # 순수 함수. 기록별 적용 공제(06 6절). 22가 추가·사용
 def prior_gifts(db, user_id, member_id: UUID) -> list[PriorGift]          # 그 가족이 받은 증여 기록. 15가 사용
 
 # app/modules/learn/service.py  (07)
@@ -645,6 +651,7 @@ class BrokerClient(Protocol):
 | 관심종목 | `/stocks/watchlist` | 12 |
 | 조건검색 | `/stocks/screener` | 13 |
 | 상속·증여 | `/estate` | 06 |
+| 상속·증여(과제) | `/succession` | 22 |
 | 배우기 | `/learn` | 07 |
 | AI 상담 | `/chat` | 09 |
 | 설정 | `/settings/profile`, `/settings/connections`, `/settings/trading-costs` | 01b, 08, 05b |
