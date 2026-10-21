@@ -315,6 +315,7 @@
 
 - CHECK `health_enc IS NULL OR sensitive_consent_at IS NOT NULL`.
 - 건강 상태 평문을 `data`·로그·에러 메시지에 남기지 않는다.
+- 접근 로그: 디코딩한 경로가 `/api/succession/`로 시작하는 요청은 `?` 뒤 쿼리 문자열 전체를 `***`로 바꿔 기록한다(키 중복·URL 인코딩된 키·`;` 구분 등 형태와 관계없이). uvicorn 접근 로그의 실제 인자 형식(`client_addr, method, full_path, http_version, status_code`)으로 테스트한다. 422 응답과 예외 로그에도 건강 상태 입력값이 남지 않는지 확인한다.
 
 ## 8. API 계약 (모두 인증 필요, prefix `/api/succession`)
 
