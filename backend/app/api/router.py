@@ -13,6 +13,7 @@ from app.modules.learn.router import router as learn_router
 from app.modules.ledger.router import router as ledger_router
 from app.modules.market.router import router as market_router
 from app.modules.screener.router import router as screener_router
+from app.modules.succession.router import router as succession_router
 from app.modules.watchlist.router import router as watchlist_router
 
 router = APIRouter(prefix="/api")
@@ -25,6 +26,7 @@ router.include_router(ledger_router)
 router.include_router(imports_router)
 router.include_router(journal_router)
 router.include_router(estate_router)
+router.include_router(succession_router)
 router.include_router(learn_router)
 router.include_router(market_router)
 router.include_router(chat_router)

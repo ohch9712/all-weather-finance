@@ -22,8 +22,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         본문으로 건너뛰기
       </a>
       <Sidebar />
-      <div className="flex min-h-dvh min-w-0 flex-col lg:pl-60">
-        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:px-8">
+      <div className="flex min-h-dvh min-w-0 flex-col lg:pl-60 print:pl-0">
+        <header className="sticky top-0 z-20 print:hidden flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:px-8">
           <MobileNav />
           <p className="min-w-0 flex-1 truncate text-sm font-medium">
             <span className="lg:hidden">{current?.label ?? APP_NAME}</span>

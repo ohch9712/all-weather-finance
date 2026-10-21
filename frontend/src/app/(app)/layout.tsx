@@ -13,7 +13,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       <RequireAuth>
         <OnboardingGate>
           <AppShell>{children}</AppShell>
-          <ChatWidget />
+          <div className="print:hidden">
+            <ChatWidget />
+          </div>
         </OnboardingGate>
       </RequireAuth>
     </Suspense>

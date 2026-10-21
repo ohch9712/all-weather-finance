@@ -14,6 +14,7 @@ describe("내비게이션 데이터(architecture 12.1)", () => {
       ["관심종목", "/stocks/watchlist"],
       ["조건검색", "/stocks/screener"],
       ["상속·증여", "/estate"],
+      ["상속·증여(과제)", "/succession"],
       ["배우기", "/learn"],
       ["AI 상담", "/chat"],
       ["프로필", "/settings/profile"],
