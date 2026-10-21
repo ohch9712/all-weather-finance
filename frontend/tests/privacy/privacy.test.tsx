@@ -78,6 +78,22 @@ describe("/privacy", () => {
     expect(screen.getByRole("link", { name: APP_NAME })).toHaveAttribute("href", "/");
   });
 
+  it("상속·증여(과제)의 민감정보 행·별도 동의 문단·암호화 항목을 보여 준다(스펙 22 13절)", async () => {
+    await renderPage(ENV);
+    const items = within(screen.getAllByRole("table")[0]);
+    expect(items.getByRole("rowheader", { name: "민감정보(선택, 별도 동의)" }).closest("tr")).toHaveTextContent(
+      "상속·증여(과제)에 입력한 부모님 건강 상태(좋음·보통·나쁨·요양 중). 별도로 동의한 경우에만 암호화해 저장합니다",
+    );
+    expect(items.getByRole("rowheader", { name: "이용자가 입력하거나 올린 정보" }).closest("tr")).toHaveTextContent(
+      "상속·증여(과제)에 입력한 부모님 정보(나이·생활비·수입)와 재산(종류·금액·지역·대출·취득 정보)",
+    );
+    expect(screen.getByText(/^민감정보는 이용자가 따로 동의한 경우에만 저장합니다\./)).toHaveTextContent(
+      "상속·증여(과제)에 입력한 정보는 AI 기능에 보내지 않습니다.",
+    );
+    expect(screen.getByText("증권사 앱키·시크릿·계좌번호, CODEF 연결 식별값, 부모님 건강 상태(민감정보)는 암호화해 저장합니다.")).toBeInTheDocument();
+    expect(screen.getByText(/자녀 관점의 상속·증여 이전 방안 비교/)).toBeInTheDocument();
+  });
+
   it("표는 표로, 목록은 목록으로 보여 준다", async () => {
     await renderPage(ENV);
     const article = screen.getByRole("article");

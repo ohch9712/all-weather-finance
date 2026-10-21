@@ -178,6 +178,7 @@ def seed(db, owner: UUID, tag: str, post_id: UUID) -> set[str]:
     )
     add(db, "watchlist_items", user_id=owner, stock_code="005930")
     add(db, "saved_screens", user_id=owner, name="조건", filter={})
+    add(db, "succession_cases", user_id=owner, data={})
     account = add(
         db,
         "connector_accounts",
@@ -223,6 +224,7 @@ def seed(db, owner: UUID, tag: str, post_id: UUID) -> set[str]:
         "saved_screens",
         "connector_accounts",
         "connector_syncs",
+        "succession_cases",
         "sessions",
         "user_profiles",
     }

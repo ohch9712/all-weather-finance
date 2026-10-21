@@ -528,3 +528,56 @@ def replay_gift_deductions(recipient: Recipient, gifts: list[PriorGift]) -> list
 - 한국경제, 다주택자 양도세 중과 4년 만에 재시행(2026-05-01): https://www.hankyung.com/article/202605010398Y
 - 정책브리핑, 서울 전역·경기 12곳 조정대상지역 등 지정(2025-10): https://www.korea.kr/news/policyNewsView.do?newsId=148950973
 - 의약일보, 요양병원 간병비 월평균 보도: https://medicaldaily.co.kr/news/16686
+
+## 구현 결과
+
+### 구현한 것
+
+- 백엔드 모듈 `succession`(router·service·repository·models·schemas·calculations·privacy·`rules/kr_2026_05_10.py`), revision `succession_0001`(`succession_cases`, 사용자당 하나·CHECK·FK CASCADE). 8.2의 7개 엔드포인트와 5절 계산 `calculate_plans`(순수 함수). 06 함수는 `estate.service`의 `calc_gift_tax`·`calc_inheritance_tax`와 10절에서 추가한 `calc_deduction_status`·`replay_gift_deductions`만 부른다.
+- 건강 상태는 동의(`sensitiveConsent: true`)일 때만 `{"father": …, "mother": …}`(값이 있는 분만)를 `app.core.crypto.encrypt_str`로 암호화해 `health_enc`에 두고, `data`의 `health`는 항상 `null`이다. `false` 저장·`DELETE /case/sensitive`는 `health_enc`와 동의 시각을 지운다. 다시 동의해 저장하면 처음 동의 시각을 유지한다.
+- 화면 `/succession`(입력 4섹션·민감정보 동의 두 체크·저장·비교·지우기, 이전 가능액 카드·1~3위 비교표와 좁은 화면 카드·`BarChart`·방안 상세·다른 방안·계산하지 않은 방안·계산 기준과 가정)과 `?view=review` 검토용 요약(입력 전체·전체 순위표·방안별 상세·출처·가정·확인 요청 11항목·메모 5줄·`tax` 고지·인쇄 버튼). 메뉴 한 줄, 11.4 인쇄 클래스 세 곳, 처리방침 `content.ts`(스펙 19 7절과 글자까지 같음).
+
+### 규칙 값 확인(2026-10-21, 모두 스펙 4절과 같음)
+
+- 국가데이터처 「2024년 생명표」 보도자료 hwpx [표 2] 성·연령별 기대여명(40·50·60·70·80·90·100세 이상)과 본문의 65세 값(남 19.5, 여 23.7).
+- 지방세법(2026-07-01 시행본) 제6조 제19호(중과기준세율 2%), 제11조 제1항 제1호 나목(상속 2.8%)·제2호(무상취득 3.5%), 제13조의2 제2항(4% + 중과기준세율×400% = 12%, 1세대 1주택자의 직계비속 무상취득 제외), 제15조 제1항 제2호 가목(상속 1가구 1주택 = 세율 − 2%), 제151조 제1항 제1호·나목(지방교육세 0.3%·0.16%·0.4%), 제103조의3(양도 개인지방소득세). 지방세법 시행령 제28조의6(시가표준액 3억 원, 제외 범위).
+- 농어촌특별세법 제5조 제1항 제6호(표준세율 2%로 계산한 취득세의 10%), 제4조 제9호(국민주택규모 이하 주택)·제10호의4(지방세법 제15조 제1항 제1~3호 특례) 비과세.
+- 소득세법(2026-07-01 시행본) 제55조 제1항 세율표(누진공제는 표의 누적 세액에서 계산한 값과 같음), 제89조 제1항 제3호(12억 원), 제95조 제2항 표 1·표 2, 제95조 제3항, 제103조(250만 원), 제104조 제1항 제2·3·8호, 제4항, 제7항. 소득세법 시행령 제154조 제1항(보유 2년, 취득 당시 조정대상지역이면 거주 2년), 제160조(고가주택 계산식), 제167조의3 제1항 제12호의2·제167조의10 제1항 제6호의2(중과 배제는 "2026년 5월 9일까지 양도하는 주택").
+- 근거 조문은 `rules/kr_2026_05_10.py` 머리 주석에 적었다.
+
+### 스펙에 없던 세부 사항(코디네이터 확인 포함)
+
+- `sales.case`의 일반 과세는 `general`, 비사업용 토지는 `non_business_land`. 1세대 1주택 요건을 갖춘 12억 원 초과 주택은 보유·거주가 표 2 조건에 못 미쳐도 `one_house_high`(장특공은 표 1)로 둔다.
+- 증여 대상이 아예 없으면 매각안 제외 이유도 "증여할 부동산이 없어요(부모님이 사시는 집은 빼요)."(코디네이터 승인, 5.6 반영). `realestate_gift_cash_staged`는 `A < 0`이면 "생활비·간병비가 현금보다 많아…", `A = 0`이면 "…지금 넘길 현금이 없어요."
+- 5.9 금액 뒤 조사는 '원을', 5.6 이름 뒤 조사는 받침에 따라 은/는(한글이 아니면 '은(는)')(코디네이터 승인).
+- 시가 0원인 부동산은 증여·매각 대상에서 뺀다(06 증여세 입력의 금액 하한 1원). T 시점 금액이 06 입력 상한(1조 원)을 넘어 06 모델 검증이 실패하면 `422`(`field: "assets"`, "금액이 너무 커 계산할 수 없어요. 재산 금액을 줄여 주세요.")로 돌려준다.
+- 8.1 추가 검증: 부모님 `role` 중복 → `422 parents`, 살아 계신 분 나이 → `parents.{i}.age`, 재산 id 중복 → `assets.{i}.id`, 취득일 > 기준일 → `assets.{i}.acquiredOn`, 자녀 id 중복 → `children.{i}.id`, 과거 증여일 > 기준일 → `children.{i}.pastGifts.{j}.giftedOn`. 비율 값은 소수 둘째 자리, 직접 넣는 기대여명은 소수 첫째 자리까지 받는다. 현금 자산의 지역·공시가격·취득 정보, 토지의 주택 전용 항목, 주택의 비사업용 토지 표시는 저장 전에 지운다.
+- 응답 `parents`에는 살아 계신 분만 넣고, 간병 기간이 0년이면 `careFrom: null`. 상속 행의 금융재산 줄은 `assetLabel: "금융재산(자녀 공동)"`, 매각 후 증여는 `assetKind: "cash"`, `assetLabel: "{이름} 매각대금"`, 현금 증여는 `assetLabel: "현금"`.
+- `GET /rules` 형식: `lifeTable[{age, father, mother}]`, `healthFactors{good…}`, `acquisitionRates[{code, label, acquisitionRate, educationRate, ruralRate}]`, `capitalGainsBrackets[{upTo, rate, progressiveDeduction}]`, `defaults`(4.4 가정값).
+- `GET /life-expectancy`의 `health` 쿼리가 uvicorn 접근 로그에 남지 않도록 `succession/privacy.py`의 로거 필터가 이 경로의 `health=` 값을 `***`로 가린다(공유 로깅 파일은 고치지 않음).
+- 화면: 저장 버튼은 동의 두 체크가 모두 켜졌을 때만 `sensitiveConsent: true`. 동의 없이 저장해도 화면의 건강 상태 값은 이번 계산용으로 남는다. 검토용 요약을 결과 없이 열면 저장한 입력으로 자동 계산하고, 저장한 입력도 없으면 안내와 입력 화면 링크를 보여 준다. 넓은 표는 `xl`(검토용 비교표·이전 일정) 또는 `md` 미만에서 "항목: 값" 카드로 바꿔 360px 가로 스크롤이 없다. 4. 가정값 섹션에 기준일(비우면 오늘) 칸을 함께 둔다.
+- `backend/tests/auth/test_delete_account.py`의 시드·기대 집합에 `succession_cases` 두 줄을 더했다(코디네이터 승인, 3절 반영).
+
+### 실행한 검증
+
+- 백엔드 `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 1,568개 통과(succession 46개: 4.1 기대여명 5, 4.2 취득세, 4.3 양도세 6 + 30%p·거주 요건, 사례 A 중간값·7개 방안 표·순위·tier·같은 날 합산 증여 배분·자녀 영향·추천 이유·notes, 사례 B, 5.6 포함 조건·제외 문구·취득 정보 없는 부동산 notes, 8.1 422, 저장·동의·철회·격리·계정 삭제 CASCADE·테이블 제약, 접근 로그, 10절 두 함수). 사례 A·B 값은 원 단위까지 스펙과 같았다.
+- 빈 DB `finance_22_verify`에서 `alembic upgrade heads` → `downgrade base` → `upgrade heads` 성공 후 삭제.
+- 프론트 `npm run lint`·`npx tsc --noEmit` 통과, `npm run test` 570개 통과(succession 9개, 처리방침·메뉴 포함), `npm run build` 성공.
+- 슬롯 22 서버와 독립 Chrome 컨텍스트(Playwright, 새 계정)에서 사례 A를 화면에 입력해 기대여명(12.0·19.3), 이전 가능액(R 522,664,859·A 277,335,141), 1~3위 비교표 값, 방안 상세·매각 내역·다주택 영향 문구를 6절과 대조했다. 사례 B의 부족 경고(92,000,000원)와 계산하지 않은 방안 6개, 저장·새로고침 불러오기, 동의 한 체크만으로는 미저장·두 체크 저장·철회, 검토용 요약과 인쇄 미디어(사이드바·상단바·챗봇 위젯·버튼 숨김, A4 PDF 8쪽), 360·768·1280px 가로 스크롤 없음, `tax` 고지, 기존 `/estate` 화면을 확인했다.
+
+### 남은 일
+
+- 배포 때 `PRIVACY_EFFECTIVE_DATE` 갱신과 이용자 안내(13절, 코디네이터).
+- 로컬 개발 로그(`backend/logs/dev-server.log`)에는 필터 추가 전 화면 확인 때 넣은 가짜 건강 상태 쿼리가 남아 있을 수 있다(저장소 밖, 운영과 무관).
+
+### 검증 지적 수정 (2026-10-21)
+
+- 지적(PR #70 검증, 중요 1건): `privacy.py` 정규식이 첫 원문 `health=`만 가려, 중복 키(`health=normal&health=poor`, 서버는 마지막 값을 씀)와 URL 인코딩된 키(`%68ealth=care`)로 보낸 건강 상태가 HTTP 200으로 처리되면서 접근 로그에 평문으로 남았다.
+- 수정: develop `24cc017`에서 보완한 7절 규칙대로 바꿨다. 디코딩한(`unquote`) 경로가 `/api/succession/`으로 시작하면 `?` 뒤 쿼리 문자열 전체를 `***`로 기록한다. `record.args`의 문자열 인자(uvicorn 접근 로그의 `full_path`)는 인자 5개를 그대로 둔 채 가리고, 메시지 틀(`record.msg`)에 경로·쿼리가 들어 있는 기록은 서식을 적용한 최종 문자열에서 가린 뒤 `args`를 비운다. 다른 경로(`/api/successions/…`, `/api/estate/…?next=/api/succession/…` 포함)는 그대로다. 위 "스펙에 없던 세부 사항"의 "`health=` 값을 가린다"는 이 규칙으로 바뀌었다.
+- 회귀 테스트 `backend/tests/succession/test_privacy.py`(16개): uvicorn 실제 인자 형식(`'%s - "%s %s HTTP/%s" %d'`, `client_addr, method, full_path, http_version, status_code`)의 LogRecord를 uvicorn 기본 접근 포매터(`AccessFormatter`)로 형식화해, 원문 health·중복 health·`%68ealth`·값 인코딩 `%63are`·키 대소문자와 `;` 구분·`/case?health=`·인코딩된 경로 `/api/%73uccession/…`은 `?***`로 남고, 쿼리 없는 경로와 다른 모듈 경로는 바뀌지 않음을 확인한다. 메시지 문자열 형태(요청 줄 전체, 쿼리 안 서식 자리)와 `uvicorn.access` 로거에 필터가 한 번만 붙는지도 본다. 이전 규칙을 기대하던 `test_api.py`의 접근 로그 테스트는 이 파일로 옮겼다.
+- 422·예외 경로 확인(코드 변경 없음, 테스트로 고정):
+  - 잘못된 health 값(쿼리, 중복 쿼리, `POST /plans`·`PUT /case` 본문)은 `422 VALIDATION_ERROR`, `details: [{field: "health", message: "형식이 올바르지 않습니다."}]`이고 응답에 입력값이 없다. 공통 검증 오류 처리기는 로그를 남기지 않는다(서버 로거 전체 DEBUG 기록에 값이 없음, 테스트 클라이언트 httpx 로그는 제외).
+  - 처리되지 않은 예외는 공통 처리기가 예외 타입 이름만 남기고, Starlette가 다시 던진 예외를 uvicorn이 `Exception in ASGI application` 트레이스백으로 남긴다. 트레이스백에는 예외 메시지와 코드 줄만 있고 요청 쿼리·본문·지역 변수는 없다. 이 모듈의 예외 메시지는 고정 문구이고, 06 모델 검증 실패(`ValidationError`)는 `field_error(...) from None`으로 바꿔 입력값이 담긴 검증 메시지가 로그로 가지 않는다. 계산 함수를 강제로 실패시킨 테스트에서 500 응답과 uvicorn 방식 error 로그(트레이스백 포함)에 건강 상태(normal·good·poor)가 없음을 확인했다. 이 모듈에서 따로 막을 곳은 없었다.
+  - 응답 모델 검증 실패(`ResponseValidationError`)는 메시지에 입력값을 담지만, 건강 상태는 `Health` 리터럴로 검증한 값만 암호화해 저장하므로 정상 경로에서는 생기지 않는다.
+- 실행한 검증: develop `24cc017` 병합(스펙 문서 한 줄만 바뀌어 프론트는 `npm run test`만 실행). 백엔드 `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 1,583개 통과(succession 61개). 프론트 `npm run test` 56개 파일 570개 통과. 슬롯 22 실서버(백엔드만, 합성 계정, 확인 뒤 계정 삭제)에 정상 요청, 두 재현 요청(각각 200, `healthFactor` 0.7·0.4로 poor·care 적용), 키 대소문자·`;` 구분·잘못된 값(422), `POST /plans` 잘못된 health(422), 다른 경로 `GET /api/health?probe=keep`을 보내 succession 접근 로그는 모두 `GET /api/succession/life-expectancy?*** HTTP/1.1`로만 남고 다른 경로는 그대로이며, 새 로그에 건강 상태 값·인코딩 키가 0건임을 확인했다.
+- 남은 일: 로컬 `backend/logs/dev-server.log.1`(저장소 밖)에는 수정 전 검증 때 보낸 합성 쿼리가 남아 있을 수 있다.
