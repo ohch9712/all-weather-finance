@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from app.api.deps import CurrentUser, DBSession, require_json
 from app.modules.succession import service
 from app.modules.succession.calculations import life_expectancy
+from app.modules.succession.privacy import install_access_log_filter
 from app.modules.succession.rules.kr_2026_05_10 import DEFAULT_ASSUMPTIONS
 from app.modules.succession.rules.kr_2026_05_10 import RULES_2026_05_10 as RULES
 from app.modules.succession.schemas import (
@@ -21,6 +22,7 @@ from app.modules.succession.schemas import (
 
 router = APIRouter(prefix="/succession", tags=["succession"])
 JSON = [Depends(require_json)]
+install_access_log_filter()
 
 
 @router.get("/case", response_model=CaseEnvelope)
