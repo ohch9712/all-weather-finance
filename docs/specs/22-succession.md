@@ -569,3 +569,15 @@ def replay_gift_deductions(recipient: Recipient, gifts: list[PriorGift]) -> list
 
 - 배포 때 `PRIVACY_EFFECTIVE_DATE` 갱신과 이용자 안내(13절, 코디네이터).
 - 로컬 개발 로그(`backend/logs/dev-server.log`)에는 필터 추가 전 화면 확인 때 넣은 가짜 건강 상태 쿼리가 남아 있을 수 있다(저장소 밖, 운영과 무관).
+
+### 검증 지적 수정 (2026-10-21)
+
+- 지적(PR #70 검증, 중요 1건): `privacy.py` 정규식이 첫 원문 `health=`만 가려, 중복 키(`health=normal&health=poor`, 서버는 마지막 값을 씀)와 URL 인코딩된 키(`%68ealth=care`)로 보낸 건강 상태가 HTTP 200으로 처리되면서 접근 로그에 평문으로 남았다.
+- 수정: develop `24cc017`에서 보완한 7절 규칙대로 바꿨다. 디코딩한(`unquote`) 경로가 `/api/succession/`으로 시작하면 `?` 뒤 쿼리 문자열 전체를 `***`로 기록한다. `record.args`의 문자열 인자(uvicorn 접근 로그의 `full_path`)는 인자 5개를 그대로 둔 채 가리고, 메시지 틀(`record.msg`)에 경로·쿼리가 들어 있는 기록은 서식을 적용한 최종 문자열에서 가린 뒤 `args`를 비운다. 다른 경로(`/api/successions/…`, `/api/estate/…?next=/api/succession/…` 포함)는 그대로다. 위 "스펙에 없던 세부 사항"의 "`health=` 값을 가린다"는 이 규칙으로 바뀌었다.
+- 회귀 테스트 `backend/tests/succession/test_privacy.py`(16개): uvicorn 실제 인자 형식(`'%s - "%s %s HTTP/%s" %d'`, `client_addr, method, full_path, http_version, status_code`)의 LogRecord를 uvicorn 기본 접근 포매터(`AccessFormatter`)로 형식화해, 원문 health·중복 health·`%68ealth`·값 인코딩 `%63are`·키 대소문자와 `;` 구분·`/case?health=`·인코딩된 경로 `/api/%73uccession/…`은 `?***`로 남고, 쿼리 없는 경로와 다른 모듈 경로는 바뀌지 않음을 확인한다. 메시지 문자열 형태(요청 줄 전체, 쿼리 안 서식 자리)와 `uvicorn.access` 로거에 필터가 한 번만 붙는지도 본다. 이전 규칙을 기대하던 `test_api.py`의 접근 로그 테스트는 이 파일로 옮겼다.
+- 422·예외 경로 확인(코드 변경 없음, 테스트로 고정):
+  - 잘못된 health 값(쿼리, 중복 쿼리, `POST /plans`·`PUT /case` 본문)은 `422 VALIDATION_ERROR`, `details: [{field: "health", message: "형식이 올바르지 않습니다."}]`이고 응답에 입력값이 없다. 공통 검증 오류 처리기는 로그를 남기지 않는다(서버 로거 전체 DEBUG 기록에 값이 없음, 테스트 클라이언트 httpx 로그는 제외).
+  - 처리되지 않은 예외는 공통 처리기가 예외 타입 이름만 남기고, Starlette가 다시 던진 예외를 uvicorn이 `Exception in ASGI application` 트레이스백으로 남긴다. 트레이스백에는 예외 메시지와 코드 줄만 있고 요청 쿼리·본문·지역 변수는 없다. 이 모듈의 예외 메시지는 고정 문구이고, 06 모델 검증 실패(`ValidationError`)는 `field_error(...) from None`으로 바꿔 입력값이 담긴 검증 메시지가 로그로 가지 않는다. 계산 함수를 강제로 실패시킨 테스트에서 500 응답과 uvicorn 방식 error 로그(트레이스백 포함)에 건강 상태(normal·good·poor)가 없음을 확인했다. 이 모듈에서 따로 막을 곳은 없었다.
+  - 응답 모델 검증 실패(`ResponseValidationError`)는 메시지에 입력값을 담지만, 건강 상태는 `Health` 리터럴로 검증한 값만 암호화해 저장하므로 정상 경로에서는 생기지 않는다.
+- 실행한 검증: develop `24cc017` 병합(스펙 문서 한 줄만 바뀌어 프론트는 `npm run test`만 실행). 백엔드 `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 1,583개 통과(succession 61개). 프론트 `npm run test` 56개 파일 570개 통과. 슬롯 22 실서버(백엔드만, 합성 계정, 확인 뒤 계정 삭제)에 정상 요청, 두 재현 요청(각각 200, `healthFactor` 0.7·0.4로 poor·care 적용), 키 대소문자·`;` 구분·잘못된 값(422), `POST /plans` 잘못된 health(422), 다른 경로 `GET /api/health?probe=keep`을 보내 succession 접근 로그는 모두 `GET /api/succession/life-expectancy?*** HTTP/1.1`로만 남고 다른 경로는 그대로이며, 새 로그에 건강 상태 값·인코딩 키가 0건임을 확인했다.
+- 남은 일: 로컬 `backend/logs/dev-server.log.1`(저장소 밖)에는 수정 전 검증 때 보낸 합성 쿼리가 남아 있을 수 있다.
