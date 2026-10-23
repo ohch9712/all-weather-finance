@@ -413,7 +413,8 @@ class _Calculator:
     def _funding(self) -> None:
         assumptions = self.assumptions
         inflation = 1 + assumptions.cost_inflation_rate / 100
-        monthly = max(0, self.req.monthly_living_cost - self.req.monthly_income)
+        monthly_living = self.req.monthly_living_cost
+        monthly_income = self.req.monthly_income
         care_windows = []
         for parent, info in self.parents:
             n = info.years_assumed
@@ -422,19 +423,29 @@ class _Calculator:
         self.costs: list[CostRow] = []
         for year in range(self.span):
             grown = inflation**year
-            living = won(monthly * 12 * grown)
+            # 생활비 부족분 d_y와 남는 수입 s_y. 남는 수입은 간병비를 먼저 메운다(20절).
+            deficit = won(max(0, monthly_living - monthly_income) * 12 * grown)
+            surplus = won(max(0, monthly_income - monthly_living) * 12 * grown)
             care = sum(
                 won(assumptions.care_monthly_cost * 12 * grown)
                 for start, end in care_windows
                 if start <= year < end
             )
+            # 표시용 생활비·수입은 늘 total = max(0, living + care − income)이 되게 맞춘다.
+            if monthly_living >= monthly_income:
+                income = won(monthly_income * 12 * grown)
+                living = income + deficit
+            else:
+                living = won(monthly_living * 12 * grown)
+                income = living + surplus
             self.costs.append(
                 CostRow(
                     year=year,
                     on=add_years(self.d0, year),
                     living=living,
                     care=care,
-                    total=living + care,
+                    income=income,
+                    total=deficit + max(0, care - surplus),
                 )
             )
         owner_costs = [row for row in self.costs if row.year < self.n_owner]
@@ -917,6 +928,8 @@ class _Calculator:
             "명의자보다 오래 사시는 부모님은 남은 생활·간병비만큼 상속받고 나머지는 "
             "자녀가 상속받는다고 봐요.",
             "생활·간병비는 부모님 현금에서 쓰고, 모자라도 부동산을 팔지 않는다고 봐요.",
+            "월 수입이 월 생활비보다 많으면 남는 수입으로 간병비를 먼저 메우고, 그래도 남는 "
+            "돈은 현금으로 쌓지 않는다고 봐요.",
             "대출은 상속 때까지 그대로 남고 모두 금융회사 채무로 봐요. "
             "부동산 증여는 대출을 넘기지 않는 단순 증여예요.",
             "부동산 가격은 입력한 시가를 쓰고, 공시가격을 비우면 시가의 "

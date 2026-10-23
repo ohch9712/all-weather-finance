@@ -81,8 +81,9 @@ def test_plans_contract_case_a(auth_client):
     assert funding["costs"][0] == {
         "year": 0,
         "on": "2026-10-21",
-        "living": 24_000_000,
+        "living": 36_000_000,
         "care": 0,
+        "income": 12_000_000,
         "total": 24_000_000,
     }
     assert body["assignments"][0] == {"assetId": "a2", "childId": "c2"}

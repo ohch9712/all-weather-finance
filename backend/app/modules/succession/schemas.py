@@ -177,6 +177,7 @@ class CostRow(CamelModel):
     on: date
     living: int
     care: int
+    income: int
     total: int
 
 
