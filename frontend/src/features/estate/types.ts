@@ -45,7 +45,7 @@ export interface Scenario {
   key: string; label: string;
   gifts: { memberId: string; displayName: string; giftOn: string; amount: number; giftTax: number }[];
   totalGifted: number; giftTaxTotal: number; giftsValueAtHorizon: number; estateAtHorizon: number;
-  inheritanceTax: number; totalTax: number; familyReceives: number;
+  inheritanceTax: number; totalTax: number; giftTaxAtHorizon: number; totalTaxAtHorizon: number; familyReceives: number;
   inheritance: { taxableValue: number; appliedDeduction: number; taxBase: number; payableTax: number };
 }
 export interface Comparison {

@@ -150,15 +150,32 @@ it("분산 증여 타임라인과 비교 카드·차트", async () => {
 });
 
 it("방향 비교 카드·최대 금액 배지·막대·상세 펼치기", async () => {
-  server.use(http.post(apiUrl("/api/estate/compare"), () => HttpResponse.json({ baseDate: "2026-10-16", horizonDate: "2031-10-16", annualGrowthRate: "0", recommendedKey: "inherit_only", scenarios: [{ key: "inherit_only", label: "증여 없이 상속", gifts: [], totalGifted: 0, giftTaxTotal: 0, giftsValueAtHorizon: 0, estateAtHorizon: 800000000, inheritanceTax: 35890000, totalTax: 35890000, familyReceives: 764110000, inheritance: { taxableValue: 795000000, appliedDeduction: 560000000, taxBase: 235000000, payableTax: 35890000 } }], notes: ["참고용 비교입니다."], assumptions: [] })));
+  // 스펙 06 8.1 사례 1의 두 방향(17절: 증여세를 상속 시점까지 불린 값)
+  const inheritOnly = { key: "inherit_only", label: "증여 없이 상속", gifts: [], totalGifted: 0, giftTaxTotal: 0, giftsValueAtHorizon: 0, estateAtHorizon: 2710264056, inheritanceTax: 187323195, totalTax: 187323195, giftTaxAtHorizon: 0, totalTaxAtHorizon: 187323195, familyReceives: 2522940861, inheritance: { taxableValue: 2705264056, appliedDeduction: 1861541738, taxBase: 843722318, payableTax: 187323195 } };
+  const lumpSum = { key: "lump_sum_now", label: "자녀에게 지금 100,000,000원씩 증여", gifts: [{ memberId: "child-id", displayName: "첫째", giftOn: "2026-10-16", amount: 100000000, giftTax: 4850000 }, { memberId: "child-2", displayName: "둘째", giftOn: "2026-10-16", amount: 100000000, giftTax: 4850000 }], totalGifted: 200000000, giftTaxTotal: 9700000, giftsValueAtHorizon: 361368540, estateAtHorizon: 2348895516, inheritanceTax: 143369471, totalTax: 153069471, giftTaxAtHorizon: 17526374, totalTaxAtHorizon: 160895845, familyReceives: 2549368211, inheritance: { taxableValue: 2343895516, appliedDeduction: 1500000000, taxBase: 843895516, payableTax: 143369471 } };
+  server.use(http.post(apiUrl("/api/estate/compare"), () => HttpResponse.json({ baseDate: "2026-10-16", horizonDate: "2046-10-16", annualGrowthRate: "3", recommendedKey: "lump_sum_now", scenarios: [inheritOnly, lumpSum], notes: ["증여할 때 낸 증여세도 상속 시점까지 연 3%로 불려 총 세금과 가족에게 남는 금액에 반영했어요."], assumptions: [] })));
   const { user } = render("compare");
   await user.click(await screen.findByRole("button", { name: "방향 비교하기" }));
-  expect(await screen.findByText("같은 가정에서 가장 많이 남는 방향")).toBeVisible();
-  expect(screen.getByText("764,110,000원")).toBeVisible();
-  expect(screen.getByRole("img", { name: "방향별 총 세금과 가족에게 남는 금액" })).toBeInTheDocument();
-  await user.click(screen.getByText("증여 일정과 상속세 단계 펼치기"));
-  expect(screen.getByText("증여 일정 없음")).toBeVisible();
-  expect(screen.getByText("과세표준")).toBeVisible();
+  const card = (await screen.findByRole("heading", { name: lumpSum.label })).closest("section") as HTMLElement;
+  expect(within(card).getByText("같은 가정에서 가장 많이 남는 방향")).toBeVisible();
+  expect(within(card).getByText("2,549,368,211원")).toBeVisible();
+  const atHorizon = within(card).getByText("총 세금(상속 시점 기준)");
+  expect(atHorizon.nextElementSibling).toHaveTextContent("160,895,845원");
+  const paid = within(card).getByText("총 세금(낸 금액)");
+  expect(paid.nextElementSibling).toHaveTextContent("153,069,471원");
+  expect(within(card).getByText("증여세", { selector: "dt" }).nextElementSibling).toHaveTextContent("9,700,000원");
+  expect(within(card).getByText("상속세", { selector: "dt" }).nextElementSibling).toHaveTextContent("143,369,471원");
+  const other = screen.getByRole("heading", { name: inheritOnly.label }).closest("section") as HTMLElement;
+  expect(within(other).queryByText("같은 가정에서 가장 많이 남는 방향")).not.toBeInTheDocument();
+  expect(within(other).getByText("총 세금(상속 시점 기준)").nextElementSibling).toHaveTextContent("187,323,195원");
+  const chart = screen.getByRole("heading", { name: "방향별 금액 비교" }).closest("section") as HTMLElement;
+  expect(within(chart).getByRole("img", { name: "방향별 상속 시점 기준 총 세금과 가족에게 남는 금액" })).toBeInTheDocument();
+  expect(within(chart).getByText("총 세금(상속 시점 기준)", { selector: "li span" })).toBeInTheDocument();
+  expect(within(chart).getByText("가족에게 남는 금액", { selector: "li span" })).toBeInTheDocument();
+  expect(within(chart).getByRole("row", { name: /일시 증여/ })).toHaveTextContent("1.6억");
+  await user.click(within(other).getByText("증여 일정과 상속세 단계 펼치기"));
+  expect(within(other).getByText("증여 일정 없음")).toBeVisible();
+  expect(within(other).getByText("과세표준")).toBeVisible();
 });
 
 it("자녀 없는 경우 안내와 사전 채움 null", async () => {

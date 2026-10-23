@@ -240,15 +240,11 @@ def compare_input(**kwargs):
     )
 
 
-def test_compare_example_one():
-    result = compare_estate_plans(compare_input())
-    expected = [
-        (0, 2_710_264_056, 187_323_195, 187_323_195, 0, 2_522_940_861),
-        (0, 2_395_177_266, 165_000_438, 165_000_438, 315_086_790, 2_545_263_618),
-        (9_700_000, 2_348_895_516, 143_369_471, 153_069_471, 361_368_540, 2_557_194_585),
-        (0, 2_647_246_698, 176_844_308, 176_844_308, 63_017_358, 2_533_419_748),
-    ]
-    for actual, values in zip(result.scenarios, expected, strict=True):
+def assert_scenarios(result, expected):
+    # 스펙 8.1 표 열 순서: 증여세 합계, T 상속재산, 상속세, 총 세금, 증여 자산 T 가치,
+    # 증여세 T 가치, 상속 시점 기준 총 세금, 가족에게 남는 금액
+    assert [s.key for s in result.scenarios] == [key for key, _ in expected]
+    for actual, (_, values) in zip(result.scenarios, expected, strict=True):
         for value, want in zip(
             (
                 actual.gift_tax_total,
@@ -256,13 +252,82 @@ def test_compare_example_one():
                 actual.inheritance_tax,
                 actual.total_tax,
                 actual.gifts_value_at_horizon,
+                actual.gift_tax_at_horizon,
+                actual.total_tax_at_horizon,
                 actual.family_receives,
             ),
             values,
             strict=True,
         ):
             assert abs(value - want) <= 1000
+        assert actual.total_tax_at_horizon == actual.gift_tax_at_horizon + actual.inheritance_tax
+        assert actual.family_receives == (
+            actual.estate_at_horizon
+            - actual.inheritance_tax
+            + actual.gifts_value_at_horizon
+            - actual.gift_tax_at_horizon
+        )
+
+
+def test_compare_example_one():
+    result = compare_estate_plans(compare_input())
+    assert_scenarios(
+        result,
+        [
+            (
+                "inherit_only",
+                (0, 2_710_264_056, 187_323_195, 187_323_195, 0, 0, 187_323_195, 2_522_940_861),
+            ),
+            (
+                "staged_children",
+                (
+                    0,
+                    2_395_177_266,
+                    165_000_438,
+                    165_000_438,
+                    315_086_790,
+                    0,
+                    165_000_438,
+                    2_545_263_618,
+                ),
+            ),
+            (
+                "lump_sum_now",
+                (
+                    9_700_000,
+                    2_348_895_516,
+                    143_369_471,
+                    153_069_471,
+                    361_368_540,
+                    17_526_374,
+                    160_895_845,
+                    2_549_368_211,
+                ),
+            ),
+            (
+                "staged_grandchildren",
+                (
+                    0,
+                    2_647_246_698,
+                    176_844_308,
+                    176_844_308,
+                    63_017_358,
+                    0,
+                    176_844_308,
+                    2_533_419_748,
+                ),
+            ),
+        ],
+    )
     assert result.recommended_key == "lump_sum_now"
+    assert [(g.amount, g.gift_tax) for g in result.scenarios[2].gifts] == [
+        (100_000_000, 4_850_000),
+        (100_000_000, 4_850_000),
+    ]
+    assert (
+        "증여할 때 낸 증여세도 상속 시점까지 연 3%로 불려 총 세금과 가족에게 남는 금액에 "
+        "반영했어요." in result.notes
+    )
     assert [g.gift_on for g in result.scenarios[1].gifts] == [
         DAY,
         DAY,
@@ -292,6 +357,49 @@ def test_compare_example_two():
         (4_850_000, 700_000_000, 35_065_500, 39_915_500, 760_084_500),
     ]
     assert result.recommended_key == "inherit_only"
+    # 증가율 0%면 증여세를 불려도 낸 금액과 같다(17절).
+    for s in result.scenarios:
+        assert s.gift_tax_at_horizon == s.gift_tax_total
+        assert s.total_tax_at_horizon == s.total_tax
+
+
+def test_compare_example_three_gift_tax_timing():
+    result = compare_estate_plans(compare_input(horizon_years=40, lump_sum_per_child=500_000_000))
+    assert result.horizon_date == date(2066, 10, 16)
+    lump = result.scenarios[2]
+    assert [(g.display_name, g.gift_on, g.amount, g.gift_tax) for g in lump.gifts] == [
+        ("첫째", DAY, 500_000_000, 77_600_000),
+        ("둘째", DAY, 100_000_000, 4_850_000),
+    ]
+    # 증여세 합계, 증여세 T 가치, 상속세, 총 세금, 상속 시점 기준 총 세금, 가족에게 남는 금액
+    expected = [
+        ("inherit_only", (0, 0, 656_999_477, 656_999_477, 656_999_477, 4_240_021_360)),
+        ("staged_children", (0, 0, 483_098_314, 483_098_314, 483_098_314, 4_413_922_523)),
+        (
+            "lump_sum_now",
+            (82_450_000, 269_172_911, 300_303_687, 382_753_687, 569_476_598, 4_327_544_239),
+        ),
+        (
+            "staged_grandchildren",
+            (0, 0, 596_830_580, 596_830_580, 596_830_580, 4_300_190_257),
+        ),
+    ]
+    assert [s.key for s in result.scenarios] == [key for key, _ in expected]
+    for actual, (_, values) in zip(result.scenarios, expected, strict=True):
+        for value, want in zip(
+            (
+                actual.gift_tax_total,
+                actual.gift_tax_at_horizon,
+                actual.inheritance_tax,
+                actual.total_tax,
+                actual.total_tax_at_horizon,
+                actual.family_receives,
+            ),
+            values,
+            strict=True,
+        ):
+            assert abs(value - want) <= 1000
+    assert result.recommended_key == "staged_children"
 
 
 def test_compare_conditions_budget_prior_and_tie():
