@@ -58,10 +58,13 @@ export function ComparisonCardView({ card }: { card: ComparisonCard }) {
                 <span className="min-w-0 text-sm font-medium break-keep">{row.label}</span>
                 {row.recommended && <Badge>같은 가정에서 가장 많이 남는 방향</Badge>}
               </div>
-              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-sm">
-                <dt className="text-muted-foreground">가족에게 남는 금액</dt>
+              {/* 270px 카드에서 금액은 한 줄로 두고 라벨이 줄바꿈한다(스펙 15 11절). */}
+              <dl className="grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-0.5 text-sm">
+                <dt className="text-muted-foreground break-keep">가족에게 남는 금액</dt>
                 <dd className="text-right font-medium tabular-nums">{row.familyReceives}</dd>
-                <dt className="text-muted-foreground">총 세금</dt>
+                <dt className="text-muted-foreground break-keep">총 세금(상속 시점 기준)</dt>
+                <dd className="text-right tabular-nums">{row.totalTaxAtHorizon}</dd>
+                <dt className="text-muted-foreground break-keep">총 세금(낸 금액)</dt>
                 <dd className="text-right tabular-nums">{row.totalTax}</dd>
               </dl>
             </li>

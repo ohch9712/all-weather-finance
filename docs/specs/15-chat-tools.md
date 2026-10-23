@@ -90,7 +90,7 @@ develop `5d82533`의 실제 코드와 대조해 정한 내용이다. 표와 어�
   - `stock_list`: `search_stocks`는 시세가 없는 종목 마스터 검색이라 `price`·`changeRate`는 null, `source`는 `"master"`(배지 없음), `extra`는 시장·ETF 표시. `screen_stocks`는 `ScreenResult.as_of`·`source`·`items`, `get_watchlist`는 항목의 `quote`와 첫 항목의 `source`.
   - `link_list`: `search_posts` 결과의 `title`·`summary`, `href`는 `/learn/{slug}`.
   - `gift_tax`: `GiftTaxResult.steps`와 `payable_tax`, `href`는 `/estate?tab=gift-tax`. `plan_gifts`의 `link`는 `/estate?tab=plan`.
-  - `comparison`: `EstateCompareResult.scenarios`의 `key`·`label`·`total_tax`·`family_receives`, `recommended`는 `key == recommended_key`, `horizonDate`는 `horizon_date`.
+  - `comparison`: `EstateCompareResult.scenarios`의 `key`·`label`·`total_tax_at_horizon`·`total_tax`·`family_receives`, `recommended`는 `key == recommended_key`, `horizonDate`는 `horizon_date`(11절).
 - `search_learning`은 사용자 없이 `learn.search_posts(db, query, limit=5)`를 부르므로 북마크·읽음 표시는 넣지 않는다.
 
 ### 4.2 금액 인용 (웨이브 4 후속, 2026-10-18)
@@ -119,7 +119,7 @@ develop `5d82533`의 실제 코드와 대조해 정한 내용이다. 표와 어�
 | { type: "directions"; title: string; items: { title: string; body: string; amount: string | null }[];
     href: "/allocation/recommendation/detail" }
 | { type: "comparison"; title: string; horizonDate: string;
-    rows: { key: string; label: string; totalTax: string; familyReceives: string; recommended: boolean }[];
+    rows: { key: string; label: string; totalTaxAtHorizon: string; totalTax: string; familyReceives: string; recommended: boolean }[];
     href: "/estate?tab=compare" }
 ```
 
@@ -172,6 +172,23 @@ develop `5d82533`의 실제 코드와 대조해 정한 내용이다. 표와 어�
 5. 도구 결과에 이메일·사용자 ID·계좌번호가 없다.
 6. 09의 append-only·고정 프롬프트 규칙이 유지된다(도구 목록 이름순, 시스템 프롬프트 고정).
 7. `get_recommendation`·`compare_estate_plans` 도구가 02·06의 공개 함수만 부르고, 결과 문장을 바꾸지 않고 전달한다.
+
+## 11. 상속·증여 방향 비교의 상속 시점 기준 세금 (2026-10-23 사용자 결정, 브랜치 `feature/15-chat-estate-timing`)
+
+- 배경: 06 17절(2026-10-23)부터 `compare_estate_plans`의 `familyReceives`는 증여세를 상속 시점까지 불린 값(`giftTaxAtHorizon`)으로 빼고, 방향마다 `totalTaxAtHorizon`(상속 시점 기준 총 세금)이 생겼다. 챗봇 도구는 `totalTax`(낸 금액)만 모델과 카드에 넘겨 세 가지가 어긋난다.
+  1. 카드: 06 사례 3(40년, 일시 증여 5억)에서 추천인 `staged_children`의 총 세금 483,098,314원이 `lump_sum_now`의 382,753,687원보다 많아 보인다(상속 시점 기준은 483,098,314원 대 569,476,598원).
+  2. 모델: `notes`에는 "증여세도 상속 시점까지 불려 총 세금과 가족에게 남는 금액에 반영했어요"가 있는데 `totalTax`는 낸 금액이다.
+  3. 모델: `estateAtHorizon − inheritanceTax + giftsValueAtHorizon − giftTaxTotal`이 `familyReceives`와 맞지 않는다(사례 3 일시 증여 4,514,267,150 대 4,327,544,239).
+- 사용자 결정: 챗봇도 06 화면과 같이 상속 시점 기준 세금을 보여 준다.
+- 도구 결과 `content.scenarios[]`에 `giftTaxAtHorizon`·`totalTaxAtHorizon`(06 응답 값 그대로)을 더하고, 4.2대로 `giftTaxAtHorizonText`·`totalTaxAtHorizonText`가 생기게 `chat/tools/common.py`의 `KRW_FIELDS`에 두 이름을 넣는다. 기존 필드는 그대로 둔다. 이제 모든 방향에서 `estateAtHorizon − inheritanceTax + giftsValueAtHorizon − giftTaxAtHorizon == familyReceives`다.
+- `comparison` 카드 `rows[]`에 `totalTaxAtHorizon`(형식화 문자열, `krw`)을 더한다(5절). 카드 각 행은 "가족에게 남는 금액", "총 세금(상속 시점 기준)", "총 세금(낸 금액)" 세 줄이다. 360px 채팅 폭(카드 안 270px)에서 넘치지 않게 한다(라벨 줄바꿈 허용).
+- 도구 설명: 첫 문장 뒤에 "총 세금은 증여세를 상속 시점까지 불려 더한 totalTaxAtHorizon이 비교 기준이고, totalTax는 낸 금액 그대로다."를 넣는다. 도구 이름·입력 모델·`summary` 문장·시스템 프롬프트·평가 질문은 바꾸지 않는다.
+- 소유 파일: `backend/app/modules/chat/tools/estate.py`·`common.py`(`KRW_FIELDS` 두 이름만), `backend/tests/chat/**`, `frontend/src/features/chat/types.ts`·`cards/EstateCards.tsx`, `frontend/tests/chat/**`, 이 문서 `## 구현 결과` 끝의 새 소절. 06·DB·마이그레이션은 바꾸지 않는다.
+- 확인: 백엔드·프론트 공통 완료 기준과 아래.
+  - 06 사례 1·3 입력으로 도구를 실행해 `content`의 두 필드와 `…Text`, 카드 `rows`의 세 값이 06 17절 표와 같다(사례 3 `lump_sum_now`: `totalTaxAtHorizon` 569,476,598원, `totalTax` 382,753,687원, `familyReceives` 4,327,544,239원, 추천 `staged_children`).
+  - 모든 방향에서 위 항등식이 성립한다. 증가율 0%면 `totalTaxAtHorizon == totalTax`.
+  - 카드 테스트: 세 줄 라벨과 값, 추천 표시.
+  - 실제 LLM을 부르지 않고 실제 도구가 만든 `comparison` 카드가 담긴 대화를 독립 브라우저로 열어 채팅 화면과 위젯을 360·1280px에서 확인한다(15 구현 결과의 화면 확인 방식, 가로 넘침 없음).
 
 ## 구현 결과
 
@@ -309,3 +326,42 @@ develop `5d82533`의 실제 코드와 대조해 정한 내용이다. 표와 어�
 
 - 금액 불일치 0건은 평가 한 번의 결과다. 모델 출력은 실행마다 달라지므로 다음 평가에서도 지표를 함께 본다.
 - 5번("올해 매매 성적")이 `get_today`를 먼저 부르는 것은 F4 남은 일 그대로다(`journal.py` 설명은 이번 범위에서 바꾸지 않았다).
+
+### 상속·증여 비교 상속 시점 기준 세금 (2026-10-23)
+
+- 대상: 11절. 브랜치 `feature/15-chat-estate-timing`(develop `f2183f3`에서 시작). 06·DB·마이그레이션, 도구 이름·입력 모델·`summary`·시스템 프롬프트·평가 질문은 바꾸지 않았다.
+- 고친 것
+  - `chat/tools/estate.py` `compare_estate_plans`: `content.scenarios[]`의 `totalTax` 뒤에 `giftTaxAtHorizon`·`totalTaxAtHorizon`(06 `CompareScenario`의 `gift_tax_at_horizon`·`total_tax_at_horizon` 그대로)을 더했다. `comparison` 카드 `rows[]`에 `totalTaxAtHorizon`(`krw`, 전체 자릿수)을 5절 순서(`key`·`label`·`totalTaxAtHorizon`·`totalTax`·`familyReceives`·`recommended`)로 더했다. 도구 설명 첫 문장 바로 뒤에 11절 문장 "총 세금은 증여세를 상속 시점까지 불려 더한 totalTaxAtHorizon이 비교 기준이고, totalTax는 낸 금액 그대로다."를 넣었다.
+  - `chat/tools/common.py`: `KRW_FIELDS`에 `giftTaxAtHorizon`·`totalTaxAtHorizon` 두 이름만 더해 `giftTaxAtHorizonText`·`totalTaxAtHorizonText`가 생긴다.
+  - 프론트 `features/chat/types.ts`의 `ComparisonCard.rows`에 `totalTaxAtHorizon`, `cards/EstateCards.tsx`의 방향 행은 "가족에게 남는 금액", "총 세금(상속 시점 기준)", "총 세금(낸 금액)" 세 줄이다. 06 방향 비교 화면과 같은 라벨이다.
+- 스펙에 없어 정한 것
+  - 카드 금액 목록은 기존 `grid-cols-[auto_1fr]`를 그대로 두고, 라벨(`dt`)에 `break-keep`, 목록에 `items-baseline`을 더했다. 금액은 한 줄로 두고 폭이 모자라면 라벨이 단어 단위로 줄바꿈한다(06처럼 금액에 `break-all`을 넣으면 금액이 먼저 줄바꿈해서 넣지 않았다). 실제 Chrome에서 270px 카드 안 폭은 세 라벨이 모두 한 줄에 들어갔다.
+  - 프론트 MSW 핸들러(`tests/chat/fake-chat.ts`)에는 `comparison` 카드가 없다. 가짜 데이터는 카드 테스트(`tests/chat/tool-cards.test.tsx`)의 픽스처뿐이라 그것만 06 사례 3 값으로 바꿨다.
+  - 화면 확인용 대화는 저장소 밖 스크립트로 만들었다: 앱(`create_app()`)을 프로세스 안 `TestClient`로 띄우고 `get_chat_provider`만 테스트용 `FakeChatProvider`로 바꿨다. 가짜 공급자가 `compare_estate_plans`(`horizonYears` 40, `lumpSumPerChild` 500,000,000)를 부르면 실제 09 루프와 실제 도구가 실행되어 카드를 저장한다. 사례 3과 값을 원 단위로 맞추려고 그 스크립트 프로세스에서만 `chat.service.today_kst`를 2026-10-16으로 바꿨다(도구 코드는 그대로다). 대화 공급자가 화면 서버와 같도록 슬롯 15 백엔드는 `LLM_PERSONAL_PROVIDER=ollama`로 띄웠다. 브라우저에서는 메시지를 보내지 않아 Ollama 호출은 없었다.
+- 테스트
+  - `backend/tests/chat/test_tools_estate.py`
+    - 새 테스트: 06 사례 1·3(기준일 2026-10-16, 가족·재산은 공개 API로 등록) 두 경우로 도구를 실행해 네 방향의 `giftTaxTotal`·`giftTaxAtHorizon`·`totalTax`·`totalTaxAtHorizon`·`familyReceives`, `giftTaxAtHorizonText`·`totalTaxAtHorizonText`·`totalTaxText`, 카드 `rows` 전체(세 값과 추천), `recommendedKey`(사례 1 `lump_sum_now`, 사례 3 `staged_children`)를 06 표와 원 단위까지 비교한다. 모든 방향에서 `estateAtHorizon − inheritanceTax + giftsValueAtHorizon − giftTaxAtHorizon == familyReceives`와 `totalTaxAtHorizon == giftTaxAtHorizon + inheritanceTax`를 확인한다.
+    - 새 테스트: 증가율 0%이고 증여세를 낸 방향이 있을 때 모든 방향에서 `giftTaxAtHorizon == giftTaxTotal`, `totalTaxAtHorizon == totalTax`, 위 항등식, 카드의 두 세금 문자열이 같은지 본다.
+    - 기존 카드 테스트의 `rows` 기대값에 `totalTaxAtHorizon`을 더했다.
+  - `backend/tests/chat/test_tool_descriptions.py`: 설명의 둘째 문장이 11절 문장과 같다.
+  - `frontend/tests/chat/tool-cards.test.tsx`: `comparison` 카드를 사례 3의 두 방향(`staged_children` 추천, `lump_sum_now`)으로 렌더링해 방향마다 세 줄의 라벨·값 순서, 추천 표시·배지가 추천 행 하나에만 있는지, tax 고지, 비교 링크를 확인한다.
+
+#### 검사 결과
+
+- 백엔드: `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 1592개 통과(챗봇 282개). 마이그레이션 변경은 없다.
+- 프론트: `npm run lint`·`npx tsc --noEmit` 통과, `npm run test` 570개 통과, `npm run build` 성공.
+- 화면: `scripts/start.sh`(백엔드 8015는 `LLM_PERSONAL_PROVIDER=ollama`, 프론트 3015)를 띄우고, 위 스크립트로 합성 계정(출생연도, 현금 600,000,000·배분 제외 900,000,000, 배우자, 첫째 1991-03-01, 둘째 1994-07-15, 손주 2020-05-05)과 실제 도구가 만든 `comparison` 카드가 담긴 대화를 만들었다. 저장된 카드는 2066.10.16 기준 네 방향의 세 값이 06 사례 3 표와 같다(`lump_sum_now` 남는 금액 4,327,544,239원, 상속 시점 기준 569,476,598원, 낸 금액 382,753,687원, 추천 `staged_children`). 독립 Playwright 컨텍스트(Playwright 1.61.1, 시스템 Chrome)에서 화면으로 로그인했다.
+
+| 화면 | 폭 | 문서 `scrollWidth` | 카드 폭(목록 폭) | 카드 안 넘침 | 세 줄 | 추천 | 고지 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `/chat?c=<id>` | 360 | 360 | 294(270) | 0 | 4행 모두, 금액 한 줄 | `staged_children`만 | tax |
+| 위젯(`/estate`) | 360 | 360 | 327(303) | 0 | 4행 모두, 금액 한 줄 | `staged_children`만 | tax |
+| `/chat?c=<id>` | 1280 | 1280 | 638(614) | 0 | 4행 모두, 금액 한 줄 | `staged_children`만 | tax |
+| 위젯(`/estate`) | 1280 | 1280 | 383(359) | 0 | 4행 모두, 금액 한 줄 | `staged_children`만 | tax |
+
+- 뷰포트 밖으로 잡힌 요소는 모든 화면에서 01b 레이아웃의 `sr-only` "본문으로 건너뛰기" 링크(left −1px) 하나뿐이었다. 콘솔 오류는 로그인 전 `/login`의 `/api/auth/me` 401 두 건뿐이고 로그인 뒤에는 없었다. 카드 링크는 `/estate?tab=compare`다.
+- 확인 뒤 합성 계정을 `DELETE /api/auth/me`로 지웠다(다시 로그인 401, `users`·`chat_conversations`·`chat_messages`·`family_members`·`holdings`·`allocation_scores`·`allocation_situations`에 남은 행 0). 서버는 `scripts/stop.sh`로 멈췄다.
+
+#### 남은 일
+
+- 평가 세트는 이번에 돌리지 않았다(실제 LLM 호출 금지). 14번("자녀에게 미리 증여하는 게 나아, 그냥 상속하는 게 나아?") 응답이 `totalTaxAtHorizon`을 비교 기준으로 인용하는지는 다음 personal 공급자 평가에서 본다.

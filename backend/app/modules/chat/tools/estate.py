@@ -363,6 +363,8 @@ def compare_estate_plans(ctx: ToolContext, params: BaseModel) -> ToolOutput:
                 "estateAtHorizon": item.estate_at_horizon,
                 "inheritanceTax": item.inheritance_tax,
                 "totalTax": item.total_tax,
+                "giftTaxAtHorizon": item.gift_tax_at_horizon,
+                "totalTaxAtHorizon": item.total_tax_at_horizon,
                 "familyReceives": item.family_receives,
                 "giftCount": len(item.gifts),
                 "gifts": [
@@ -391,6 +393,7 @@ def compare_estate_plans(ctx: ToolContext, params: BaseModel) -> ToolOutput:
             {
                 "key": item.key,
                 "label": item.label,
+                "totalTaxAtHorizon": krw(item.total_tax_at_horizon),
                 "totalTax": krw(item.total_tax),
                 "familyReceives": krw(item.family_receives),
                 "recommended": item.key == result.recommended_key,
@@ -566,7 +569,9 @@ register_tool(
         description=(
             "증여 없이 상속, 자녀에게 10년마다 분산 증여, 자녀에게 지금 일시 증여, 손자녀에게 분산 "
             "증여 같은 상속·증여 방향을 같은 가정에서 비교해 방향별 총 세금과 가족에게 남는 금액을 "
-            "돌려준다. '자녀에게 미리 증여하는 게 나아, 그냥 상속하는 게 나아?' 같은 질문에 쓴다. "
+            "돌려준다. 총 세금은 증여세를 상속 시점까지 불려 더한 totalTaxAtHorizon이 비교 "
+            "기준이고, totalTax는 낸 금액 그대로다. '자녀에게 미리 증여하는 게 나아, 그냥 "
+            "상속하는 게 나아?' 같은 질문에 쓴다. "
             "재산은 자산배분 보유 자산으로 채운다. 인자는 모두 null이면 06 기본값이다: "
             "horizonYears(상속 가정까지 몇 년, "
             '1~40, 기본 20), annualGrowthRate(연 재산 증가율 % 숫자 문자열, 0~10, 기본 "3"), '

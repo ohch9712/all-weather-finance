@@ -54,6 +54,16 @@ def test_plan_gifts_uses_defaults_without_asking():
     assert "말하지 않았으면 묻지 말고 null로 두면 기본값으로 계산한다" in description("plan_gifts")
 
 
+def test_compare_estate_plans_names_tax_at_horizon_after_first_sentence():
+    # 스펙 15 11절: 첫 문장 바로 뒤에 비교 기준(totalTaxAtHorizon)과 낸 금액(totalTax)을 구분한다.
+    sentences = description("compare_estate_plans").split(". ")
+    assert sentences[0].endswith("방향별 총 세금과 가족에게 남는 금액을 돌려준다")
+    assert sentences[1] == (
+        "총 세금은 증여세를 상속 시점까지 불려 더한 totalTaxAtHorizon이 비교 기준이고, "
+        "totalTax는 낸 금액 그대로다"
+    )
+
+
 def test_spending_summary_skips_get_today_for_this_month():
     text = description("get_spending_summary")
     assert "이번 달이면 get_today 없이 바로 month를 null로 부른다" in text
