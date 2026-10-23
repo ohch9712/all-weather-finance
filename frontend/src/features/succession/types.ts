@@ -167,6 +167,7 @@ export interface Taxes {
   capitalGainsTax: number;
   inheritanceTax: number;
   total: number;
+  totalAtHorizon: number;
 }
 
 export interface ChildImpact {

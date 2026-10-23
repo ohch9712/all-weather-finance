@@ -182,7 +182,8 @@ export function ReviewSummary({ result, input }: { result: SuccessionResult; inp
           columns={[
             { label: "순위" },
             { label: "방안" },
-            { label: "세금 합계", numeric: true },
+            { label: "세금 합계(상속 시점 기준)", numeric: true },
+            { label: "세금 합계(낸 금액)", numeric: true },
             { label: "증여세", numeric: true },
             { label: "취득세", numeric: true },
             { label: "양도세", numeric: true },
@@ -194,6 +195,7 @@ export function ReviewSummary({ result, input }: { result: SuccessionResult; inp
             cells: [
               `${plan.rank}위`,
               plan.label,
+              won(plan.taxes.totalAtHorizon),
               won(plan.taxes.total),
               won(plan.taxes.giftTax),
               won(plan.taxes.acquisitionTax),
