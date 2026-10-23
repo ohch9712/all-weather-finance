@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.core.crypto import decrypt_str
 from app.modules.succession.models import SuccessionCase
-from tests.succession.cases import CASE_A, CASE_B, case
+from tests.succession.cases import CASE_A, CASE_B, CASE_D, case
 
 BASE = "/api/succession"
 
@@ -77,7 +77,9 @@ def test_plans_contract_case_a(auth_client):
         "cashAssets",
         "transferableNow",
         "shortfall",
+        "singleFrom",
     }
+    assert funding["singleFrom"] == "2038-10-21"
     assert funding["costs"][0] == {
         "year": 0,
         "on": "2026-10-21",
@@ -175,9 +177,47 @@ def test_plans_contract_case_a(auth_client):
     assert set(body["sources"][0]) == {"label", "url"}
 
 
+def test_plans_case_d_survivor_ratios(auth_client):
+    body = auth_client.post(f"{BASE}/plans", json=CASE_D).json()
+    funding = body["funding"]
+    assert (funding["singleFrom"], funding["reservePresentValue"]) == ("2038-10-21", 461_576_150)
+    assert funding["costs"][12] == {
+        "year": 12,
+        "on": "2038-10-21",
+        "living": 27_850_588,
+        "care": 0,
+        "income": 9_131_340,
+        "total": 18_719_248,
+    }
+    assert body["notes"][1] == "재산은 연 3%, 생활비·수입·간병비는 연 2%씩 늘어난다고 가정했어요."
+    assert (
+        "월 생활비·월 수입은 두 분 합계로 보고, 한 분만 계시게 되는 2038-10-21부터는 "
+        "월 생활비를 61%, 월 수입을 60%로 계산해요."
+    ) in body["assumptions"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("survivorLivingRatio", "9.99"),
+        ("survivorLivingRatio", "101"),
+        ("survivorLivingRatio", "61.005"),
+        ("survivorIncomeRatio", "-0.01"),
+        ("survivorIncomeRatio", "100.01"),
+    ],
+)
+def test_survivor_ratio_out_of_range_422(auth_client, field, value):
+    data = case(CASE_A, assumptions={**CASE_A["assumptions"], field: value})
+    # 공통 422 형식(architecture 4.1)은 위치의 마지막 키를 field로 쓴다.
+    assert detail(auth_client.post(f"{BASE}/plans", json=data))[0] == field
+    response = auth_client.put(f"{BASE}/case", json={"case": data, "sensitiveConsent": False})
+    assert detail(response)[0] == field
+
+
 def test_plans_case_b_and_default_base_date(auth_client):
     body = auth_client.post(f"{BASE}/plans", json=CASE_B).json()
     assert body["funding"]["shortfall"] == 92_000_000
+    assert body["funding"]["singleFrom"] is None
     assert [p["key"] for p in body["plans"]] == ["inherit_only"]
     assert body["plans"][0]["taxes"]["totalAtHorizon"] == body["plans"][0]["taxes"]["total"]
     assert body["plans"][0]["taxes"]["totalAtHorizon"] == 10_360_000
@@ -278,8 +318,14 @@ def test_rules_endpoint(auth_client):
         "careMonthlyCost": 2_000_000,
         "careYears": 2,
         "officialPriceRatio": "70",
+        "survivorLivingRatio": "61",
+        "survivorIncomeRatio": "60",
     }
     assert {"label", "url"} == set(body["sources"][0])
+    assert {source["label"] for source in body["sources"]} >= {
+        "보건복지부, 기준 중위소득",
+        "국민연금공단, 유족연금",
+    }
 
 
 @freeze_time("2026-10-21T03:00:00Z")
@@ -335,6 +381,24 @@ def test_save_without_consent_and_withdraw(auth_client, db):
     row = stored(db, auth_client)
     assert (row.health_enc, row.sensitive_consent_at) == (None, None)
     assert row.data["monthlyLivingCost"] == 3_000_000
+
+
+def test_saved_case_without_survivor_ratios_uses_defaults(auth_client, db):
+    """21절 전에 저장한 입력(두 비율 없음)은 기본값 61·60으로 불러오고 계산한다."""
+    auth_client.put(f"{BASE}/case", json={"case": CASE_A, "sensitiveConsent": False})
+    row = stored(db, auth_client)
+    legacy = json.loads(json.dumps(row.data))
+    del legacy["assumptions"]["survivorLivingRatio"]
+    del legacy["assumptions"]["survivorIncomeRatio"]
+    row.data = legacy
+    db.commit()
+    assert "survivorLivingRatio" not in stored(db, auth_client).data["assumptions"]
+    loaded = auth_client.get(f"{BASE}/case").json()["case"]
+    assumptions = loaded["assumptions"]
+    assert (assumptions["survivorLivingRatio"], assumptions["survivorIncomeRatio"]) == ("61", "60")
+    loaded["parents"] = CASE_A["parents"]
+    body = auth_client.post(f"{BASE}/plans", json=loaded).json()
+    assert body["funding"]["reservePresentValue"] == 461_576_150
 
 
 def test_save_validates_and_keeps_null_base_date(auth_client):

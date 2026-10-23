@@ -5,7 +5,7 @@ import { SuccessionPage } from "@/features/succession/components/SuccessionPage"
 import type { SuccessionInput } from "@/features/succession/types";
 import { formatKRWCompact } from "@/lib/format";
 import { apiUrl, authPayload, errorResponse, renderWithProviders, server } from "../utils";
-import { CASE_A, COVERED_RESULT, envelope, RESULT, SHORT_RESULT } from "./fixtures";
+import { CASE_A, CASE_D, COVERED_RESULT, envelope, RESULT, RESULT_D, SHORT_RESULT } from "./fixtures";
 
 const LIFE = {
   father: { tableLifeExpectancy: "12.0", healthFactor: "1.0", lifeExpectancy: "12.0", yearsAssumed: 12, source: "국가데이터처 2024년 생명표" },
@@ -131,6 +131,50 @@ describe("입력", () => {
     await user.click(screen.getByRole("button", { name: "방안 비교하기" }));
     expect(await screen.findByText("재산 명의자는 살아 계신 부모님이어야 해요.")).toBeVisible();
     expect(calls.plans).toHaveLength(0);
+  });
+
+  it("가정값에 한 분만 계실 때 생활비·수입 비율 두 칸과 근거 안내가 있고, 검증과 기본값 되돌리기를 한다", async () => {
+    const calls = mockApi();
+    const { user } = render();
+    const section = await screen.findByRole("region", { name: "4. 가정값" });
+    const living = within(section).getByLabelText("한 분만 계실 때 생활비 비율(%)");
+    const income = within(section).getByLabelText("한 분만 계실 때 수입 비율(%)");
+    expect(living).toHaveValue("61");
+    expect(income).toHaveValue("60");
+    expect(within(section).getByLabelText("생활비·수입·간병비 연 상승률(%)")).toHaveValue("2");
+    expect(within(section).getByText(/두 분 중 한 분만 계시게 된 해부터 월 생활비에 곱해요\. 앱 가정값\(2026년 기준 중위소득 1인 가구 2,564,238원 ÷ 2인 가구 4,199,292원 ≈ 61%\)/)).toBeVisible();
+    expect(
+      within(section).getByText(/월 수입에 곱해요\. 앱 가정값\(국민연금 유족연금은 가입기간에 따라 기본연금액의 40~60%, 본인 연금과 겹치면 본인 연금 \+ 유족연금 30%\)/),
+    ).toBeVisible();
+
+    await user.clear(living);
+    await user.type(living, "9.5");
+    await user.clear(income);
+    await user.type(income, "100.5");
+    await user.click(screen.getByRole("button", { name: "방안 비교하기" }));
+    expect(await within(section).findByText("10~100%로 입력해 주세요.")).toBeVisible();
+    expect(within(section).getByText("0~100%로 입력해 주세요.")).toBeVisible();
+    expect(calls.plans).toHaveLength(0);
+
+    await user.click(within(section).getByRole("button", { name: "기본값으로 되돌리기" }));
+    expect(living).toHaveValue("61");
+    expect(income).toHaveValue("60");
+    await waitFor(() => expect(within(section).queryByText("10~100%로 입력해 주세요.")).not.toBeInTheDocument());
+    expect(within(section).queryByText("0~100%로 입력해 주세요.")).not.toBeInTheDocument();
+  });
+
+  it("저장한 두 비율을 불러와 그대로 계산 요청에 보낸다", async () => {
+    const calls = mockApi(envelope(CASE_D), RESULT_D);
+    const { user } = render();
+    const section = await screen.findByRole("region", { name: "4. 가정값" });
+    await waitFor(() => expect(screen.getByLabelText(/아버지 나이/)).toHaveValue("75"));
+    const living = within(section).getByLabelText("한 분만 계실 때 생활비 비율(%)");
+    expect(living).toHaveValue("61");
+    await user.clear(living);
+    await user.type(living, "70.5");
+    await user.click(screen.getByRole("button", { name: "방안 비교하기" }));
+    await waitFor(() => expect(calls.plans).toHaveLength(1));
+    expect(calls.plans[0].assumptions).toEqual({ ...CASE_D.assumptions, survivorLivingRatio: "70.5" });
   });
 
   it("서버 검증 오류를 해당 칸에 보여 준다", async () => {
@@ -358,10 +402,71 @@ describe("결과", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "생활·간병비가 현금보다 92,000,000원 많아요. 지금 재산을 넘기기보다 부모님 생활 자금을 먼저 확보해야 해요.",
     );
+    // singleFrom이 없으면 한 분만 계신 뒤 안내가 없다(21절).
+    expect(screen.queryByText(/한 분만 계신다고 보고/)).not.toBeInTheDocument();
+  });
+
+  it("한 분만 계신 날부터의 비율 안내를 연도별 표 위에, 가정값·가구·간병 줄을 계산 기준과 가정에 보여 준다", async () => {
+    const calls = mockApi(envelope(CASE_D), RESULT_D);
+    const { user } = render();
+    await user.click(await screen.findByRole("button", { name: "방안 비교하기" }));
+    const funding = await screen.findByRole("region", { name: "이전 가능액" });
+    expect(calls.plans[0]).toEqual(CASE_D);
+    expect(within(funding).getByText("461,576,150원")).toBeVisible();
+    const costs = within(funding).getByText("연도별 생활비·간병비 보기").closest("details")!;
+    await user.click(within(costs).getByText("연도별 생활비·간병비 보기"));
+    const notice = within(costs).getByText("2038-10-21부터는 한 분만 계신다고 보고 생활비 61%·수입 60%로 계산했어요.");
+    expect(notice).toBeVisible();
+    const table = within(costs).getByRole("table", { name: "연도별 생활비·간병비" });
+    expect(notice.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(within(table).getAllByRole("row")[2]).getAllByRole("cell").map((cell) => cell.textContent)).toEqual([
+      "12년차",
+      "2038-10-21",
+      "27,850,588원",
+      "9,131,340원",
+      "0원",
+      "18,719,248원",
+    ]);
+
+    const basis = screen.getByText("계산 기준과 가정").closest("details")!;
+    await user.click(within(basis).getByText("계산 기준과 가정"));
+    expect(
+      within(basis).getByText(
+        "재산 연 3% · 생활비·수입·간병비 연 2% · 월 간병비 2,000,000원 · 간병 2년 · 공시가격 비율 70% · 한 분만 계실 때 생활비 61% · 수입 60%",
+      ),
+    ).toBeVisible();
+    expect(
+      within(basis).getByText("월 생활비·월 수입은 두 분 합계로 보고, 한 분만 계시게 되는 2038-10-21부터는 월 생활비를 61%, 월 수입을 60%로 계산해요."),
+    ).toBeVisible();
+    expect(
+      within(basis).getByText("간병비는 부모님마다 예상 시점 전 마지막 2년에 들어간다고 봐요. 건강 상태가 '요양·간병 중'인 분은 지금부터 예상 시점까지 들어가요."),
+    ).toBeVisible();
   });
 });
 
 describe("검토용 요약", () => {
+  it("가정값 표에 한 분만 계실 때 생활비·수입 비율을 보여 준다", async () => {
+    mockApi(envelope(CASE_D), RESULT_D);
+    render("/succession?view=review");
+    const table = await screen.findByRole("table", { name: "가정값 입력" });
+    expect(
+      within(table)
+        .getAllByRole("row")
+        .map((row) => [within(row).getByRole("rowheader").textContent, within(row).getByRole("cell").textContent]),
+    ).toEqual([
+      ["재산 연 증가율", "3%"],
+      ["생활비·수입·간병비 연 상승률", "2%"],
+      ["월 간병비", "2,000,000원"],
+      ["간병 기간", "2년"],
+      ["공시가격 비율", "70%"],
+      ["한 분만 계실 때 생활비 비율", "61%"],
+      ["한 분만 계실 때 수입 비율", "60%"],
+    ]);
+    const basis = screen.getByRole("region", { name: "적용 세법 기준과 출처, 계산 가정" });
+    expect(within(basis).getByText(/한 분만 계실 때 생활비 61% · 수입 60%$/)).toBeVisible();
+    expect(within(basis).getByText(/한 분만 계시게 되는 2038-10-21부터는 월 생활비를 61%, 월 수입을 60%로 계산해요\./)).toBeVisible();
+  });
+
   it("결과가 없고 저장한 입력도 없으면 안내와 입력 화면 링크를 보여 준다", async () => {
     mockApi();
     render("/succession?view=review");

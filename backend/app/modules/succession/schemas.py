@@ -127,6 +127,9 @@ class Assumptions(CamelModel):
     care_monthly_cost: MonthlyMoney = 2_000_000
     care_years: int = Field(default=2, ge=0, le=20)
     official_price_ratio: Decimal = Field(default=Decimal("70"), ge=10, le=100, decimal_places=2)
+    # 21절: 두 분 중 한 분만 계신 해의 월 생활비·월 수입 비율. 저장된 입력에 없으면 기본값이다.
+    survivor_living_ratio: Decimal = Field(default=Decimal("61"), ge=10, le=100, decimal_places=2)
+    survivor_income_ratio: Decimal = Field(default=Decimal("60"), ge=0, le=100, decimal_places=2)
 
 
 class SuccessionInput(CamelModel):
@@ -188,6 +191,7 @@ class Funding(CamelModel):
     cash_assets: int
     transferable_now: int
     shortfall: int
+    single_from: date | None
 
 
 class Assignment(CamelModel):

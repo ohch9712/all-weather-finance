@@ -61,6 +61,8 @@ export interface Assumptions {
   careMonthlyCost: number;
   careYears: number;
   officialPriceRatio: string;
+  survivorLivingRatio: string;
+  survivorIncomeRatio: string;
 }
 
 export interface SuccessionInput {
@@ -117,6 +119,8 @@ export interface Funding {
   cashAssets: number;
   transferableNow: number;
   shortfall: number;
+  /** 두 분 중 한 분만 계시게 되는 날(21절). 없으면 null */
+  singleFrom: string | null;
 }
 
 export interface Transfer {

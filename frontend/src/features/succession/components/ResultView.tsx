@@ -41,7 +41,7 @@ export function ShortfallWarning({ shortfall }: { shortfall: number }) {
   );
 }
 
-export function FundingCard({ result }: { result: SuccessionResult }) {
+export function FundingCard({ result, input }: { result: SuccessionResult; input: SuccessionInput }) {
   const funding = result.funding;
   // 남는 수입이 간병비까지 모두 메우면 해마다 필요 금액이 0이다(20절).
   const noCostNeeded = funding.costs.every((row) => row.total === 0);
@@ -77,6 +77,11 @@ export function FundingCard({ result }: { result: SuccessionResult }) {
       <details className="rounded-lg border p-3 text-sm">
         <summary className="cursor-pointer font-medium">연도별 생활비·간병비 보기</summary>
         <div className="mt-3 space-y-3">
+          {funding.singleFrom && (
+            <p className="text-muted-foreground break-keep">
+              {funding.singleFrom}부터는 한 분만 계신다고 보고 생활비 {input.assumptions.survivorLivingRatio}%·수입 {input.assumptions.survivorIncomeRatio}%로 계산했어요.
+            </p>
+          )}
           {noCostNeeded && (
             <p className="text-muted-foreground break-keep">월 수입이 생활비와 간병비보다 많아 따로 떼어 둘 생활·간병비가 없어요.</p>
           )}
@@ -268,7 +273,7 @@ export function BasisList({ result, input }: { result: SuccessionResult; input: 
       <div>
         <p className="font-medium">가정값</p>
         <p className="text-muted-foreground break-keep">
-          재산 연 {assumptions.annualGrowthRate}% · 생활비·간병비 연 {assumptions.costInflationRate}% · 월 간병비 {won(assumptions.careMonthlyCost)} · 간병 {assumptions.careYears}년 · 공시가격 비율 {assumptions.officialPriceRatio}%
+          재산 연 {assumptions.annualGrowthRate}% · 생활비·수입·간병비 연 {assumptions.costInflationRate}% · 월 간병비 {won(assumptions.careMonthlyCost)} · 간병 {assumptions.careYears}년 · 공시가격 비율 {assumptions.officialPriceRatio}% · 한 분만 계실 때 생활비 {assumptions.survivorLivingRatio}% · 수입 {assumptions.survivorIncomeRatio}%
         </p>
       </div>
       <div>
@@ -301,7 +306,7 @@ export function ResultView({ result, input }: { result: SuccessionResult; input:
   const others = result.plans.slice(3);
   return (
     <div className="min-w-0 space-y-5" aria-live="polite">
-      <FundingCard result={result} />
+      <FundingCard result={result} input={input} />
       <Card title="방안 비교(상속 시점 기준 세금이 적은 순)">
         <p className="text-sm text-muted-foreground break-keep">
           생활·간병비를 먼저 떼어 둔 뒤, 지금 내는 세금을 상속 시점({result.horizonDate})까지 연 {input.assumptions.annualGrowthRate}%로 불려 상속세와 더한 금액이 가장 적은 방안을 최선안으로 골랐어요.
