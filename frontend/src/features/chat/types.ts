@@ -76,7 +76,14 @@ export type ComparisonCard = {
   type: "comparison";
   title: string;
   horizonDate: string;
-  rows: { key: string; label: string; totalTax: string; familyReceives: string; recommended: boolean }[];
+  rows: {
+    key: string;
+    label: string;
+    totalTaxAtHorizon: string;
+    totalTax: string;
+    familyReceives: string;
+    recommended: boolean;
+  }[];
   href: "/estate?tab=compare";
 };
 
