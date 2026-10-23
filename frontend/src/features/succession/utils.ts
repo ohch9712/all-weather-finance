@@ -67,6 +67,9 @@ export const ASSUMPTION_HINTS = {
   careMonthlyCost: "요양병원 간병비 월평균 200만~267만 원 수준이라는 보도를 참고한 앱 가정값",
   careYears: "앱 가정값",
   officialPriceRatio: "앱 가정값(공동주택 공시가격 현실화율 약 69%)",
+  survivorLivingRatio: "앱 가정값(2026년 기준 중위소득 1인 가구 2,564,238원 ÷ 2인 가구 4,199,292원 ≈ 61%)",
+  survivorIncomeRatio:
+    "앱 가정값(국민연금 유족연금은 가입기간에 따라 기본연금액의 40~60%, 본인 연금과 겹치면 본인 연금 + 유족연금 30%)",
 } as const;
 
 export function childNames(input: SuccessionInput | null): Record<string, string> {

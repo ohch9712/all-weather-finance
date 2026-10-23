@@ -130,6 +130,8 @@ function InputTables({ input, result }: { input: SuccessionInput; result: Succes
             ["월 간병비", won(input.assumptions.careMonthlyCost)],
             ["간병 기간", `${input.assumptions.careYears}년`],
             ["공시가격 비율", `${input.assumptions.officialPriceRatio}%`],
+            ["한 분만 계실 때 생활비 비율", `${input.assumptions.survivorLivingRatio}%`],
+            ["한 분만 계실 때 수입 비율", `${input.assumptions.survivorIncomeRatio}%`],
           ]}
         />
       </div>
