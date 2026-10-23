@@ -5,7 +5,7 @@ import { SuccessionPage } from "@/features/succession/components/SuccessionPage"
 import type { SuccessionInput } from "@/features/succession/types";
 import { formatKRWCompact } from "@/lib/format";
 import { apiUrl, authPayload, errorResponse, renderWithProviders, server } from "../utils";
-import { CASE_A, envelope, RESULT, SHORT_RESULT } from "./fixtures";
+import { CASE_A, COVERED_RESULT, envelope, RESULT, SHORT_RESULT } from "./fixtures";
 
 const LIFE = {
   father: { tableLifeExpectancy: "12.0", healthFactor: "1.0", lifeExpectancy: "12.0", yearsAssumed: 12, source: "국가데이터처 2024년 생명표" },
@@ -287,6 +287,68 @@ describe("결과", () => {
     expect(screen.getByText(/— 생활비·간병비를 떼어 두면 지금 넘길 현금이 없어요\./)).toBeVisible();
     expect(screen.getByRole("link", { name: "세무전문가 검토용 요약" })).toHaveAttribute("href", "/succession?view=review");
     expect(screen.getByText("계산 기준과 가정")).toBeVisible();
+  });
+
+  it("연도별 생활비·간병비 표는 생활비·수입·간병비·필요 금액을 보여 준다", async () => {
+    mockApi(envelope(CASE_A));
+    const { user } = render();
+    await user.click(await screen.findByRole("button", { name: "방안 비교하기" }));
+    const funding = await screen.findByRole("region", { name: "이전 가능액" });
+    const costs = within(funding).getByText("연도별 생활비·간병비 보기").closest("details")!;
+    expect(costs).not.toHaveAttribute("open");
+    await user.click(within(costs).getByText("연도별 생활비·간병비 보기"));
+    const table = within(costs).getByRole("table", { name: "연도별 생활비·간병비" });
+    expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
+      "연차",
+      "날짜",
+      "생활비",
+      "수입",
+      "간병비",
+      "필요 금액",
+    ]);
+    const [, first, tenth] = within(table).getAllByRole("row");
+    expect(within(first).getAllByRole("cell").map((cell) => cell.textContent)).toEqual([
+      "0년차",
+      "2026-10-21",
+      "36,000,000원",
+      "12,000,000원",
+      "0원",
+      "24,000,000원",
+    ]);
+    expect(within(tenth).getAllByRole("cell").map((cell) => cell.textContent)).toEqual([
+      "10년차",
+      "2036-10-21",
+      "43,883,799원",
+      "14,627,933원",
+      "29,255,866원",
+      "58,511,732원",
+    ]);
+    // 좁은 화면 카드도 같은 6개 항목이다.
+    const cards = within(costs).getByRole("list", { name: "연도별 생활비·간병비" });
+    const firstCard = within(cards).getAllByRole("listitem")[0];
+    expect([...firstCard.querySelectorAll("dt")].map((term) => term.textContent)).toEqual([
+      "연차",
+      "날짜",
+      "생활비",
+      "수입",
+      "간병비",
+      "필요 금액",
+    ]);
+    expect(within(costs).queryByText(/따로 떼어 둘 생활·간병비가 없어요/)).not.toBeInTheDocument();
+  });
+
+  it("모든 해의 필요 금액이 0이면 안내 문구를 표 위에 보여 준다", async () => {
+    mockApi(envelope(CASE_A), COVERED_RESULT);
+    const { user } = render();
+    await user.click(await screen.findByRole("button", { name: "방안 비교하기" }));
+    const funding = await screen.findByRole("region", { name: "이전 가능액" });
+    const costs = within(funding).getByText("연도별 생활비·간병비 보기").closest("details")!;
+    await user.click(within(costs).getByText("연도별 생활비·간병비 보기"));
+    const notice = within(costs).getByText("월 수입이 생활비와 간병비보다 많아 따로 떼어 둘 생활·간병비가 없어요.");
+    expect(notice).toBeVisible();
+    const table = within(costs).getByRole("table", { name: "연도별 생활비·간병비" });
+    expect(notice.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(table).getAllByRole("columnheader")).toHaveLength(6);
   });
 
   it("생활·간병비가 현금보다 많으면 경고한다", async () => {

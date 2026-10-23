@@ -106,6 +106,7 @@ export interface CostRow {
   on: string;
   living: number;
   care: number;
+  income: number;
   total: number;
 }
 

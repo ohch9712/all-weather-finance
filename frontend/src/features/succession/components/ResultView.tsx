@@ -43,6 +43,8 @@ export function ShortfallWarning({ shortfall }: { shortfall: number }) {
 
 export function FundingCard({ result }: { result: SuccessionResult }) {
   const funding = result.funding;
+  // 남는 수입이 간병비까지 모두 메우면 해마다 필요 금액이 0이다(20절).
+  const noCostNeeded = funding.costs.every((row) => row.total === 0);
   return (
     <Card title="이전 가능액">
       <ul className="grid min-w-0 gap-3 md:grid-cols-2">
@@ -74,13 +76,23 @@ export function FundingCard({ result }: { result: SuccessionResult }) {
       <ShortfallWarning shortfall={funding.shortfall} />
       <details className="rounded-lg border p-3 text-sm">
         <summary className="cursor-pointer font-medium">연도별 생활비·간병비 보기</summary>
-        <div className="mt-3">
+        <div className="mt-3 space-y-3">
+          {noCostNeeded && (
+            <p className="text-muted-foreground break-keep">월 수입이 생활비와 간병비보다 많아 따로 떼어 둘 생활·간병비가 없어요.</p>
+          )}
           <DataTable
             caption="연도별 생활비·간병비"
-            columns={[{ label: "연차" }, { label: "날짜" }, { label: "생활비", numeric: true }, { label: "간병비", numeric: true }, { label: "합계", numeric: true }]}
+            columns={[
+              { label: "연차" },
+              { label: "날짜" },
+              { label: "생활비", numeric: true },
+              { label: "수입", numeric: true },
+              { label: "간병비", numeric: true },
+              { label: "필요 금액", numeric: true },
+            ]}
             rows={funding.costs.map((row) => ({
               key: String(row.year),
-              cells: [`${row.year}년차`, row.on, won(row.living), won(row.care), won(row.total)],
+              cells: [`${row.year}년차`, row.on, won(row.living), won(row.income), won(row.care), won(row.total)],
             }))}
           />
         </div>
