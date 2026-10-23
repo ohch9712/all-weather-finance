@@ -428,7 +428,7 @@ def replay_gift_deductions(recipient: Recipient, gifts: list[PriorGift]) -> list
 3. **나와 형제자매**(1~10명): 이름(별칭 권장), 본인 여부(한 명), 나이(만), 세대 주택 수, 과거 증여받은 내역(날짜, 준 사람 부모님·조부모님, 금액, 낸 증여세. 추가·삭제).
 4. **가정값**: 4.4의 다섯 값과 근거 안내. "기본값으로 되돌리기".
 
-- 금액 입력은 06처럼 "1.2억원 · 12,000만원" 도우미를 붙인다(표기 규칙은 17절 `formatKRWHint`).
+- 금액 입력 칸 아래 도우미는 `formatKRWCompact` 짧은 표기 하나만 보인다(예: 120,000,000 → "1.2억원". 18절).
 - 민감정보 동의 상자(저장 버튼 위)
   - "[선택] 부모님 건강 상태(민감정보) 저장에 동의해요"
   - 내용: "수집 목적: 부모님 기대여명 추정과 이전 방안 계산 / 항목: 부모님 건강 상태 / 보유 기간: 동의를 철회하거나 계정을 삭제할 때까지 / 동의하지 않을 권리가 있고, 동의하지 않아도 계산할 수 있어요. 이 경우 건강 상태는 저장하지 않아요."
@@ -531,6 +531,8 @@ def replay_gift_deductions(recipient: Recipient, gifts: list[PriorGift]) -> list
 
 ## 17. 금액 도우미 중복 표시 수정 (2026-10-23, 브랜치 `feature/22-succession-fix-1`)
 
+> 18절에서 만원 표기를 없애 `formatKRWHint`도 지웠다. 이 절은 기록으로 남긴다.
+
 - 증상: 금액 입력 칸 아래 도우미가 "억 단위 · 만원 단위"를 항상 둘 다 붙여, 1억 원 미만이면 같은 말이 두 번 나온다(월 생활비 2,500,000 → "250만원 · 250만원"). 06 `/estate`의 금액 칸(`frontend/src/features/estate/components/shared.tsx`)도 같은 식이라 함께 고친다.
 - 공용 형식 함수 `formatKRWHint(value: number): string`을 `frontend/src/lib/format.ts`에 추가하고 두 화면이 쓴다. 22의 `moneyHint`(`features/succession/utils.ts`)는 지우고 `components/fields.tsx`가 `formatKRWHint`를 쓴다. 06 `shared.tsx`의 금액 도우미 한 줄도 `formatKRWHint(Number(value) || 0)`로 바꾼다. 입력이 비었을 때의 기존 문구("원 단위로 입력해 주세요." 등)는 그대로 둔다.
 - 규칙: `compact = formatKRWCompact(value)`, `manwon = (value / 10000).toLocaleString("ko-KR") + "만원"`(지금 두 화면의 둘째 표기 그대로). `value`가 0이면 `"0원"`, `compact === manwon`이면 `compact` 하나, 다르면 `` `${compact} · ${manwon}` ``.
@@ -548,6 +550,23 @@ def replay_gift_deductions(recipient: Recipient, gifts: list[PriorGift]) -> list
 
 - 소유 파일: `frontend/src/lib/format.ts`(`formatKRWHint` 추가만), `frontend/src/features/succession/utils.ts`·`components/fields.tsx`, `frontend/src/features/estate/components/shared.tsx`(금액 도우미 한 줄), `frontend/tests/foundation/format.test.ts`(`formatKRWHint` 표 테스트 추가), `frontend/tests/succession/**`, `frontend/tests/estate/**`(도우미 표기 단언만), 이 문서 `## 구현 결과` 끝의 새 소절.
 - 확인: 프론트 공통 완료 기준. 위 표 전체를 단위 테스트로 고정한다. 22·06 화면 테스트에 1억 미만 금액이 한 번만 보이는 단언을 하나씩 둔다. 슬롯 22 서버에서 `/succession`(월 생활비 2,500,000, 현금 800,000,000)과 `/estate` 금액 칸의 도우미를 360·1280px에서 확인한다. 백엔드는 바꾸지 않는다.
+
+## 18. 금액 도우미 만원 표기 제거 (2026-10-23 사용자 결정, 브랜치 `feature/22-succession-fix-2`)
+
+- 사용자 결정: 금액 입력 칸 아래 도우미는 앞의 짧은 표기만 보이고 뒤의 만원 표기(" · 12,000만원")는 없앤다. 02 자산배분 금액 칸(`= 500만원`)과 같은 방식이다.
+- 22 `features/succession/components/fields.tsx`의 `MoneyField`와 06 `features/estate/components/shared.tsx`의 금액 도우미가 `formatKRWCompact(value)`를 바로 쓴다. 17절의 `formatKRWHint`는 `frontend/src/lib/format.ts`와 `tests/foundation/format.test.ts`에서 지운다(다른 사용처 없음). 입력이 비었을 때 문구는 그대로다(22 "원 단위로 입력해 주세요.", 06은 지금처럼 0으로 보아 `0원`).
+
+| 입력 | 결과 |
+| --- | --- |
+| 120,000,000 | `1.2억원` |
+| 99,995,000 | `1억원` |
+| 2,500,000 | `250만원` |
+| 12,345,678 | `1,235만원` |
+| 5,000 | `5,000원` |
+| 0 | `0원` |
+
+- 소유 파일: `frontend/src/lib/format.ts`(`formatKRWHint` 삭제만), `frontend/src/features/succession/components/fields.tsx`, `frontend/src/features/estate/components/shared.tsx`(금액 도우미 줄과 import), `frontend/tests/foundation/format.test.ts`(`formatKRWHint` 테스트 삭제만), `frontend/tests/succession/**`, `frontend/tests/estate/**`(도우미 단언만), 이 문서 `## 구현 결과` 끝의 새 소절.
+- 확인: 프론트 공통 완료 기준. 22·06 화면 테스트에서 1억 이상(예: 120,000,000 → `1.2억원`)과 1억 미만(2,500,000 → `250만원`) 도우미가 짧은 표기만 보이고 "만원" 둘째 표기(` · `)가 없음을 단언한다. 저장소에 `formatKRWHint`가 남지 않는다. 슬롯 22 서버에서 `/succession`과 `/estate` 금액 칸을 360·1280px에서 확인한다. 백엔드는 바꾸지 않는다.
 
 ## 구현 결과
 
