@@ -6,7 +6,7 @@ import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiError, getErrorMessage } from "@/lib/api-client";
-import { formatKRW, formatKRWCompact } from "@/lib/format";
+import { formatKRW, formatKRWHint } from "@/lib/format";
 import { excludedAssumptions } from "../utils";
 import type { TaxResult } from "../types";
 
@@ -33,7 +33,7 @@ function FieldInput({ field, form }: { field: Field; form: UseFormReturn<Values>
       {field.options ? <select {...common} className="h-9 w-full min-w-0 rounded-lg border bg-background px-2 text-sm">{field.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.type === "textarea" ? <textarea {...common} className="min-h-20 w-full rounded-lg border p-2 text-sm" /> : <Input {...common} value={field.type === "range" ? String(value ?? field.min ?? 0) : undefined} type={field.type ?? "text"} min={field.min} max={field.max} step={field.step ?? 1} inputMode={field.money ? "numeric" : undefined} />}
     </>}
     <div id={`${id}-help`} className="text-xs text-muted-foreground">
-      {field.money && <p>{formatKRWCompact(Number(value) || 0)} · {((Number(value) || 0) / 10000).toLocaleString("ko-KR")}만원</p>}
+      {field.money && <p>{formatKRWHint(Number(value) || 0)}</p>}
       {field.type === "range" && <p>{String(value)}{field.name === "horizonYears" ? `년 뒤 · ${Number(new Date().getFullYear()) + Number(value)}년 기준` : "세"}</p>}
       {field.hint && <p>{field.hint}</p>}
       {error && <p role="alert" className="text-destructive">{String(error.message)}</p>}
