@@ -247,7 +247,8 @@ def test_case_a_funding_timeline_and_assignment():
 
 
 CASE_A_TABLE = [
-    # key, 증여세, 취득세, 양도세, 상속세, 합계, 부모님에게 남는 재산(지금), 자녀에게 남는 금액(T)
+    # key, 증여세, 취득세, 양도세, 상속세, 합계(낸 금액), 상속 시점 기준 세금,
+    # 부모님에게 남는 재산(지금), 자녀에게 남는 금액(T). 19절 순위(상속 시점 기준 세금 순).
     (
         "realestate_gift_cash_staged",
         232_800_000,
@@ -255,6 +256,7 @@ CASE_A_TABLE = [
         0,
         420_589_229,
         766_564_390,
+        907_861_575,
         2_050_000_000,
         2_852_916_387,
     ),
@@ -265,18 +267,9 @@ CASE_A_TABLE = [
         0,
         436_850_083,
         782_825_244,
+        924_122_429,
         2_100_000_000,
         2_836_655_533,
-    ),
-    (
-        "realestate_sell_cash_now",
-        110_525_583,
-        14_375_161,
-        220_187_000,
-        498_930_084,
-        844_017_828,
-        2_300_000_000,
-        2_690_619_621,
     ),
     (
         "cash_lump_now",
@@ -285,8 +278,20 @@ CASE_A_TABLE = [
         0,
         866_960_875,
         936_413_428,
+        947_407_960,
         2_822_664_860,
         2_813_370_000,
+    ),
+    (
+        "realestate_sell_cash_now",
+        110_525_583,
+        14_375_161,
+        220_187_000,
+        498_930_084,
+        844_017_828,
+        984_936_877,
+        2_300_000_000,
+        2_690_619_621,
     ),
     (
         "cash_staged_spread",
@@ -295,6 +300,7 @@ CASE_A_TABLE = [
         0,
         931_159_988,
         991_793_577,
+        995_968_196,
         2_961_332_430,
         2_764_809_762,
     ),
@@ -305,6 +311,7 @@ CASE_A_TABLE = [
         0,
         973_918_867,
         1_017_569_156,
+        1_017_569_156,
         3_050_000_000,
         2_743_208_806,
     ),
@@ -314,6 +321,7 @@ CASE_A_TABLE = [
         43_650_289,
         0,
         990_179_721,
+        1_033_830_010,
         1_033_830_010,
         3_100_000_000,
         2_726_947_952,
@@ -337,6 +345,7 @@ def test_case_a_plan_table_rank_and_tier():
             taxes.capital_gains_tax,
             taxes.inheritance_tax,
             taxes.total,
+            taxes.total_at_horizon,
             plan.parents_remaining_now,
             plan.children_receive_at_horizon,
         )
@@ -345,6 +354,45 @@ def test_case_a_plan_table_rank_and_tier():
             taxes.gift_tax + taxes.acquisition_tax + taxes.capital_gains_tax + taxes.inheritance_tax
         )
         assert near(plan.parents_reserve, 522_664_859)
+
+
+def test_case_a_total_at_horizon_formula():
+    """19절: 증여 항목·매각은 낸 날부터 T까지 불리고, 상속 취득세·상속세는 그대로 더한다."""
+    result = run(CASE_A)
+    horizon = result.horizon_date
+
+    def grown(amount: int, on: date) -> int:
+        days = Decimal((horizon - on).days)
+        return int(amount * Decimal("1.03") ** (days / 365))
+
+    for plan in result.plans:
+        expected = (
+            sum(
+                grown(t.gift_tax + t.acquisition_tax, t.on)
+                for t in plan.transfers
+                if t.method in ("gift", "sale_gift")
+            )
+            + sum(grown(s.total, D0) for s in plan.sales)
+            + sum(t.acquisition_tax for t in plan.transfers if t.method == "inherit")
+            + plan.taxes.inheritance_tax
+        )
+        assert plan.taxes.total_at_horizon == expected, plan.key
+    plans = by_key(result)
+    # 지금 내는 세금이 없는 방안은 낸 금액 합계와 같다.
+    for key in ("cash_staged_deduction", "inherit_only"):
+        assert plans[key].taxes.total_at_horizon == plans[key].taxes.total
+
+
+def test_case_a_zero_growth_total_at_horizon_equals_total():
+    assumptions = {**CASE_A["assumptions"], "annualGrowthRate": "0"}
+    result = run(case(CASE_A, assumptions=assumptions))
+    assert len(result.plans) == 7
+    for plan in result.plans:
+        assert plan.taxes.total_at_horizon == plan.taxes.total, plan.key
+    assert (
+        result.notes[2]
+        == "지금 내는 세금은 상속 시점까지 연 0%로 불려 상속세와 더해 순위를 매겼어요."
+    )
 
 
 def test_case_a_same_day_gift_split_and_acquisition():
@@ -427,13 +475,13 @@ def test_case_a_staged_deduction_and_inheritance_steps():
 def test_case_a_reasons():
     plans = by_key(run(CASE_A))
     assert plans["realestate_gift_cash_staged"].reasons == [
-        "입력한 조건에서 세금 총액이 가장 적어요(766,564,390원).",
+        "상속 시점(2038-10-21) 기준으로 맞춘 세금 합계가 가장 적어요(907,861,575원).",
         "부동산을 지금 넘기고, 남는 현금은 10년마다 공제 한도만큼 넘겨요.",
         "상속 가정 시점(2038-10-21) 전 10년 안에 한 증여 100,000,000원은 상속재산에 다시 더해져요.",
         "부모님이 주택을 2채 이상 가지고 계셔서 조정대상지역 주택 증여 취득세가 12%로 무거워져요.",
     ]
     assert plans["realestate_gift_now"].reasons == [
-        "최선안보다 세금이 16,260,854원 많아요.",
+        "상속 시점 기준 세금 합계가 최선안보다 16,260,854원 많아요.",
         "부동산을 지금 넘겨 앞으로 오를 가격만큼 상속재산이 줄어요. "
         "대신 자녀가 증여세와 취득세 331,600,000원을 내요.",
         "부모님이 주택을 2채 이상 가지고 계셔서 조정대상지역 주택 증여 취득세가 12%로 무거워져요.",
@@ -459,17 +507,40 @@ def test_case_a_reasons():
     assert len(plans["inherit_only"].reasons) == 2
 
 
+def test_case_a_first_reasons_follow_total_at_horizon():
+    result = run(CASE_A)
+    differences = [
+        "16,260,854원",
+        "39,546,385원",
+        "77,075,302원",
+        "88,106,621원",
+        "109,707,581원",
+        "125,968,435원",
+    ]
+    assert [plan.reasons[0] for plan in result.plans] == [
+        "상속 시점(2038-10-21) 기준으로 맞춘 세금 합계가 가장 적어요(907,861,575원).",
+        *(f"상속 시점 기준 세금 합계가 최선안보다 {d} 많아요." for d in differences),
+    ]
+
+
 def test_case_a_notes_assumptions_sources():
     result = run(CASE_A)
     assert result.notes == [
         "기대여명은 2024년 생명표 평균에 건강 상태 가정을 곱한 값이에요. 실제와 다를 수 있어요.",
         "재산은 연 3%, 생활비·간병비는 연 2%씩 늘어난다고 가정했어요.",
+        "지금 내는 세금은 상속 시점까지 연 3%로 불려 상속세와 더해 순위를 매겼어요.",
         "실행 전에 세무전문가에게 입력 정보와 결과를 검토받으세요.",
     ]
     assert "부동산 가격은 입력한 시가를 쓰고, 공시가격을 비우면 시가의 70%로 봐요." in (
         result.assumptions
     )
     assert "장례비는 최소 공제(500만 원)만 반영해요." in result.assumptions
+    lines = result.assumptions
+    timing = (
+        "증여세·증여 취득세·양도세는 증여하거나 판 날, 상속세·상속 취득세는 상속 가정 "
+        "시점에 낸다고 봐요."
+    )
+    assert lines.index(timing) == lines.index("양도세 기본공제 250만 원은 한 번만 적용해요.") + 1
     assert result.rule_version == "KR-2026.05.10"
     assert any("law.go.kr" in source.url for source in result.sources)
 
@@ -510,7 +581,11 @@ def test_case_b_shortfall_and_excluded():
         600_000_000,
         489_640_000,
     )
+    assert plan.taxes.total_at_horizon == 10_360_000
     assert (plan.rank, plan.tier) == (1, "best")
+    assert plan.reasons[0] == (
+        "상속 시점(2032-10-21) 기준으로 맞춘 세금 합계가 가장 적어요(10,360,000원)."
+    )
     assert result.notes[1] == "재산은 연 0%, 생활비·간병비는 연 0%씩 늘어난다고 가정했어요."
 
 
@@ -603,7 +678,7 @@ def test_unsold_notes_use_topic_particle():
     for index, label in enumerate(["상가", "땅", "B"]):
         assets.append({"id": f"u{index}", "kind": "land", "label": label, "value": 10_000_000})
     result = run(flat(assets=assets))
-    assert result.notes[3:] == [
+    assert result.notes[4:] == [
         "취득 정보가 없는 상가는 팔지 않고 계산했어요.",
         "취득 정보가 없는 땅은 팔지 않고 계산했어요.",
         "취득 정보가 없는 B은(는) 팔지 않고 계산했어요.",
