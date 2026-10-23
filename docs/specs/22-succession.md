@@ -698,7 +698,7 @@ def replay_gift_deductions(recipient: Recipient, gifts: list[PriorGift]) -> list
 - 확인: 백엔드·프론트 공통 완료 기준과 아래.
   - 사례 A·B·C 값이 6·19·20절 그대로이고 `singleFrom`(A·C 2038-10-21, B `null`).
   - 사례 D 비용 표·`S`·`R`·`A`·방안 표·첫 이유·`assumptions` 두 줄.
-  - 두 분 예상 시점이 같은 입력과 `careYears` 0인 입력의 `assumptions` 문구. 저장된 입력에 두 비율이 없으면 기본값으로 계산한다. 범위 밖 값은 `422`(`assumptions.survivorLivingRatio` 등).
+  - 두 분 예상 시점이 같은 입력과 `careYears` 0인 입력의 `assumptions` 문구. 저장된 입력에 두 비율이 없으면 기본값으로 계산한다. 범위 밖 값은 `422` `VALIDATION_ERROR`(공통 처리기대로 `field`는 마지막 키 `survivorLivingRatio`·`survivorIncomeRatio`).
   - 모든 사례·모든 해에서 `total == max(0, living + care − income)`.
   - 화면 테스트: 가정값 두 칸과 되돌리기, 연도별 표 위 안내, "계산 기준과 가정"의 가정값·계산 가정 줄, 검토용 요약 가정값 표.
   - 슬롯 22 서버에서 사례 D 입력으로 `/succession` 결과(연도별 표·계산 기준과 가정)와 `?view=review`를 360·1280px에서 확인한다(가로 스크롤 없음).
