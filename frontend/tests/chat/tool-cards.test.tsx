@@ -221,30 +221,55 @@ describe("15 카드 렌더러", () => {
     );
   });
 
-  it("comparison: 추천 방향 표시는 하나, tax 고지, 비교 링크", () => {
+  it("comparison: 방향마다 남는 금액·상속 시점 기준 총 세금·낸 총 세금, 추천 표시는 하나, tax 고지, 비교 링크", () => {
+    // 06 8.1 사례 3(17절): 낸 금액은 lump_sum_now가 적지만 상속 시점 기준으로는 staged_children이 적다.
     const card: ComparisonCard = {
       type: "comparison",
       title: "상속·증여 방향 비교",
-      horizonDate: "2046.10.17",
+      horizonDate: "2066.10.16",
       rows: [
-        { key: "inherit_only", label: "증여 없이 상속", totalTax: "90,000,000원", familyReceives: "910,000,000원", recommended: false },
         {
           key: "staged_children",
           label: "자녀에게 10년마다 공제 한도만큼 증여",
-          totalTax: "60,000,000원",
-          familyReceives: "940,000,000원",
+          totalTaxAtHorizon: "483,098,314원",
+          totalTax: "483,098,314원",
+          familyReceives: "4,413,922,523원",
           recommended: true,
+        },
+        {
+          key: "lump_sum_now",
+          label: "자녀에게 지금 500,000,000원씩 증여",
+          totalTaxAtHorizon: "569,476,598원",
+          totalTax: "382,753,687원",
+          familyReceives: "4,327,544,239원",
+          recommended: false,
         },
       ],
       href: "/estate?tab=compare",
     };
     const { container } = renderCard(card);
-    expect(screen.getByText("2046.10.17에 상속한다고 가정했어요.")).toBeInTheDocument();
+    expect(screen.getByText("2066.10.16에 상속한다고 가정했어요.")).toBeInTheDocument();
+
+    const items = container.querySelectorAll("li");
+    expect(items).toHaveLength(2);
+    const lines = (item: Element) =>
+      Array.from(item.querySelectorAll("dt")).map((dt) => [dt.textContent, dt.nextElementSibling?.textContent]);
+    expect(lines(items[0])).toEqual([
+      ["가족에게 남는 금액", "4,413,922,523원"],
+      ["총 세금(상속 시점 기준)", "483,098,314원"],
+      ["총 세금(낸 금액)", "483,098,314원"],
+    ]);
+    expect(lines(items[1])).toEqual([
+      ["가족에게 남는 금액", "4,327,544,239원"],
+      ["총 세금(상속 시점 기준)", "569,476,598원"],
+      ["총 세금(낸 금액)", "382,753,687원"],
+    ]);
+
     const recommended = container.querySelectorAll('[data-recommended="true"]');
     expect(recommended).toHaveLength(1);
     expect(within(recommended[0] as HTMLElement).getByText("자녀에게 10년마다 공제 한도만큼 증여")).toBeInTheDocument();
+    expect(within(recommended[0] as HTMLElement).getByText("같은 가정에서 가장 많이 남는 방향")).toBeInTheDocument();
     expect(screen.getAllByText("같은 가정에서 가장 많이 남는 방향")).toHaveLength(1);
-    expect(screen.getByText("940,000,000원")).toBeInTheDocument();
     expect(disclaimers(container)).toEqual(["tax"]);
     expect(screen.getByRole("link", { name: /방향 비교 자세히 보기/ })).toHaveAttribute("href", "/estate?tab=compare");
   });

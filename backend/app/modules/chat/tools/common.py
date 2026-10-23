@@ -85,6 +85,8 @@ KRW_FIELDS = frozenset(
         "estateAtHorizon",
         "inheritanceTax",
         "totalTax",
+        "giftTaxAtHorizon",
+        "totalTaxAtHorizon",
         "familyReceives",
         "giftTax",
         "tax",

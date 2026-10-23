@@ -307,6 +307,7 @@ def test_compare_card_and_defaults(auth_client, db, monkeypatch):
         {
             "key": scenario.key,
             "label": scenario.label,
+            "totalTaxAtHorizon": money(scenario.total_tax_at_horizon),
             "totalTax": money(scenario.total_tax),
             "familyReceives": money(scenario.family_receives),
             "recommended": scenario.key == expected.recommended_key,
@@ -342,6 +343,111 @@ def test_compare_custom_arguments(auth_client, db, monkeypatch):
 def test_compare_input_validation(auth_client, db, arguments):
     result = run(tool_ctx(db), "compare_estate_plans", arguments)
     assert result.is_error and "INVALID_INPUT" in result.content
+
+
+# 06 8.1 사례 1·3(17절, 스펙 15 11절): 기준일 2026-10-16, 금융 6억·부동산 9억, 배우자 있음,
+# 자녀 첫째·둘째, 손자녀 손주, 연 3%. 사례 1은 20년·일시 증여 1억, 사례 3은 40년·5억이다.
+ESTATE_CASE_DAY = date(2026, 10, 16)
+# 방향별 (증여세 합계, 증여세 T 가치, 총 세금, 상속 시점 기준 총 세금, 가족에게 남는 금액)
+COMPARE_CASES = {
+    "case1": (
+        {"horizonYears": 20, "annualGrowthRate": "3", "lumpSumPerChild": 100_000_000},
+        "lump_sum_now",
+        {
+            "inherit_only": (0, 0, 187_323_195, 187_323_195, 2_522_940_861),
+            "staged_children": (0, 0, 165_000_438, 165_000_438, 2_545_263_618),
+            "lump_sum_now": (9_700_000, 17_526_374, 153_069_471, 160_895_845, 2_549_368_211),
+            "staged_grandchildren": (0, 0, 176_844_308, 176_844_308, 2_533_419_748),
+        },
+    ),
+    "case3": (
+        {"horizonYears": 40, "annualGrowthRate": "3", "lumpSumPerChild": 500_000_000},
+        "staged_children",
+        {
+            "inherit_only": (0, 0, 656_999_477, 656_999_477, 4_240_021_360),
+            "staged_children": (0, 0, 483_098_314, 483_098_314, 4_413_922_523),
+            "lump_sum_now": (82_450_000, 269_172_911, 382_753_687, 569_476_598, 4_327_544_239),
+            "staged_grandchildren": (0, 0, 596_830_580, 596_830_580, 4_300_190_257),
+        },
+    ),
+}
+
+
+def add_case_family(client) -> None:
+    add_holding(client, "cash", 600_000_000)
+    add_holding(client, "other", 900_000_000, include=False)  # 배분에서 뺀 자산 = 부동산
+    add_member(client, "배우자", relation="spouse")
+    add_member(client, "첫째", birthDate="1991-03-01")
+    add_member(client, "둘째", birthDate="1994-07-15")
+    add_member(client, "손주", relation="grandchild", birthDate="2020-05-05")
+
+
+def assert_family_receives_identity(scenario: dict) -> None:
+    # 06 17절: 증여세를 상속 시점까지 불려 빼면 가족에게 남는 금액과 맞는다.
+    assert (
+        scenario["estateAtHorizon"]
+        - scenario["inheritanceTax"]
+        + scenario["giftsValueAtHorizon"]
+        - scenario["giftTaxAtHorizon"]
+        == scenario["familyReceives"]
+    )
+    tax_at_horizon = scenario["giftTaxAtHorizon"] + scenario["inheritanceTax"]
+    assert scenario["totalTaxAtHorizon"] == tax_at_horizon
+
+
+@pytest.mark.parametrize("case", COMPARE_CASES)
+def test_compare_tax_at_horizon_matches_estate_cases(auth_client, db, case):
+    arguments, recommended_key, expected = COMPARE_CASES[case]
+    add_case_family(auth_client)
+    result = run(tool_ctx(db, today=ESTATE_CASE_DAY), "compare_estate_plans", arguments)
+    assert not result.is_error
+
+    content = result.content
+    assert content["recommendedKey"] == recommended_key
+    scenarios = {scenario["key"]: scenario for scenario in content["scenarios"]}
+    assert list(scenarios) == list(expected)
+    for key, (gift_tax, gift_tax_at, total_tax, total_tax_at, family) in expected.items():
+        scenario = scenarios[key]
+        assert (
+            scenario["giftTaxTotal"],
+            scenario["giftTaxAtHorizon"],
+            scenario["totalTax"],
+            scenario["totalTaxAtHorizon"],
+            scenario["familyReceives"],
+        ) == (gift_tax, gift_tax_at, total_tax, total_tax_at, family)
+        assert scenario["giftTaxAtHorizonText"] == money(gift_tax_at)
+        assert scenario["totalTaxAtHorizonText"] == money(total_tax_at)
+        assert scenario["totalTaxText"] == money(total_tax)  # 낸 금액은 그대로 남는다
+        assert_family_receives_identity(scenario)
+
+    assert result.card["rows"] == [
+        {
+            "key": key,
+            "label": scenarios[key]["label"],
+            "totalTaxAtHorizon": money(total_tax_at),
+            "totalTax": money(total_tax),
+            "familyReceives": money(family),
+            "recommended": key == recommended_key,
+        }
+        for key, (_, _, total_tax, total_tax_at, family) in expected.items()
+    ]
+
+
+def test_compare_zero_growth_tax_at_horizon_equals_paid(auth_client, db):
+    add_case_family(auth_client)
+    result = run(
+        tool_ctx(db, today=ESTATE_CASE_DAY),
+        "compare_estate_plans",
+        {"horizonYears": 20, "annualGrowthRate": "0"},
+    )
+    scenarios = result.content["scenarios"]
+    assert any(scenario["giftTaxTotal"] > 0 for scenario in scenarios)  # 증여세를 낸 방향이 있다
+    for scenario in scenarios:
+        assert scenario["giftTaxAtHorizon"] == scenario["giftTaxTotal"]
+        assert scenario["totalTaxAtHorizon"] == scenario["totalTax"]
+        assert_family_receives_identity(scenario)
+    for row in result.card["rows"]:
+        assert row["totalTaxAtHorizon"] == row["totalTax"]
 
 
 # ── plan_gifts ──────────────────────────────────────────────────────
