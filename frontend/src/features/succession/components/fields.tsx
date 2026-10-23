@@ -3,7 +3,7 @@
 import { useId, type ReactNode } from "react";
 import { Controller, get, useFormContext, type Path } from "react-hook-form";
 import { Input } from "@/components/ui/input";
-import { formatKRWHint } from "@/lib/format";
+import { formatKRWCompact } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { parseInteger, type SuccessionForm } from "../form";
 
@@ -83,7 +83,7 @@ export function TextField({ name, label, type = "text", numeric, decimal, hint, 
   );
 }
 
-/** 원 단위 금액. 숫자만 받고 쉼표로 묶어 보여 주며 "1.2억원 · 12,000만원" 도우미를 붙인다. */
+/** 원 단위 금액. 숫자만 받고 쉼표로 묶어 보여 주며 "1.2억원" 도우미를 붙인다. */
 export function MoneyField({ name, label, hint, required, className }: Omit<TextFieldProps, "type" | "numeric" | "decimal">) {
   const id = useId();
   const { control } = useFormContext<SuccessionForm>();
@@ -104,7 +104,7 @@ export function MoneyField({ name, label, hint, required, className }: Omit<Text
             hint={
               <>
                 <span className="block tabular-nums" aria-live="polite">
-                  {amount === null ? "원 단위로 입력해 주세요." : formatKRWHint(amount)}
+                  {amount === null ? "원 단위로 입력해 주세요." : formatKRWCompact(amount)}
                 </span>
                 {hint}
               </>

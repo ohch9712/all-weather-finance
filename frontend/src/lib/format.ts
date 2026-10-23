@@ -58,17 +58,6 @@ export function formatKRWCompact(value: number): string {
   return formatKRW(rounded);
 }
 
-/**
- * 금액 입력 칸 도우미(스펙 22 17절). 짧은 표기와 만원 표기를 함께 보여 주되, 둘이 같으면 하나만 보인다.
- * `120000000` → `"1.2억원 · 12,000만원"`, `2500000` → `"250만원"`, `0` → `"0원"`
- */
-export function formatKRWHint(value: number): string {
-  if (value === 0) return "0원";
-  const compact = formatKRWCompact(value);
-  const manwon = `${(value / MAN).toLocaleString("ko-KR")}만원`;
-  return compact === manwon ? compact : `${compact} · ${manwon}`;
-}
-
 /** `formatPercent(12.345, 1)` → `"12.3%"`. 소수 자릿수는 `digits`로 고정한다(기본 1). */
 export function formatPercent(value: number, digits = 1): string {
   const text = new Intl.NumberFormat("ko-KR", {
