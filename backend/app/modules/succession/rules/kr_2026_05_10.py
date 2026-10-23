@@ -104,6 +104,9 @@ RULES_2026_05_10 = SuccessionRules(
             "정책브리핑, 서울 전역·경기 12곳 조정대상지역 지정(2025-10)",
             "https://www.korea.kr/news/policyNewsView.do?newsId=148950973",
         ),
+        # 21절: 한 분만 계실 때 생활비·수입 비율 가정값의 근거
+        ("보건복지부, 기준 중위소득", "https://www.mohw.go.kr/menu.es?mid=a10708010900"),
+        ("국민연금공단, 유족연금", "https://www.nps.or.kr/pnsinfo/ntpsklg/getOHAF0072M0.do"),
     ),
     life_table_ages=(40, 50, 60, 65, 70, 80, 90, 100),
     life_table={
@@ -170,4 +173,9 @@ DEFAULT_ASSUMPTIONS = {
     "care_monthly_cost": 2_000_000,
     "care_years": 2,
     "official_price_ratio": D("70"),
+    # 2026년 기준 중위소득 1인 가구 2,564,238원 ÷ 2인 가구 4,199,292원 ≈ 61%
+    "survivor_living_ratio": D("61"),
+    # 국민연금 유족연금은 가입기간에 따라 기본연금액의 40~60%,
+    # 본인 연금과 겹치면 본인 연금 + 유족연금 30%
+    "survivor_income_ratio": D("60"),
 }

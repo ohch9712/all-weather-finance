@@ -1,4 +1,4 @@
-"""스펙 22 6절·20절 검증용 종합 사례 입력(JSON 계약 그대로)."""
+"""스펙 22 6절·20절·21절 검증용 종합 사례 입력(JSON 계약 그대로)."""
 
 import copy
 
@@ -91,6 +91,9 @@ CASE_A = {
         "careMonthlyCost": 2_000_000,
         "careYears": 2,
         "officialPriceRatio": "70",
+        # 21절: 사례 A는 두 비율을 100으로 두어 6·19·20절 값이 그대로다.
+        "survivorLivingRatio": "100",
+        "survivorIncomeRatio": "100",
     },
 }
 
@@ -136,3 +139,9 @@ def case(base: dict, **changes) -> dict:
 
 # 20절 사례 C: 사례 A에서 월 수입만 4,000,000(남는 수입 0년차 12,000,000).
 CASE_C = case(CASE_A, monthlyIncome=4_000_000)
+
+# 21절 사례 D: 사례 A에서 두 비율만 기본값(61·60).
+CASE_D = case(
+    CASE_A,
+    assumptions={**CASE_A["assumptions"], "survivorLivingRatio": "61", "survivorIncomeRatio": "60"},
+)
