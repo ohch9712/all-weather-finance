@@ -17,7 +17,7 @@ from app.modules.succession.calculations import (
     topic,
 )
 from app.modules.succession.schemas import AssetInput, SuccessionInput
-from tests.succession.cases import CASE_A, CASE_B, case
+from tests.succession.cases import CASE_A, CASE_B, CASE_C, case
 
 D0 = date(2026, 10, 21)
 
@@ -231,13 +231,22 @@ def test_case_a_funding_timeline_and_assignment():
     funding = result.funding
     costs = funding.costs
     assert len(costs) == 19
-    assert (costs[0].living, costs[0].care, costs[0].on) == (24_000_000, 0, D0)
-    assert costs[10].living == costs[10].care == 29_255_866
+    # 20절: 표시용 생활비·수입과 필요 금액(생활비 부족분 + 간병비).
+    assert (costs[0].living, costs[0].income, costs[0].care, costs[0].total, costs[0].on) == (
+        36_000_000,
+        12_000_000,
+        0,
+        24_000_000,
+        D0,
+    )
+    assert costs[10].living - costs[10].income == costs[10].care == 29_255_866
+    assert costs[10].total == 58_511_732
     assert [row.year for row in costs if row.care] == [10, 11, 17, 18]
-    assert near(funding.survivor_need, 294_166_954)
-    assert near(funding.reserve_present_value, 522_664_859)
+    # 월 생활비 ≥ 월 수입이면 20절 전과 원 단위까지 같다.
+    assert funding.survivor_need == 294_166_954
+    assert funding.reserve_present_value == 522_664_859
     assert funding.cash_assets == 800_000_000
-    assert near(funding.transferable_now, 277_335_141)
+    assert funding.transferable_now == 277_335_141
     assert funding.shortfall == 0
     assert [(a.asset_id, a.child_id) for a in result.assignments] == [
         ("a2", "c2"),
@@ -349,11 +358,12 @@ def test_case_a_plan_table_rank_and_tier():
             plan.parents_remaining_now,
             plan.children_receive_at_horizon,
         )
-        assert all(near(a, e) for a, e in zip(actual, row[1:], strict=True)), (plan.key, actual)
+        # 20절: 6절·19절 값과 원 단위까지 같다.
+        assert actual == row[1:], (plan.key, actual)
         assert taxes.total == (
             taxes.gift_tax + taxes.acquisition_tax + taxes.capital_gains_tax + taxes.inheritance_tax
         )
-        assert near(plan.parents_reserve, 522_664_859)
+        assert plan.parents_reserve == 522_664_859
 
 
 def test_case_a_total_at_horizon_formula():
@@ -541,6 +551,12 @@ def test_case_a_notes_assumptions_sources():
         "시점에 낸다고 봐요."
     )
     assert lines.index(timing) == lines.index("양도세 기본공제 250만 원은 한 번만 적용해요.") + 1
+    surplus = (
+        "월 수입이 월 생활비보다 많으면 남는 수입으로 간병비를 먼저 메우고, 그래도 남는 "
+        "돈은 현금으로 쌓지 않는다고 봐요."
+    )
+    cash_first = "생활·간병비는 부모님 현금에서 쓰고, 모자라도 부동산을 팔지 않는다고 봐요."
+    assert lines.index(surplus) == lines.index(cash_first) + 1
     assert result.rule_version == "KR-2026.05.10"
     assert any("law.go.kr" in source.url for source in result.sources)
 
@@ -559,8 +575,16 @@ def test_case_b_shortfall_and_excluded():
         -92_000_000,
         92_000_000,
     )
-    assert sum(row.living for row in funding.costs) == 24_000_000 * 6
+    first = funding.costs[0]
+    assert (first.living, first.income, first.care, first.total) == (
+        30_000_000,
+        6_000_000,
+        0,
+        24_000_000,
+    )
+    assert sum(row.living - row.income for row in funding.costs) == 24_000_000 * 6
     assert sum(row.care for row in funding.costs) == 24_000_000 * 2
+    assert [row.total for row in funding.costs] == [24_000_000] * 4 + [48_000_000] * 2
     assert [plan.key for plan in result.plans] == ["inherit_only"]
     assert [(e.key, e.reason) for e in result.excluded] == [
         ("cash_staged_deduction", "생활비·간병비를 떼어 두면 지금 넘길 현금이 없어요."),
@@ -587,6 +611,96 @@ def test_case_b_shortfall_and_excluded():
         "상속 시점(2032-10-21) 기준으로 맞춘 세금 합계가 가장 적어요(10,360,000원)."
     )
     assert result.notes[1] == "재산은 연 0%, 생활비·간병비는 연 0%씩 늘어난다고 가정했어요."
+
+
+# ── 20절 사례 C(남는 수입으로 간병비 메우기) ──────────────────────────────
+
+CASE_C_COSTS = [
+    # 연차, 생활비, 수입, 간병비, 필요 금액
+    (0, 36_000_000, 48_000_000, 0, 0),
+    (10, 43_883_799, 58_511_732, 29_255_866, 14_627_933),
+    (11, 44_761_475, 59_681_966, 29_840_983, 14_920_492),
+    (17, 50_408_691, 67_211_588, 33_605_794, 16_802_897),
+    (18, 51_416_864, 68_555_818, 34_277_909, 17_138_955),
+]
+
+CASE_C_TABLE = [
+    # key, 세금 합계(낸 금액), 상속 시점 기준 세금,
+    # 부모님에게 남는 재산(지금), 자녀에게 남는 금액(T). 20절 순위.
+    ("cash_lump_now", 934_684_869, 984_659_180, 2_345_458_522, 3_456_666_227),
+    ("realestate_gift_cash_staged", 897_032_446, 1_038_329_631, 2_050_000_000, 3_402_995_778),
+    ("realestate_gift_now", 913_293_300, 1_054_590_485, 2_100_000_000, 3_386_734_924),
+    ("cash_staged_spread", 1_060_069_783, 1_082_481_218, 2_722_729_262, 3_358_844_189),
+    ("realestate_sell_cash_now", 983_021_804, 1_123_940_853, 2_300_000_000, 3_232_163_092),
+    ("cash_staged_deduction", 1_171_933_943, 1_171_933_943, 3_050_000_000, 3_269_391_466),
+    ("inherit_only", 1_192_260_011, 1_192_260_011, 3_100_000_000, 3_249_065_398),
+]
+
+
+def test_case_c_surplus_income_covers_care():
+    funding = run(CASE_C).funding
+    rows = {row.year: row for row in funding.costs}
+    assert len(funding.costs) == 19
+    assert [
+        (row.year, row.living, row.income, row.care, row.total)
+        for row in (rows[year] for year, *_ in CASE_C_COSTS)
+    ] == CASE_C_COSTS
+    # 남는 수입은 0년차 12,000,000(이후 연 2%). 필요 금액은 간병 기간에만 있다.
+    assert rows[0].income - rows[0].living == 12_000_000
+    assert [row.year for row in funding.costs if row.total] == [10, 11, 17, 18]
+    assert (
+        funding.survivor_need,
+        funding.reserve_present_value,
+        funding.transferable_now,
+        funding.shortfall,
+    ) == (33_941_852, 45_458_522, 754_541_478, 0)
+
+
+def test_case_c_plan_table_rank_and_tier():
+    result = run(CASE_C)
+    assert result.excluded == []
+    assert [plan.key for plan in result.plans] == [row[0] for row in CASE_C_TABLE]
+    assert [plan.rank for plan in result.plans] == list(range(1, 8))
+    assert [plan.tier for plan in result.plans] == ["best", "runner_up", "runner_up"] + [
+        "other"
+    ] * 4
+    for plan, row in zip(result.plans, CASE_C_TABLE, strict=True):
+        actual = (
+            plan.taxes.total,
+            plan.taxes.total_at_horizon,
+            plan.parents_remaining_now,
+            plan.children_receive_at_horizon,
+        )
+        assert actual == row[1:], (plan.key, actual)
+        assert plan.parents_reserve == 45_458_522
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        CASE_A,
+        CASE_B,
+        CASE_C,
+        case(CASE_A, monthlyIncome=3_000_000),
+        case(CASE_A, monthlyIncome=3_500_000),
+        case(CASE_B, monthlyIncome=3_000_000),
+        case(CASE_A, monthlyLivingCost=0, monthlyIncome=0),
+    ],
+    ids=["A", "B", "C", "A-equal", "A-small-surplus", "B-surplus", "A-zero"],
+)
+def test_cost_total_matches_display_columns(data):
+    """20절: 모든 해에서 필요 금액 = max(0, 생활비 + 간병비 − 수입)."""
+    for row in run(data).funding.costs:
+        assert row.total == max(0, row.living + row.care - row.income), row.year
+        assert min(row.living, row.income, row.care, row.total) >= 0
+
+
+def test_large_income_needs_no_reserve():
+    result = run(case(CASE_A, monthlyIncome=100_000_000))
+    funding = result.funding
+    assert all(row.total == 0 for row in funding.costs)
+    assert (funding.survivor_need, funding.reserve_present_value) == (0, 0)
+    assert funding.transferable_now == funding.cash_assets == 800_000_000
 
 
 # ── 5.6 포함 조건과 제외 이유 ─────────────────────────────────────────

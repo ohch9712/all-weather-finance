@@ -93,7 +93,11 @@ export const RESULT: SuccessionResult = {
     { role: "mother", age: 72, tableLifeExpectancy: "17.5", healthFactor: "1.1", lifeExpectancy: "19.3", yearsAssumed: 19, expectedUntil: "2045-10-21", careFrom: "2043-10-21", isOwner: false },
   ],
   funding: {
-    costs: [{ year: 0, on: "2026-10-21", living: 24_000_000, care: 0, total: 24_000_000 }],
+    // 사례 A 0·10년차(20절): 필요 금액 = 생활비 + 간병비 − 수입.
+    costs: [
+      { year: 0, on: "2026-10-21", living: 36_000_000, care: 0, income: 12_000_000, total: 24_000_000 },
+      { year: 10, on: "2036-10-21", living: 43_883_799, care: 29_255_866, income: 14_627_933, total: 58_511_732 },
+    ],
     survivorNeed: 294_166_954,
     reservePresentValue: 522_664_859,
     cashAssets: 800_000_000,
@@ -118,4 +122,19 @@ export const SHORT_RESULT: SuccessionResult = {
   ...RESULT,
   funding: { ...RESULT.funding, transferableNow: -92_000_000, shortfall: 92_000_000 },
   plans: [plan("inherit_only", 1, { giftTax: 0, acquisitionTax: 10_360_000, capitalGainsTax: 0, inheritanceTax: 0, total: 10_360_000, totalAtHorizon: 10_360_000 })],
+};
+
+// 월 수입이 생활비와 간병비보다 많아 모든 해의 필요 금액이 0인 결과(20절).
+export const COVERED_RESULT: SuccessionResult = {
+  ...RESULT,
+  funding: {
+    ...RESULT.funding,
+    costs: [
+      { year: 0, on: "2026-10-21", living: 36_000_000, care: 0, income: 1_200_000_000, total: 0 },
+      { year: 10, on: "2036-10-21", living: 43_883_799, care: 29_255_866, income: 1_462_793_315, total: 0 },
+    ],
+    survivorNeed: 0,
+    reservePresentValue: 0,
+    transferableNow: 800_000_000,
+  },
 };
