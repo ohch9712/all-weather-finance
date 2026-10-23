@@ -1,4 +1,4 @@
-import { formatKRW, formatKRWCompact } from "@/lib/format";
+import { formatKRW } from "@/lib/format";
 import type { AssetKind, Health, ParentRole, Plan, PlanKey, Sale, SuccessionInput, Transfer } from "./types";
 
 export const ROLE_LABELS: Record<ParentRole, string> = { father: "아버지", mother: "어머니" };
@@ -114,9 +114,4 @@ export function scheduleText(row: { on: string; method: "gift" | "inherit"; amou
 
 export function todayKst(): string {
   return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
-}
-
-/** 금액 도우미 "1.2억원 · 12,000만원" */
-export function moneyHint(value: number): string {
-  return `${formatKRWCompact(value)} · ${(value / 10_000).toLocaleString("ko-KR")}만원`;
 }

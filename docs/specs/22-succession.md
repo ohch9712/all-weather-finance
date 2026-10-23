@@ -601,3 +601,11 @@ def replay_gift_deductions(recipient: Recipient, gifts: list[PriorGift]) -> list
   - 응답 모델 검증 실패(`ResponseValidationError`)는 메시지에 입력값을 담지만, 건강 상태는 `Health` 리터럴로 검증한 값만 암호화해 저장하므로 정상 경로에서는 생기지 않는다.
 - 실행한 검증: develop `24cc017` 병합(스펙 문서 한 줄만 바뀌어 프론트는 `npm run test`만 실행). 백엔드 `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 1,583개 통과(succession 61개). 프론트 `npm run test` 56개 파일 570개 통과. 슬롯 22 실서버(백엔드만, 합성 계정, 확인 뒤 계정 삭제)에 정상 요청, 두 재현 요청(각각 200, `healthFactor` 0.7·0.4로 poor·care 적용), 키 대소문자·`;` 구분·잘못된 값(422), `POST /plans` 잘못된 health(422), 다른 경로 `GET /api/health?probe=keep`을 보내 succession 접근 로그는 모두 `GET /api/succession/life-expectancy?*** HTTP/1.1`로만 남고 다른 경로는 그대로이며, 새 로그에 건강 상태 값·인코딩 키가 0건임을 확인했다.
 - 남은 일: 로컬 `backend/logs/dev-server.log.1`(저장소 밖)에는 수정 전 검증 때 보낸 합성 쿼리가 남아 있을 수 있다.
+
+### 금액 도우미 중복 표시 수정 (2026-10-23)
+
+- 구현: 17절 규칙대로 `frontend/src/lib/format.ts`에 `formatKRWHint(value: number): string`을 추가했다(0이면 `"0원"`, `formatKRWCompact` 결과와 만원 표기가 같으면 하나, 다르면 `"A · B"`). 22의 `moneyHint`(`features/succession/utils.ts`)를 지우고 `components/fields.tsx`의 `MoneyField`가 `formatKRWHint`를 쓴다. 06 `features/estate/components/shared.tsx`의 금액 도우미 한 줄은 `formatKRWHint(Number(value) || 0)`로 바꿨다. 입력이 비었을 때 문구("원 단위로 입력해 주세요.")와 다른 형식 함수는 그대로다. 06 금액 칸의 0원은 이제 `"0원 · 0만원"` 대신 `"0원"`으로 보인다(17절 규칙).
+- 테스트: `tests/foundation/format.test.ts`에 17절 표 8개 값을 `it.each` 표 테스트로 고정했다. `tests/succession/succession.test.tsx`는 기존 `"1.2억원 · 12,000만원"` 단언 뒤에 월 생활비 2,500,000 → `"250만원"` 한 번, `"250만원 · 250만원"` 없음을 더했다. `tests/estate/estate.test.tsx`의 증여세 계산 테스트에 증여 금액 2,500,000 → 같은 두 단언을 더하고, 계산 요청 본문 단언(1억 원)이 그대로 맞도록 금액을 100,000,000으로 되돌린 뒤 계산한다.
+- 스펙과 다른 점: 없다.
+- 실행한 검증: 프론트 `npm run lint`·`npx tsc --noEmit` 통과, `npm run test` 56개 파일 578개 통과, `npm run build` 성공. 백엔드는 바꾸지 않았다. 슬롯 22 서버와 독립 헤드리스 Chrome 컨텍스트(합성 계정, 확인 뒤 계정 삭제, localhost 밖 요청 차단)에서 360·1280px 각각 `/succession` 월 생활비 2,500,000 → `250만원`, 현금 800,000,000 → `8억원 · 80,000만원`, `/estate?tab=gift-tax` 증여 금액 기본 100,000,000 → `1억원 · 10,000만원`, 2,500,000 → `250만원`, 감정평가수수료 0 → `0원`, 두 화면 모두 `"250만원 · 250만원"` 없음과 가로 스크롤 없음을 확인했다(22항목 통과). 확인 뒤 `scripts/stop.sh`로 서버를 멈췄다.
+- 남은 일: 없다.

@@ -87,6 +87,11 @@ describe("입력", () => {
     await user.type(screen.getByRole("textbox", { name: "부모님 월 생활비" }), "120000000");
     expect(screen.getByRole("textbox", { name: "부모님 월 생활비" })).toHaveValue("120,000,000");
     expect(screen.getByText("1.2억원 · 12,000만원")).toBeVisible();
+    // 1억 미만은 두 표기가 같아 한 번만 보인다(17절)
+    await user.clear(screen.getByRole("textbox", { name: "부모님 월 생활비" }));
+    await user.type(screen.getByRole("textbox", { name: "부모님 월 생활비" }), "2500000");
+    expect(screen.getByText("250만원")).toBeVisible();
+    expect(screen.queryByText(/250만원 · 250만원/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "재산 추가" }));
     const house = screen.getAllByRole("group").find((group) => group.getAttribute("aria-label") === "재산 2")!;
     await user.selectOptions(within(house).getByLabelText("소재 시·도"), "서울");
