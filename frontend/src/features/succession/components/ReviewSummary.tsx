@@ -126,7 +126,7 @@ function InputTables({ input, result }: { input: SuccessionInput; result: Succes
           caption="가정값 입력"
           rows={[
             ["재산 연 증가율", `${input.assumptions.annualGrowthRate}%`],
-            ["생활비·간병비 연 상승률", `${input.assumptions.costInflationRate}%`],
+            ["생활비·수입·간병비 연 상승률", `${input.assumptions.costInflationRate}%`],
             ["월 간병비", won(input.assumptions.careMonthlyCost)],
             ["간병 기간", `${input.assumptions.careYears}년`],
             ["공시가격 비율", `${input.assumptions.officialPriceRatio}%`],

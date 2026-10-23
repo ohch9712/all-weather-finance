@@ -27,7 +27,7 @@ export function AssumptionsSection() {
     >
       <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <TextField name="assumptions.annualGrowthRate" label="재산 연 증가율(%)" decimal hint={`0~10%. ${ASSUMPTION_HINTS.annualGrowthRate}`} />
-        <TextField name="assumptions.costInflationRate" label="생활비·간병비 연 상승률(%)" decimal hint={`0~10%. ${ASSUMPTION_HINTS.costInflationRate}`} />
+        <TextField name="assumptions.costInflationRate" label="생활비·수입·간병비 연 상승률(%)" decimal hint={`0~10%. ${ASSUMPTION_HINTS.costInflationRate}`} />
         <MoneyField name="assumptions.careMonthlyCost" label="월 간병비" hint={ASSUMPTION_HINTS.careMonthlyCost} />
         <TextField name="assumptions.careYears" label="간병 기간(년)" numeric hint={`0~20년, 기대여명 마지막 해들에 넣어요. ${ASSUMPTION_HINTS.careYears}`} />
         <TextField name="assumptions.officialPriceRatio" label="공시가격 비율(%)" decimal hint={`10~100%. 공시가격을 비운 부동산에 써요. ${ASSUMPTION_HINTS.officialPriceRatio}`} />

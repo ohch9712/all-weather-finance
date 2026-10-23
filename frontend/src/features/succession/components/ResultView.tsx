@@ -273,7 +273,7 @@ export function BasisList({ result, input }: { result: SuccessionResult; input: 
       <div>
         <p className="font-medium">가정값</p>
         <p className="text-muted-foreground break-keep">
-          재산 연 {assumptions.annualGrowthRate}% · 생활비·간병비 연 {assumptions.costInflationRate}% · 월 간병비 {won(assumptions.careMonthlyCost)} · 간병 {assumptions.careYears}년 · 공시가격 비율 {assumptions.officialPriceRatio}% · 한 분만 계실 때 생활비 {assumptions.survivorLivingRatio}% · 수입 {assumptions.survivorIncomeRatio}%
+          재산 연 {assumptions.annualGrowthRate}% · 생활비·수입·간병비 연 {assumptions.costInflationRate}% · 월 간병비 {won(assumptions.careMonthlyCost)} · 간병 {assumptions.careYears}년 · 공시가격 비율 {assumptions.officialPriceRatio}% · 한 분만 계실 때 생활비 {assumptions.survivorLivingRatio}% · 수입 {assumptions.survivorIncomeRatio}%
         </p>
       </div>
       <div>
