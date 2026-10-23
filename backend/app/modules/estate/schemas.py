@@ -357,6 +357,8 @@ class CompareScenario(CamelModel):
     estate_at_horizon: int
     inheritance_tax: int
     total_tax: int
+    gift_tax_at_horizon: int
+    total_tax_at_horizon: int
     family_receives: int
     inheritance: InheritanceSummary
 

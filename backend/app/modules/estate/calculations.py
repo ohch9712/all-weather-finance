@@ -753,6 +753,10 @@ def compare_estate_plans(req: EstateCompareInput) -> EstateCompareResult:
         )
         tax_result = calc_inheritance_tax(inheritance_req)
         gift_tax = sum(g.gift_tax for g in gifts)
+        # 증여세도 낸 날부터 T까지 같은 증가율로 불린다(17절).
+        gift_tax_value = sum(
+            future_value(g.gift_tax, g.gift_on, end, req.annual_growth_rate) for g in gifts
+        )
         scenarios.append(
             CompareScenario(
                 key=key,
@@ -764,14 +768,18 @@ def compare_estate_plans(req: EstateCompareInput) -> EstateCompareResult:
                 estate_at_horizon=estate,
                 inheritance_tax=tax_result.payable_tax,
                 total_tax=gift_tax + tax_result.payable_tax,
-                family_receives=estate - tax_result.payable_tax + gift_value - gift_tax,
+                gift_tax_at_horizon=gift_tax_value,
+                total_tax_at_horizon=gift_tax_value + tax_result.payable_tax,
+                family_receives=estate - tax_result.payable_tax + gift_value - gift_tax_value,
                 inheritance=InheritanceSummary.model_validate(tax_result.model_dump()),
             )
         )
-    best = max(scenarios, key=lambda s: (s.family_receives, -s.total_tax))
+    best = max(scenarios, key=lambda s: (s.family_receives, -s.total_tax_at_horizon))
     notes = [
         "상속 전 10년(상속인이 아닌 손자녀는 5년) 안에 한 증여는 상속재산에 다시 더해져요.",
         f"재산과 증여한 돈이 모두 연 {req.annual_growth_rate}%씩 늘어난다고 가정했어요.",
+        f"증여할 때 낸 증여세도 상속 시점까지 연 {req.annual_growth_rate}%로 불려 "
+        "총 세금과 가족에게 남는 금액에 반영했어요.",
         "실제 상속 시점과 재산 가치, 세법은 달라질 수 있어요.",
     ]
     if omitted:

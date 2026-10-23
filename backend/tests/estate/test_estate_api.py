@@ -204,6 +204,47 @@ def test_prefill_actual_allocation_and_compare(auth_client, db):
     assert resolved.assets.financial_assets == 300_000_000
 
 
+@freeze_time("2026-10-16T03:00:00Z")
+def test_compare_returns_gift_tax_at_horizon(auth_client, other_auth_client):
+    # 스펙 8.1 사례 1, 17절의 두 응답 필드
+    create_member(auth_client, displayName="첫째", birthDate="1991-03-01")
+    create_member(auth_client, displayName="둘째", birthDate="1994-07-15")
+    create_member(auth_client, relation="grandchild", displayName="손주", birthDate="2020-05-05")
+    body = {
+        "baseDate": "2026-10-16",
+        "horizonYears": 20,
+        "annualGrowthRate": "3",
+        "assets": {
+            "financialAssets": 600_000_000,
+            "realEstate": 900_000_000,
+            "otherAssets": 0,
+            "debts": 0,
+        },
+        "spouseAlive": True,
+        "lumpSumPerChild": 100_000_000,
+    }
+    response = auth_client.post(f"{BASE}/compare", json=body)
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["recommendedKey"] == "lump_sum_now"
+    scenarios = {s["key"]: s for s in data["scenarios"]}
+    lump = scenarios["lump_sum_now"]
+    assert (lump["giftTaxTotal"], lump["totalTax"]) == (9_700_000, 153_069_471)
+    assert abs(lump["giftTaxAtHorizon"] - 17_526_374) <= 1000
+    assert abs(lump["totalTaxAtHorizon"] - 160_895_845) <= 1000
+    assert abs(lump["familyReceives"] - 2_549_368_211) <= 1000
+    for scenario in data["scenarios"]:
+        assert isinstance(scenario["giftTaxAtHorizon"], int)
+        assert (
+            scenario["totalTaxAtHorizon"]
+            == scenario["giftTaxAtHorizon"] + scenario["inheritanceTax"]
+        )
+    assert scenarios["inherit_only"]["giftTaxAtHorizon"] == 0
+    # 다른 사용자의 가족은 쓰지 않는다(자녀·배우자 없음).
+    other = other_auth_client.post(f"{BASE}/compare", json={**body, "spouseAlive": False})
+    assert other.status_code == 422
+
+
 @pytest.mark.parametrize("kind", ["missing", "attribute"])
 def test_prefill_fallback(auth_client, monkeypatch, kind):
     from app.modules.allocation import service as allocation
