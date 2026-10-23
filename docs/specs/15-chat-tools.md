@@ -90,7 +90,7 @@ develop `5d82533`의 실제 코드와 대조해 정한 내용이다. 표와 어�
   - `stock_list`: `search_stocks`는 시세가 없는 종목 마스터 검색이라 `price`·`changeRate`는 null, `source`는 `"master"`(배지 없음), `extra`는 시장·ETF 표시. `screen_stocks`는 `ScreenResult.as_of`·`source`·`items`, `get_watchlist`는 항목의 `quote`와 첫 항목의 `source`.
   - `link_list`: `search_posts` 결과의 `title`·`summary`, `href`는 `/learn/{slug}`.
   - `gift_tax`: `GiftTaxResult.steps`와 `payable_tax`, `href`는 `/estate?tab=gift-tax`. `plan_gifts`의 `link`는 `/estate?tab=plan`.
-  - `comparison`: `EstateCompareResult.scenarios`의 `key`·`label`·`total_tax`·`family_receives`, `recommended`는 `key == recommended_key`, `horizonDate`는 `horizon_date`.
+  - `comparison`: `EstateCompareResult.scenarios`의 `key`·`label`·`total_tax_at_horizon`·`total_tax`·`family_receives`, `recommended`는 `key == recommended_key`, `horizonDate`는 `horizon_date`(11절).
 - `search_learning`은 사용자 없이 `learn.search_posts(db, query, limit=5)`를 부르므로 북마크·읽음 표시는 넣지 않는다.
 
 ### 4.2 금액 인용 (웨이브 4 후속, 2026-10-18)
@@ -119,7 +119,7 @@ develop `5d82533`의 실제 코드와 대조해 정한 내용이다. 표와 어�
 | { type: "directions"; title: string; items: { title: string; body: string; amount: string | null }[];
     href: "/allocation/recommendation/detail" }
 | { type: "comparison"; title: string; horizonDate: string;
-    rows: { key: string; label: string; totalTax: string; familyReceives: string; recommended: boolean }[];
+    rows: { key: string; label: string; totalTaxAtHorizon: string; totalTax: string; familyReceives: string; recommended: boolean }[];
     href: "/estate?tab=compare" }
 ```
 
@@ -172,6 +172,23 @@ develop `5d82533`의 실제 코드와 대조해 정한 내용이다. 표와 어�
 5. 도구 결과에 이메일·사용자 ID·계좌번호가 없다.
 6. 09의 append-only·고정 프롬프트 규칙이 유지된다(도구 목록 이름순, 시스템 프롬프트 고정).
 7. `get_recommendation`·`compare_estate_plans` 도구가 02·06의 공개 함수만 부르고, 결과 문장을 바꾸지 않고 전달한다.
+
+## 11. 상속·증여 방향 비교의 상속 시점 기준 세금 (2026-10-23 사용자 결정, 브랜치 `feature/15-chat-estate-timing`)
+
+- 배경: 06 17절(2026-10-23)부터 `compare_estate_plans`의 `familyReceives`는 증여세를 상속 시점까지 불린 값(`giftTaxAtHorizon`)으로 빼고, 방향마다 `totalTaxAtHorizon`(상속 시점 기준 총 세금)이 생겼다. 챗봇 도구는 `totalTax`(낸 금액)만 모델과 카드에 넘겨 세 가지가 어긋난다.
+  1. 카드: 06 사례 3(40년, 일시 증여 5억)에서 추천인 `staged_children`의 총 세금 483,098,314원이 `lump_sum_now`의 382,753,687원보다 많아 보인다(상속 시점 기준은 483,098,314원 대 569,476,598원).
+  2. 모델: `notes`에는 "증여세도 상속 시점까지 불려 총 세금과 가족에게 남는 금액에 반영했어요"가 있는데 `totalTax`는 낸 금액이다.
+  3. 모델: `estateAtHorizon − inheritanceTax + giftsValueAtHorizon − giftTaxTotal`이 `familyReceives`와 맞지 않는다(사례 3 일시 증여 4,514,267,150 대 4,327,544,239).
+- 사용자 결정: 챗봇도 06 화면과 같이 상속 시점 기준 세금을 보여 준다.
+- 도구 결과 `content.scenarios[]`에 `giftTaxAtHorizon`·`totalTaxAtHorizon`(06 응답 값 그대로)을 더하고, 4.2대로 `giftTaxAtHorizonText`·`totalTaxAtHorizonText`가 생기게 `chat/tools/common.py`의 `KRW_FIELDS`에 두 이름을 넣는다. 기존 필드는 그대로 둔다. 이제 모든 방향에서 `estateAtHorizon − inheritanceTax + giftsValueAtHorizon − giftTaxAtHorizon == familyReceives`다.
+- `comparison` 카드 `rows[]`에 `totalTaxAtHorizon`(형식화 문자열, `krw`)을 더한다(5절). 카드 각 행은 "가족에게 남는 금액", "총 세금(상속 시점 기준)", "총 세금(낸 금액)" 세 줄이다. 360px 채팅 폭(카드 안 270px)에서 넘치지 않게 한다(라벨 줄바꿈 허용).
+- 도구 설명: 첫 문장 뒤에 "총 세금은 증여세를 상속 시점까지 불려 더한 totalTaxAtHorizon이 비교 기준이고, totalTax는 낸 금액 그대로다."를 넣는다. 도구 이름·입력 모델·`summary` 문장·시스템 프롬프트·평가 질문은 바꾸지 않는다.
+- 소유 파일: `backend/app/modules/chat/tools/estate.py`·`common.py`(`KRW_FIELDS` 두 이름만), `backend/tests/chat/**`, `frontend/src/features/chat/types.ts`·`cards/EstateCards.tsx`, `frontend/tests/chat/**`, 이 문서 `## 구현 결과` 끝의 새 소절. 06·DB·마이그레이션은 바꾸지 않는다.
+- 확인: 백엔드·프론트 공통 완료 기준과 아래.
+  - 06 사례 1·3 입력으로 도구를 실행해 `content`의 두 필드와 `…Text`, 카드 `rows`의 세 값이 06 17절 표와 같다(사례 3 `lump_sum_now`: `totalTaxAtHorizon` 569,476,598원, `totalTax` 382,753,687원, `familyReceives` 4,327,544,239원, 추천 `staged_children`).
+  - 모든 방향에서 위 항등식이 성립한다. 증가율 0%면 `totalTaxAtHorizon == totalTax`.
+  - 카드 테스트: 세 줄 라벨과 값, 추천 표시.
+  - 실제 LLM을 부르지 않고 실제 도구가 만든 `comparison` 카드가 담긴 대화를 독립 브라우저로 열어 채팅 화면과 위젯을 360·1280px에서 확인한다(15 구현 결과의 화면 확인 방식, 가로 넘침 없음).
 
 ## 구현 결과
 
