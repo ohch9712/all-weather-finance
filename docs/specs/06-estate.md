@@ -532,3 +532,31 @@ def compare_estate_plans(req: EstateCompareInput) -> EstateCompareResult   # 8.1
 - 실제 백엔드를 사용한 360px 화면에서 공제 현황이 "사용 50,000,000원 · 남음 0원"으로 표시되고 `NaN`이 없음을 확인했다. 상속세 "내 정보로 채우기" 후 10년·5년 사전증여 입력이 각각 100,000,000원·0원으로 채워지고, 계산 요청과 결과가 위 회귀 사례와 일치한다.
 - 재검증: `uv run ruff check .`, `uv run ruff format --check .`, `uv run pytest`(**765개, estate 33개**), `npm run lint`, `npx tsc --noEmit`, `npm run test`(**293개**), `npm run build` 모두 통과했다. 별도 빈 DB의 `upgrade heads` → `downgrade base` → `upgrade heads`도 통과했고 임시 DB는 삭제했다.
 - 새 의존성·마이그레이션·공유 파일 직접 수정은 없다. 수정 범위의 남은 일은 없으며 별도 재검증과 병합은 코디네이터가 진행한다.
+
+### 증여세 낸 시점을 맞춘 방향 비교 (2026-10-23)
+
+구현한 것
+
+- `CompareScenario`에 `gift_tax_at_horizon`·`total_tax_at_horizon`(응답 `giftTaxAtHorizon`·`totalTaxAtHorizon`, 정수 원)을 더했다.
+- `compare_estate_plans`는 증여마다 기존 `future_value(gift_tax, gift_on, T, g)`(원 미만 버림)를 더해 `giftTaxAtHorizon`을 만들고, 여기에 상속세를 더해 `totalTaxAtHorizon`을 만든다. `familyReceives`는 `estateAtHorizon − inheritanceTax + giftsValueAtHorizon − giftTaxAtHorizon`, `recommendedKey` 동률 기준은 `totalTaxAtHorizon`이다. `notes`에 "증여할 때 낸 증여세도 상속 시점까지 연 {g}%로 불려 총 세금과 가족에게 남는 금액에 반영했어요."를 증가율 안내 바로 뒤에 넣었다. 증여 일정·`totalGifted`·`giftTaxTotal`·`giftsValueAtHorizon`·`estateAtHorizon`·`inheritanceTax`·`totalTax`·`inheritance`는 바꾸지 않았다.
+- 방향 카드 금액 목록은 "총 세금(상속 시점 기준)"(`totalTaxAtHorizon`), "총 세금(낸 금액)"(`totalTax`), 증여 합계, 증여세, 상속세 순서다. `BarChart` 세금 막대는 `totalTaxAtHorizon`, 범례 "총 세금(상속 시점 기준)", `ariaLabel` "방향별 상속 시점 기준 총 세금과 가족에게 남는 금액"이다.
+- 테스트: 사례 1(8열 전체)·사례 3(6열 전체, `lump_sum_now` 증여 일정)·`recommendedKey`, 사례 2의 증가율 0% 동치(`giftTaxAtHorizon == giftTaxTotal`, `totalTaxAtHorizon == totalTax`), 모든 방향에서 두 식(`totalTaxAtHorizon`, `familyReceives`)이 성립하는지, 새 `notes` 문구, `POST /api/estate/compare` 응답의 두 필드(사례 1, 가족은 API로 등록, 다른 사용자는 그 가족을 쓰지 않아 422). 화면 테스트는 사례 1의 두 방향으로 카드의 두 줄, 배지, 차트 범례·`ariaLabel`·데이터 표를 확인한다.
+
+스펙과 다른 점: 없다. 사례 1·2·3 값은 계산 결과와 원 단위까지 같다.
+
+완료 기준 검증
+
+| 명령·확인 | 결과 |
+| --- | --- |
+| `uv run ruff check .`, `uv run ruff format --check .` | 통과 |
+| `uv run pytest` | 1588개 통과(estate 35개, 15 챗봇 테스트 포함 변경 없이 통과) |
+| `npm run lint`, `npx tsc --noEmit` | 통과 |
+| `npm run test` | 56개 파일·570개 테스트 통과(estate 8개) |
+| `npm run build` | 통과 |
+| 슬롯 06 서버 + 독립 Playwright 컨텍스트(시스템 Chrome) | 합성 계정 가입·출생연도·가족(첫째 1991-03-01, 둘째 1994-07-15, 손주 2020-05-05)은 브라우저 안 API 요청으로 넣고, 방향 비교 폼(기준일 2026-10-16, 금융 6억, 부동산 9억, 배우자 생존)은 화면에서 입력했다. 네 방향 카드의 남는 금액·두 줄 세금이 사례 1 표와 같다(`lump_sum_now` 2,549,368,211원, 상속 시점 기준 160,895,845원, 낸 금액 153,069,471원). 추천 배지는 `lump_sum_now` 카드에만, 차트 범례 "총 세금(상속 시점 기준)"·"가족에게 남는 금액", 새 `notes` 문구 표시 |
+| 360px·1280px | `scrollWidth === clientWidth`(360·1280), 360px 한 열·1280px 두 열 |
+| 정리 | 합성 계정 `DELETE /api/auth/me` 204 후 `/api/auth/me` 401, `scripts/stop.sh`로 서버 종료 |
+
+마이그레이션·의존성·공유 파일 변경은 없다.
+
+남은 일: 없다. 별도 검증과 병합은 코디네이터가 진행한다.
