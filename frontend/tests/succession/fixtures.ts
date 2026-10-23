@@ -1,6 +1,6 @@
 import type { CaseEnvelope, Plan, PlanKey, SuccessionInput, SuccessionResult, Taxes } from "@/features/succession/types";
 
-// 스펙 22 6절 사례 A 입력과, 화면 확인에 필요한 만큼 줄인 응답.
+// 스펙 22 6절 사례 A·21절 사례 D 입력과, 화면 확인에 필요한 만큼 줄인 응답.
 
 export const CASE_A: SuccessionInput = {
   baseDate: "2026-10-21",
@@ -20,8 +20,17 @@ export const CASE_A: SuccessionInput = {
     { id: "c1", displayName: "나", isSelf: true, age: 45, houseCount: 1, pastGifts: [{ giftedOn: "2019-05-01", donorGroup: "parents", amount: 50_000_000, taxPaid: 0 }] },
     { id: "c2", displayName: "동생", isSelf: false, age: 42, houseCount: 0, pastGifts: [] },
   ],
-  assumptions: { annualGrowthRate: "3", costInflationRate: "2", careMonthlyCost: 2_000_000, careYears: 2, officialPriceRatio: "70" },
+  // 21절: 사례 A는 두 비율을 100으로 둔다.
+  assumptions: { annualGrowthRate: "3", costInflationRate: "2", careMonthlyCost: 2_000_000, careYears: 2, officialPriceRatio: "70", survivorLivingRatio: "100", survivorIncomeRatio: "100" },
 };
+
+// 21절 사례 D: 사례 A에서 두 비율만 기본값(61·60).
+export const CASE_D: SuccessionInput = {
+  ...CASE_A,
+  assumptions: { ...CASE_A.assumptions, survivorLivingRatio: "61", survivorIncomeRatio: "60" },
+};
+
+const CARE_LINE = "간병비는 부모님마다 예상 시점 전 마지막 2년에 들어간다고 봐요. 건강 상태가 '요양·간병 중'인 분은 지금부터 예상 시점까지 들어가요.";
 
 export function envelope(input: SuccessionInput | null, consentAt: string | null = null): CaseEnvelope {
   return { case: input, sensitiveConsentAt: consentAt, updatedAt: input ? "2026-10-21T03:00:00Z" : null };
@@ -103,6 +112,7 @@ export const RESULT: SuccessionResult = {
     cashAssets: 800_000_000,
     transferableNow: 277_335_141,
     shortfall: 0,
+    singleFrom: "2038-10-21",
   },
   assignments: [{ assetId: "a3", childId: "c1" }],
   // 19절 순위(상속 시점 기준 세금 순)의 1~4위.
@@ -114,13 +124,42 @@ export const RESULT: SuccessionResult = {
   ],
   excluded: [{ key: "cash_staged_spread", label: LABELS.cash_staged_spread, reason: "생활비·간병비를 떼어 두면 지금 넘길 현금이 없어요." }],
   notes: ["실행 전에 세무전문가에게 입력 정보와 결과를 검토받으세요."],
-  assumptions: ["장례비는 최소 공제(500만 원)만 반영해요."],
+  assumptions: [
+    "생활·간병비는 부모님 현금에서 쓰고, 모자라도 부동산을 팔지 않는다고 봐요.",
+    "월 생활비·월 수입은 두 분 합계로 보고, 한 분만 계시게 되는 2038-10-21부터는 월 생활비를 100%, 월 수입을 100%로 계산해요.",
+    CARE_LINE,
+    "장례비는 최소 공제(500만 원)만 반영해요.",
+  ],
   sources: [{ label: "소득세법", url: "https://www.law.go.kr/법령/소득세법" }],
+};
+
+// 21절 사례 D 응답: 0·12년차 비용과 S·R·A, 가구·간병 줄. 방안은 화면 확인용으로 사례 A 것을 쓴다.
+export const RESULT_D: SuccessionResult = {
+  ...RESULT,
+  funding: {
+    costs: [
+      { year: 0, on: "2026-10-21", living: 36_000_000, care: 0, income: 12_000_000, total: 24_000_000 },
+      { year: 12, on: "2038-10-21", living: 27_850_588, care: 0, income: 9_131_340, total: 18_719_248 },
+    ],
+    survivorNeed: 207_047_900,
+    reservePresentValue: 461_576_150,
+    cashAssets: 800_000_000,
+    transferableNow: 338_423_850,
+    shortfall: 0,
+    singleFrom: "2038-10-21",
+  },
+  assumptions: [
+    "생활·간병비는 부모님 현금에서 쓰고, 모자라도 부동산을 팔지 않는다고 봐요.",
+    "월 생활비·월 수입은 두 분 합계로 보고, 한 분만 계시게 되는 2038-10-21부터는 월 생활비를 61%, 월 수입을 60%로 계산해요.",
+    CARE_LINE,
+    "장례비는 최소 공제(500만 원)만 반영해요.",
+  ],
 };
 
 export const SHORT_RESULT: SuccessionResult = {
   ...RESULT,
-  funding: { ...RESULT.funding, transferableNow: -92_000_000, shortfall: 92_000_000 },
+  // 사례 B처럼 한 분만 계셔서 singleFrom이 없다.
+  funding: { ...RESULT.funding, transferableNow: -92_000_000, shortfall: 92_000_000, singleFrom: null },
   plans: [plan("inherit_only", 1, { giftTax: 0, acquisitionTax: 10_360_000, capitalGainsTax: 0, inheritanceTax: 0, total: 10_360_000, totalAtHorizon: 10_360_000 })],
 };
 

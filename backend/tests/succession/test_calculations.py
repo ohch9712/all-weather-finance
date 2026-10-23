@@ -1,9 +1,10 @@
-"""스펙 22 4절 규칙 사례, 6절 종합 사례, 5.6·5.9 포함 조건과 문구, 10절 공개 함수."""
+"""스펙 22 4절 규칙 사례, 6절·20절·21절 종합 사례, 5.6·5.9 포함 조건과 문구, 10절 공개 함수."""
 
 from datetime import date
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from app.core.errors import AppError
 from app.modules.estate.schemas import PriorGift, Recipient
@@ -17,7 +18,7 @@ from app.modules.succession.calculations import (
     topic,
 )
 from app.modules.succession.schemas import AssetInput, SuccessionInput
-from tests.succession.cases import CASE_A, CASE_B, CASE_C, case
+from tests.succession.cases import CASE_A, CASE_B, CASE_C, CASE_D, case
 
 D0 = date(2026, 10, 21)
 
@@ -248,6 +249,8 @@ def test_case_a_funding_timeline_and_assignment():
     assert funding.cash_assets == 800_000_000
     assert funding.transferable_now == 277_335_141
     assert funding.shortfall == 0
+    # 21절: 아버지 12년 뒤부터 한 분만 계신다(비율 100이라 값은 그대로).
+    assert funding.single_from == date(2038, 10, 21)
     assert [(a.asset_id, a.child_id) for a in result.assignments] == [
         ("a2", "c2"),
         ("a3", "c1"),
@@ -533,11 +536,17 @@ def test_case_a_first_reasons_follow_total_at_horizon():
     ]
 
 
+CARE_LINE = (
+    "간병비는 부모님마다 예상 시점 전 마지막 2년에 들어간다고 봐요. 건강 상태가 "
+    "'요양·간병 중'인 분은 지금부터 예상 시점까지 들어가요."
+)
+
+
 def test_case_a_notes_assumptions_sources():
     result = run(CASE_A)
     assert result.notes == [
         "기대여명은 2024년 생명표 평균에 건강 상태 가정을 곱한 값이에요. 실제와 다를 수 있어요.",
-        "재산은 연 3%, 생활비·간병비는 연 2%씩 늘어난다고 가정했어요.",
+        "재산은 연 3%, 생활비·수입·간병비는 연 2%씩 늘어난다고 가정했어요.",
         "지금 내는 세금은 상속 시점까지 연 3%로 불려 상속세와 더해 순위를 매겼어요.",
         "실행 전에 세무전문가에게 입력 정보와 결과를 검토받으세요.",
     ]
@@ -556,9 +565,20 @@ def test_case_a_notes_assumptions_sources():
         "돈은 현금으로 쌓지 않는다고 봐요."
     )
     cash_first = "생활·간병비는 부모님 현금에서 쓰고, 모자라도 부동산을 팔지 않는다고 봐요."
-    assert lines.index(surplus) == lines.index(cash_first) + 1
+    # 21절: 현금 줄 다음에 가구·간병 두 줄, 그다음 남는 수입 줄.
+    start = lines.index(cash_first)
+    assert lines[start + 1 : start + 3] == [
+        "월 생활비·월 수입은 두 분 합계로 보고, 한 분만 계시게 되는 2038-10-21부터는 "
+        "월 생활비를 100%, 월 수입을 100%로 계산해요.",
+        CARE_LINE,
+    ]
+    assert lines.index(surplus) == start + 3
     assert result.rule_version == "KR-2026.05.10"
     assert any("law.go.kr" in source.url for source in result.sources)
+    assert [(s.label, s.url) for s in result.sources][-2:] == [
+        ("보건복지부, 기준 중위소득", "https://www.mohw.go.kr/menu.es?mid=a10708010900"),
+        ("국민연금공단, 유족연금", "https://www.nps.or.kr/pnsinfo/ntpsklg/getOHAF0072M0.do"),
+    ]
 
 
 # ── 6절 사례 B ──────────────────────────────────────────────────────
@@ -610,7 +630,11 @@ def test_case_b_shortfall_and_excluded():
     assert plan.reasons[0] == (
         "상속 시점(2032-10-21) 기준으로 맞춘 세금 합계가 가장 적어요(10,360,000원)."
     )
-    assert result.notes[1] == "재산은 연 0%, 생활비·간병비는 연 0%씩 늘어난다고 가정했어요."
+    assert result.notes[1] == "재산은 연 0%, 생활비·수입·간병비는 연 0%씩 늘어난다고 가정했어요."
+    # 21절: 한 분만 계셔서 기본 비율이어도 값이 그대로이고 singleFrom은 없다.
+    assert funding.single_from is None
+    assert "월 생활비·월 수입은 지금 계신 한 분 기준으로 봐요." in result.assumptions
+    assert CARE_LINE in result.assumptions
 
 
 # ── 20절 사례 C(남는 수입으로 간병비 메우기) ──────────────────────────────
@@ -654,6 +678,7 @@ def test_case_c_surplus_income_covers_care():
         funding.transferable_now,
         funding.shortfall,
     ) == (33_941_852, 45_458_522, 754_541_478, 0)
+    assert funding.single_from == date(2038, 10, 21)
 
 
 def test_case_c_plan_table_rank_and_tier():
@@ -685,11 +710,30 @@ def test_case_c_plan_table_rank_and_tier():
         case(CASE_A, monthlyIncome=3_500_000),
         case(CASE_B, monthlyIncome=3_000_000),
         case(CASE_A, monthlyLivingCost=0, monthlyIncome=0),
+        CASE_D,
+        case(CASE_D, monthlyIncome=4_000_000),
+        # 두 분일 때는 부족하고 한 분만 계신 해에는 수입이 남는다.
+        case(
+            CASE_D,
+            monthlyIncome=2_900_000,
+            assumptions={**CASE_D["assumptions"], "survivorIncomeRatio": "100"},
+        ),
     ],
-    ids=["A", "B", "C", "A-equal", "A-small-surplus", "B-surplus", "A-zero"],
+    ids=[
+        "A",
+        "B",
+        "C",
+        "A-equal",
+        "A-small-surplus",
+        "B-surplus",
+        "A-zero",
+        "D",
+        "D-surplus",
+        "D-single-surplus",
+    ],
 )
 def test_cost_total_matches_display_columns(data):
-    """20절: 모든 해에서 필요 금액 = max(0, 생활비 + 간병비 − 수입)."""
+    """20절·21절: 모든 해에서 필요 금액 = max(0, 생활비 + 간병비 − 수입)."""
     for row in run(data).funding.costs:
         assert row.total == max(0, row.living + row.care - row.income), row.year
         assert min(row.living, row.income, row.care, row.total) >= 0
@@ -701,6 +745,172 @@ def test_large_income_needs_no_reserve():
     assert all(row.total == 0 for row in funding.costs)
     assert (funding.survivor_need, funding.reserve_present_value) == (0, 0)
     assert funding.transferable_now == funding.cash_assets == 800_000_000
+
+
+# ── 21절 사례 D(한 분만 계신 뒤 생활비·수입) ──────────────────────────────
+
+CASE_D_COSTS = [
+    # 연차, 날짜, 생활비, 수입, 간병비, 필요 금액
+    (0, date(2026, 10, 21), 36_000_000, 12_000_000, 0, 24_000_000),
+    (11, date(2037, 10, 21), 44_761_474, 14_920_491, 29_840_983, 59_681_966),
+    (12, date(2038, 10, 21), 27_850_588, 9_131_340, 0, 18_719_248),
+    (16, date(2042, 10, 21), 30_146_374, 9_884_057, 0, 20_262_317),
+    (17, date(2043, 10, 21), 30_749_301, 10_081_738, 33_605_794, 54_273_357),
+    (18, date(2044, 10, 21), 31_364_286, 10_283_372, 34_277_909, 55_358_823),
+]
+
+CASE_D_TABLE = [
+    # key, 세금 합계(낸 금액), 상속 시점 기준 세금,
+    # 부모님에게 남는 재산(지금), 자녀에게 남는 금액(T). 21절 순위.
+    ("realestate_gift_cash_staged", 766_564_390, 907_861_575, 2_050_000_000, 2_940_035_441),
+    ("realestate_gift_now", 782_825_244, 924_122_429, 2_100_000_000, 2_923_774_587),
+    ("cash_lump_now", 918_388_613, 933_964_636, 2_761_576_150, 2_913_932_378),
+    ("realestate_sell_cash_now", 844_017_828, 984_936_877, 2_300_000_000, 2_777_738_675),
+    ("cash_staged_spread", 982_031_288, 987_710_606, 2_930_788_076, 2_860_186_407),
+    ("cash_staged_deduction", 1_017_569_156, 1_017_569_156, 3_050_000_000, 2_830_327_860),
+    ("inherit_only", 1_033_830_010, 1_033_830_010, 3_100_000_000, 2_814_067_006),
+]
+
+
+def test_case_d_survivor_costs():
+    funding = run(CASE_D).funding
+    rows = {row.year: row for row in funding.costs}
+    assert len(funding.costs) == 19
+    assert funding.single_from == date(2038, 10, 21)
+    assert [
+        (row.year, row.on, row.living, row.income, row.care, row.total)
+        for row in (rows[year] for year, *_ in CASE_D_COSTS)
+    ] == CASE_D_COSTS
+    # 12년차부터 월 생활비 1,830,000, 월 수입 600,000(물가 반영 전 연 금액).
+    assert all(row.living == row.income + row.total - row.care for row in funding.costs)
+    assert (
+        funding.survivor_need,
+        funding.reserve_present_value,
+        funding.transferable_now,
+        funding.shortfall,
+    ) == (207_047_900, 461_576_150, 338_423_850, 0)
+    # 한 분만 계시기 전(11년차까지)은 사례 A와 같다.
+    before = run(CASE_A).funding.costs[:12]
+    assert funding.costs[:12] == before
+
+
+def test_case_d_plan_table_reasons_and_assumptions():
+    result = run(CASE_D)
+    assert result.excluded == []
+    assert [plan.key for plan in result.plans] == [row[0] for row in CASE_D_TABLE]
+    assert [plan.tier for plan in result.plans] == ["best", "runner_up", "runner_up"] + [
+        "other"
+    ] * 4
+    for plan, row in zip(result.plans, CASE_D_TABLE, strict=True):
+        actual = (
+            plan.taxes.total,
+            plan.taxes.total_at_horizon,
+            plan.parents_remaining_now,
+            plan.children_receive_at_horizon,
+        )
+        assert actual == row[1:], (plan.key, actual)
+        assert plan.parents_reserve == 461_576_150
+    differences = [
+        "16,260,854원",
+        "26,103,061원",
+        "77,075,302원",
+        "79,849,031원",
+        "109,707,581원",
+        "125,968,435원",
+    ]
+    assert [plan.reasons[0] for plan in result.plans] == [
+        "상속 시점(2038-10-21) 기준으로 맞춘 세금 합계가 가장 적어요(907,861,575원).",
+        *(f"상속 시점 기준 세금 합계가 최선안보다 {d} 많아요." for d in differences),
+    ]
+    # S가 배우자공제 최소 5억 원보다 작아, 증여액이 A에 따라 바뀌지 않는 방안의 상속세는
+    # 비율 100일 때와 같고 자녀에게 남는 금액만 늘어난다.
+    case_a = by_key(run(CASE_A))
+    plans = by_key(result)
+    for key in [
+        "realestate_gift_cash_staged",
+        "realestate_gift_now",
+        "realestate_sell_cash_now",
+        "cash_staged_deduction",
+        "inherit_only",
+    ]:
+        assert plans[key].taxes == case_a[key].taxes, key
+        assert plans[key].children_receive_at_horizon > case_a[key].children_receive_at_horizon
+    lines = result.assumptions
+    start = lines.index("생활·간병비는 부모님 현금에서 쓰고, 모자라도 부동산을 팔지 않는다고 봐요.")
+    assert lines[start + 1 : start + 3] == [
+        "월 생활비·월 수입은 두 분 합계로 보고, 한 분만 계시게 되는 2038-10-21부터는 "
+        "월 생활비를 61%, 월 수입을 60%로 계산해요.",
+        CARE_LINE,
+    ]
+
+
+def test_missing_survivor_ratios_use_defaults():
+    """저장된 입력에 두 비율이 없으면 기본값(61·60)으로 계산한다(사례 D와 같다)."""
+    legacy = {
+        key: value
+        for key, value in CASE_A["assumptions"].items()
+        if key not in ("survivorLivingRatio", "survivorIncomeRatio")
+    }
+    data = SuccessionInput.model_validate(case(CASE_A, assumptions=legacy))
+    assert (data.assumptions.survivor_living_ratio, data.assumptions.survivor_income_ratio) == (
+        Decimal("61"),
+        Decimal("60"),
+    )
+    assert calculate_plans(data).funding == run(CASE_D).funding
+
+
+def test_same_expected_dates_have_no_single_years():
+    # 어머니 기대여명을 아버지와 같은 12년으로 고치면 한 분만 계신 기간이 없다.
+    same = case(CASE_D)
+    same["parents"][1]["lifeExpectancyYears"] = "12.0"
+    result = run(same)
+    assert result.funding.single_from is None
+    assert result.spouse_alive_at_horizon is False
+    assert len(result.funding.costs) == 12
+    # 비율을 바꿔도 생활비·수입이 그대로다.
+    full = case(same, assumptions=CASE_A["assumptions"])
+    assert run(full).funding.costs == result.funding.costs
+    assert (
+        "월 생활비·월 수입은 두 분 합계로 봐요. 두 분의 예상 시점이 같아 한 분만 계신 기간은 "
+        "없어요." in result.assumptions
+    )
+
+
+def test_care_years_zero_assumption_line():
+    result = run(case(CASE_D, assumptions={**CASE_D["assumptions"], "careYears": 0}))
+    assert all(row.care == 0 for row in result.funding.costs)
+    assert (
+        "간병비는 건강 상태가 '요양·간병 중'인 분만 지금부터 예상 시점까지 들어간다고 봐요."
+        in result.assumptions
+    )
+    assert CARE_LINE not in result.assumptions
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("survivorLivingRatio", "9.99"),
+        ("survivorLivingRatio", "100.01"),
+        ("survivorLivingRatio", "61.123"),
+        ("survivorIncomeRatio", "-1"),
+        ("survivorIncomeRatio", "100.5"),
+    ],
+)
+def test_survivor_ratio_range(field, value):
+    with pytest.raises(ValidationError):
+        SuccessionInput.model_validate(
+            case(CASE_A, assumptions={**CASE_A["assumptions"], field: value})
+        )
+
+
+def test_survivor_ratio_bounds_are_allowed():
+    for living, income in [("10", "0"), ("100", "100"), ("55.25", "0.5")]:
+        assumptions = {
+            **CASE_A["assumptions"],
+            "survivorLivingRatio": living,
+            "survivorIncomeRatio": income,
+        }
+        run(case(CASE_A, assumptions=assumptions))
 
 
 # ── 5.6 포함 조건과 제외 이유 ─────────────────────────────────────────

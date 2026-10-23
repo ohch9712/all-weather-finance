@@ -413,16 +413,28 @@ class _Calculator:
     def _funding(self) -> None:
         assumptions = self.assumptions
         inflation = 1 + assumptions.cost_inflation_rate / 100
-        monthly_living = self.req.monthly_living_cost
-        monthly_income = self.req.monthly_income
         care_windows = []
         for parent, info in self.parents:
             n = info.years_assumed
             years = n if parent.health == "care" else min(assumptions.care_years, n)
             care_windows.append((n - years, n))
+        # 21절: 두 분이 계시고 예상 시점이 다르면 먼저 가시는 분의 n부터 한 분만 계신 해다.
+        # 살아 계신 분이 한 분이면 입력값이 이미 한 분 기준이라 그대로 쓴다.
+        lengths = [info.years_assumed for _, info in self.parents]
+        single_year = min(lengths) if len(lengths) == 2 and min(lengths) < max(lengths) else None
+        self.single_from = None if single_year is None else add_years(self.d0, single_year)
+        survivor_living = won(
+            self.req.monthly_living_cost * assumptions.survivor_living_ratio / 100
+        )
+        survivor_income = won(self.req.monthly_income * assumptions.survivor_income_ratio / 100)
         self.costs: list[CostRow] = []
         for year in range(self.span):
             grown = inflation**year
+            if single_year is not None and year >= single_year:
+                monthly_living, monthly_income = survivor_living, survivor_income
+            else:
+                monthly_living = self.req.monthly_living_cost
+                monthly_income = self.req.monthly_income
             # 생활비 부족분 d_y와 남는 수입 s_y. 남는 수입은 간병비를 먼저 메운다(20절).
             deficit = won(max(0, monthly_living - monthly_income) * 12 * grown)
             surplus = won(max(0, monthly_income - monthly_living) * 12 * grown)
@@ -906,7 +918,7 @@ class _Calculator:
         notes = [
             "기대여명은 2024년 생명표 평균에 건강 상태 가정을 곱한 값이에요. "
             "실제와 다를 수 있어요.",
-            f"재산은 연 {percent(self.assumptions.annual_growth_rate)}%, 생활비·간병비는 "
+            f"재산은 연 {percent(self.assumptions.annual_growth_rate)}%, 생활비·수입·간병비는 "
             f"연 {percent(self.assumptions.cost_inflation_rate)}%씩 늘어난다고 가정했어요.",
             f"지금 내는 세금은 상속 시점까지 연 {percent(self.assumptions.annual_growth_rate)}%로 "
             "불려 상속세와 더해 순위를 매겼어요.",
@@ -921,6 +933,32 @@ class _Calculator:
             )
         return notes
 
+    def household_line(self) -> str:
+        # 21절 가구 줄(셋 중 하나)
+        if len(self.parents) == 1:
+            return "월 생활비·월 수입은 지금 계신 한 분 기준으로 봐요."
+        if self.single_from is None:
+            return (
+                "월 생활비·월 수입은 두 분 합계로 봐요. 두 분의 예상 시점이 같아 한 분만 계신 "
+                "기간은 없어요."
+            )
+        return (
+            "월 생활비·월 수입은 두 분 합계로 보고, 한 분만 계시게 되는 "
+            f"{self.single_from.isoformat()}부터는 월 생활비를 "
+            f"{percent(self.assumptions.survivor_living_ratio)}%, 월 수입을 "
+            f"{percent(self.assumptions.survivor_income_ratio)}%로 계산해요."
+        )
+
+    def care_line(self) -> str:
+        # 21절 간병 줄(둘 중 하나)
+        if self.assumptions.care_years > 0:
+            return (
+                "간병비는 부모님마다 예상 시점 전 마지막 "
+                f"{self.assumptions.care_years}년에 들어간다고 봐요. 건강 상태가 "
+                "'요양·간병 중'인 분은 지금부터 예상 시점까지 들어가요."
+            )
+        return "간병비는 건강 상태가 '요양·간병 중'인 분만 지금부터 예상 시점까지 들어간다고 봐요."
+
     def assumption_lines(self) -> list[str]:
         return [
             *EXCLUDED_SCOPE,
@@ -928,6 +966,8 @@ class _Calculator:
             "명의자보다 오래 사시는 부모님은 남은 생활·간병비만큼 상속받고 나머지는 "
             "자녀가 상속받는다고 봐요.",
             "생활·간병비는 부모님 현금에서 쓰고, 모자라도 부동산을 팔지 않는다고 봐요.",
+            self.household_line(),
+            self.care_line(),
             "월 수입이 월 생활비보다 많으면 남는 수입으로 간병비를 먼저 메우고, 그래도 남는 "
             "돈은 현금으로 쌓지 않는다고 봐요.",
             "대출은 상속 때까지 그대로 남고 모두 금융회사 채무로 봐요. "
@@ -1001,6 +1041,7 @@ def calculate_plans(req: SuccessionInput) -> SuccessionResult:
             cash_assets=calc.cash_total,
             transferable_now=calc.transferable,
             shortfall=max(0, -calc.transferable),
+            single_from=calc.single_from,
         ),
         assignments=[
             Assignment(asset_id=asset.id, child_id=req.children[calc.assignment[asset.id]].id)

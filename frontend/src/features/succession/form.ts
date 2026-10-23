@@ -51,6 +51,8 @@ export interface AssumptionsForm {
   careMonthlyCost: string;
   careYears: string;
   officialPriceRatio: string;
+  survivorLivingRatio: string;
+  survivorIncomeRatio: string;
 }
 
 export interface SuccessionForm {
@@ -77,6 +79,8 @@ export const DEFAULT_ASSUMPTIONS: AssumptionsForm = {
   careMonthlyCost: "2000000",
   careYears: "2",
   officialPriceRatio: "70",
+  survivorLivingRatio: "61",
+  survivorIncomeRatio: "60",
 };
 
 export function newId(prefix: string): string {
@@ -222,6 +226,8 @@ export const successionSchema = z
       careMonthlyCost: integer(0, HUNDRED_MILLION, "0원~1억 원으로 입력해 주세요."),
       careYears: integer(0, 20, "0~20년으로 입력해 주세요."),
       officialPriceRatio: decimal(10, 100, 2, "10~100%로 입력해 주세요."),
+      survivorLivingRatio: decimal(10, 100, 2, "10~100%로 입력해 주세요."),
+      survivorIncomeRatio: decimal(0, 100, 2, "0~100%로 입력해 주세요."),
     }),
   })
   .superRefine((form, ctx) => {
@@ -302,6 +308,8 @@ export function toInput(form: SuccessionForm): SuccessionInput {
       careMonthlyCost: toNumber(form.assumptions.careMonthlyCost, 0),
       careYears: toNumber(form.assumptions.careYears, 0),
       officialPriceRatio: form.assumptions.officialPriceRatio.trim(),
+      survivorLivingRatio: form.assumptions.survivorLivingRatio.trim(),
+      survivorIncomeRatio: form.assumptions.survivorIncomeRatio.trim(),
     },
   };
 }
@@ -360,6 +368,8 @@ export function fromInput(input: SuccessionInput): SuccessionForm {
       careMonthlyCost: String(input.assumptions.careMonthlyCost),
       careYears: String(input.assumptions.careYears),
       officialPriceRatio: input.assumptions.officialPriceRatio,
+      survivorLivingRatio: input.assumptions.survivorLivingRatio,
+      survivorIncomeRatio: input.assumptions.survivorIncomeRatio,
     },
   };
 }
