@@ -250,6 +250,7 @@ class Taxes(CamelModel):
     capital_gains_tax: int
     inheritance_tax: int
     total: int
+    total_at_horizon: int
 
 
 ImpactCode = Literal[

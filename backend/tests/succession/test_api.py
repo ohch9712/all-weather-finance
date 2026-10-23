@@ -102,6 +102,15 @@ def test_plans_contract_case_a(auth_client):
         "childImpacts",
         "reasons",
     }
+    assert [(p["key"], p["tier"]) for p in body["plans"][:4]] == [
+        ("realestate_gift_cash_staged", "best"),
+        ("realestate_gift_now", "runner_up"),
+        ("cash_lump_now", "runner_up"),
+        ("realestate_sell_cash_now", "other"),
+    ]
+    assert best["reasons"][0] == (
+        "상속 시점(2038-10-21) 기준으로 맞춘 세금 합계가 가장 적어요(907,861,575원)."
+    )
     assert (best["key"], best["rank"], best["tier"], best["sales"]) == (
         "realestate_gift_cash_staged",
         1,
@@ -139,6 +148,7 @@ def test_plans_contract_case_a(auth_client):
         "capitalGainsTax": 0,
         "inheritanceTax": 420_589_229,
         "total": 766_564_390,
+        "totalAtHorizon": 907_861_575,
     }
     impact = best["childImpacts"][0]
     assert set(impact) == {"childId", "houseCountBefore", "houseCountAfter", "flags"}
@@ -168,6 +178,8 @@ def test_plans_case_b_and_default_base_date(auth_client):
     body = auth_client.post(f"{BASE}/plans", json=CASE_B).json()
     assert body["funding"]["shortfall"] == 92_000_000
     assert [p["key"] for p in body["plans"]] == ["inherit_only"]
+    assert body["plans"][0]["taxes"]["totalAtHorizon"] == body["plans"][0]["taxes"]["total"]
+    assert body["plans"][0]["taxes"]["totalAtHorizon"] == 10_360_000
     assert len(body["excluded"]) == 6
     assert set(body["excluded"][0]) == {"key", "label", "reason"}
     with freeze_time("2026-10-20T16:00:00Z"):  # KST 2026-10-21 01:00

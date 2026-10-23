@@ -748,12 +748,20 @@ class _Calculator:
         gift_tax = sum(g.gift_tax for g in gifts)
         gift_acquisition = sum(g.acquisition_tax for g in gifts)
         capital = sum(sale.total for sale in sales)
+        # 19절: 지금 내는 세금은 낸 날부터 T까지 불리고, T에 내는 세금은 그대로 더한다.
+        total_at_horizon = (
+            sum(self.at_horizon(g.gift_tax + g.acquisition_tax, g.on) for g in gifts)
+            + sum(self.at_horizon(sale.total, self.d0) for sale in sales)
+            + inherit_acquisition
+            + tax.payable_tax
+        )
         taxes = Taxes(
             gift_tax=gift_tax,
             acquisition_tax=gift_acquisition + inherit_acquisition,
             capital_gains_tax=capital,
             inheritance_tax=tax.payable_tax,
             total=gift_tax + gift_acquisition + inherit_acquisition + capital + tax.payable_tax,
+            total_at_horizon=total_at_horizon,
         )
         remaining_now = (
             self.cash_total
@@ -889,6 +897,8 @@ class _Calculator:
             "실제와 다를 수 있어요.",
             f"재산은 연 {percent(self.assumptions.annual_growth_rate)}%, 생활비·간병비는 "
             f"연 {percent(self.assumptions.cost_inflation_rate)}%씩 늘어난다고 가정했어요.",
+            f"지금 내는 세금은 상속 시점까지 연 {percent(self.assumptions.annual_growth_rate)}%로 "
+            "불려 상속세와 더해 순위를 매겼어요.",
             "실행 전에 세무전문가에게 입력 정보와 결과를 검토받으세요.",
         ]
         if "realestate_sell_cash_now" in included:
@@ -913,6 +923,8 @@ class _Calculator:
             f"{percent(self.ratio)}%로 봐요.",
             "장례비는 최소 공제(500만 원)만 반영해요.",
             "양도세 기본공제 250만 원은 한 번만 적용해요.",
+            "증여세·증여 취득세·양도세는 증여하거나 판 날, 상속세·상속 취득세는 상속 가정 "
+            "시점에 낸다고 봐요.",
             "부모님이 준 과거 증여는 모두 재산 명의자가 준 것으로 봐요.",
             "자녀 생년월일은 기준일에서 나이만큼 뺀 날로 봐요.",
             "조정대상지역 여부는 입력한 값을 그대로 써요.",
@@ -930,16 +942,24 @@ def calculate_plans(req: SuccessionInput) -> SuccessionResult:
         calc = _Calculator(req)
         candidates, excluded = calc.candidates()
         plans = [calc.evaluate(candidate) for candidate in candidates]
-    plans.sort(key=lambda p: (p.taxes.total, -p.children_receive_at_horizon, ORDER.index(p.key)))
-    best = plans[0].taxes.total
+    plans.sort(
+        key=lambda p: (
+            p.taxes.total_at_horizon,
+            -p.children_receive_at_horizon,
+            ORDER.index(p.key),
+        )
+    )
+    best = plans[0].taxes.total_at_horizon
     for rank, plan in enumerate(plans, start=1):
         plan.rank = rank
         plan.tier = "best" if rank == 1 else "runner_up" if rank <= 3 else "other"
         plan.reasons.insert(
             0,
-            f"입력한 조건에서 세금 총액이 가장 적어요({money(best)})."
+            f"상속 시점({calc.horizon.isoformat()}) 기준으로 맞춘 세금 합계가 가장 적어요"
+            f"({money(best)})."
             if rank == 1
-            else f"최선안보다 세금이 {money(plan.taxes.total - best)} 많아요.",
+            else "상속 시점 기준 세금 합계가 최선안보다 "
+            f"{money(plan.taxes.total_at_horizon - best)} 많아요.",
         )
     excluded.sort(key=lambda e: ORDER.index(e.key))
     return SuccessionResult(

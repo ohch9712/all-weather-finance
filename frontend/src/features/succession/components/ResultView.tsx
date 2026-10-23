@@ -93,7 +93,8 @@ function TaxLines({ plan }: { plan: Plan }) {
   const taxes = plan.taxes;
   return (
     <div className="space-y-0.5 tabular-nums">
-      <p className="font-semibold">{won(taxes.total)}</p>
+      <p className="font-semibold">상속 시점 기준 {won(taxes.totalAtHorizon)}</p>
+      <p className="text-xs text-muted-foreground">낸 금액 합계 {won(taxes.total)}</p>
       <p className="text-xs text-muted-foreground">증여세 {won(taxes.giftTax)}</p>
       <p className="text-xs text-muted-foreground">취득세 {won(taxes.acquisitionTax)}</p>
       <p className="text-xs text-muted-foreground">양도세 {won(taxes.capitalGainsTax)}</p>
@@ -194,7 +195,7 @@ export function ComparisonTable({ plans, names }: { plans: Plan[]; names: Record
 function TaxChart({ plans }: { plans: Plan[] }) {
   const data = plans.map((plan) => ({
     name: `${plan.rank}위 ${SHORT_PLAN_LABELS[plan.key]}`,
-    total: plan.taxes.total,
+    total: plan.taxes.totalAtHorizon,
     gift: plan.taxes.giftTax,
     acquisition: plan.taxes.acquisitionTax,
     capital: plan.taxes.capitalGainsTax,
@@ -206,10 +207,10 @@ function TaxChart({ plans }: { plans: Plan[] }) {
       xKey="name"
       layout="vertical"
       height={Math.max(220, plans.length * 70)}
-      ariaLabel="방안별 세금 총액과 항목"
+      ariaLabel="방안별 상속 시점 기준 세금 합계와 항목"
       valueFormatter={formatKRWCompact}
       series={[
-        { key: "total", label: "세금 합계", color: seriesColor(0) },
+        { key: "total", label: "세금 합계(상속 시점 기준)", color: seriesColor(0) },
         { key: "gift", label: "증여세", color: seriesColor(1) },
         { key: "acquisition", label: "취득세", color: seriesColor(2) },
         { key: "capital", label: "양도세", color: seriesColor(3) },
@@ -223,7 +224,7 @@ function PlanDetails({ plan, names }: { plan: Plan; names: Record<string, string
   return (
     <details className="group rounded-lg border p-3" data-plan={plan.key}>
       <summary className="cursor-pointer text-sm font-medium break-keep">
-        {plan.rank}위 {plan.label} 상세 · 세금 {won(plan.taxes.total)}
+        {plan.rank}위 {plan.label} 상세 · 상속 시점 기준 세금 {won(plan.taxes.totalAtHorizon)}
       </summary>
       <div className="mt-4">
         <PlanDetail plan={plan} names={names} />
@@ -289,9 +290,9 @@ export function ResultView({ result, input }: { result: SuccessionResult; input:
   return (
     <div className="min-w-0 space-y-5" aria-live="polite">
       <FundingCard result={result} />
-      <Card title="방안 비교(세금 총액이 적은 순)">
+      <Card title="방안 비교(상속 시점 기준 세금이 적은 순)">
         <p className="text-sm text-muted-foreground break-keep">
-          생활·간병비를 먼저 떼어 둔 뒤, 입력한 조건에서 세금 총액이 가장 적은 방안을 최선안으로 골랐어요.
+          생활·간병비를 먼저 떼어 둔 뒤, 지금 내는 세금을 상속 시점({result.horizonDate})까지 연 {input.assumptions.annualGrowthRate}%로 불려 상속세와 더한 금액이 가장 적은 방안을 최선안으로 골랐어요.
         </p>
         <ComparisonTable plans={result.plans} names={names} />
         <TaxChart plans={result.plans} />

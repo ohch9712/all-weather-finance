@@ -39,7 +39,7 @@ export function DataTable({
           <thead>
             <tr className="border-b">
               {columns.map((column) => (
-                <th key={column.label} scope="col" className={cn("p-2 font-medium whitespace-nowrap text-muted-foreground print:p-1", column.numeric && "text-right")}>
+                <th key={column.label} scope="col" className={cn("p-2 align-bottom font-medium break-keep text-muted-foreground print:p-1", column.numeric && "text-right")}>
                   {column.label}
                 </th>
               ))}
