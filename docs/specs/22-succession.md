@@ -628,3 +628,11 @@ def replay_gift_deductions(recipient: Recipient, gifts: list[PriorGift]) -> list
 - 스펙과 다른 점: 없다.
 - 실행한 검증: 프론트 `npm run lint`·`npx tsc --noEmit` 통과, `npm run test` 56개 파일 578개 통과, `npm run build` 성공. 백엔드는 바꾸지 않았다. 슬롯 22 서버와 독립 헤드리스 Chrome 컨텍스트(합성 계정, 확인 뒤 계정 삭제, localhost 밖 요청 차단)에서 360·1280px 각각 `/succession` 월 생활비 2,500,000 → `250만원`, 현금 800,000,000 → `8억원 · 80,000만원`, `/estate?tab=gift-tax` 증여 금액 기본 100,000,000 → `1억원 · 10,000만원`, 2,500,000 → `250만원`, 감정평가수수료 0 → `0원`, 두 화면 모두 `"250만원 · 250만원"` 없음과 가로 스크롤 없음을 확인했다(22항목 통과). 확인 뒤 `scripts/stop.sh`로 서버를 멈췄다.
 - 남은 일: 없다.
+
+### 금액 도우미 만원 표기 제거 (2026-10-23)
+
+- 구현: 18절대로 22 `features/succession/components/fields.tsx`의 `MoneyField`와 06 `features/estate/components/shared.tsx`의 금액 도우미가 `formatKRWCompact`를 바로 쓴다(06은 `formatKRWCompact(Number(value) || 0)`). `MoneyField` 주석의 예는 `"1.2억원"`으로 고쳤다. 17절의 `formatKRWHint`는 `frontend/src/lib/format.ts`와 `tests/foundation/format.test.ts`(표 테스트 8개)에서 지웠고, 두 파일은 17절 작업 전과 같아졌다. 입력이 비었을 때 문구(22 "원 단위로 입력해 주세요.", 06 `0원`)는 그대로다. 코드·테스트에는 `formatKRWHint`가 남지 않는다(이 문서의 17·18절과 구현 결과 기록에만 이름이 남는다).
+- 테스트: `tests/succession/succession.test.tsx`는 월 생활비 120,000,000 → `"1.2억원"`, 2,500,000 → `"250만원"`을 정확히 찾고, 매번 `/ · [\d,.]+만원/`에 맞는 텍스트가 없음을 단언한다. `tests/estate/estate.test.tsx`의 증여세 계산 테스트도 증여 금액 120,000,000 → `"1.2억원"`, 2,500,000 → `"250만원"`과 같은 부정 단언을 둔 뒤 계산 요청 본문 단언(1억 원)에 맞게 100,000,000으로 되돌린다. 소스만 develop으로 되돌리면 두 테스트가 실패하는 것을 확인했다.
+- 스펙과 다른 점: 없다.
+- 실행한 검증: 프론트 `npm run lint`·`npx tsc --noEmit` 통과, `npm run test` 56개 파일 570개 통과(17절 표 테스트 8개를 지운 수), `npm run build` 성공. 백엔드는 바꾸지 않았다. 슬롯 22 서버와 독립 헤드리스 Chrome 컨텍스트(합성 계정, 확인 뒤 계정 삭제, localhost 밖 요청 차단)에서 360·1280px 각각 `/succession` 월 생활비 2,500,000 → `250만원`, 120,000,000 → `1.2억원`, 현금 800,000,000 → `8억원`, `/estate?tab=gift-tax` 증여 금액 기본 100,000,000 → `1억원`, 120,000,000 → `1.2억원`, 2,500,000 → `250만원`, 감정평가수수료 0 → `0원`, 두 화면 모두 도우미에 `" · …만원"` 둘째 표기 없음과 가로 스크롤 없음을 확인했다(25항목 통과). 확인 뒤 `scripts/stop.sh`로 서버를 멈췄다.
+- 남은 일: 없다.
