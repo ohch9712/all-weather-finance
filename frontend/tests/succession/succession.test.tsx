@@ -3,6 +3,7 @@ import { HttpResponse, http } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SuccessionPage } from "@/features/succession/components/SuccessionPage";
 import type { SuccessionInput } from "@/features/succession/types";
+import { formatKRWCompact } from "@/lib/format";
 import { apiUrl, authPayload, errorResponse, renderWithProviders, server } from "../utils";
 import { CASE_A, envelope, RESULT, SHORT_RESULT } from "./fixtures";
 
@@ -211,7 +212,7 @@ describe("결과", () => {
     expect(headers.slice(1).map((cell) => cell.textContent)).toEqual([
       "최선안부동산 증여 + 현금 10년 공제 한도 증여",
       "차선안 1부동산을 지금 그대로 증여",
-      "차선안 2부동산을 팔아 현금으로 지금 증여",
+      "차선안 2이전 가능액을 지금 현금으로 증여",
     ]);
     expect(within(table).getAllByRole("rowheader").map((cell) => cell.textContent)).toEqual([
       "이전 대상과 자산 종류",
@@ -222,17 +223,59 @@ describe("결과", () => {
     ]);
     expect(within(table).getAllByText("나: 주택(증여)")).toHaveLength(3);
     expect(within(table).getAllByText("2026-10-21 증여 700,000,000원")).toHaveLength(3);
-    expect(within(table).getByText("766,564,390원")).toBeVisible();
-    expect(within(table).getByText("입력한 조건에서 세금 총액이 가장 적어요(766,564,390원).")).toBeVisible();
+    // 예상 세금 두 줄(19절): 굵게 상속 시점 기준, 그 아래 작게 낸 금액 합계, 이어서 항목별 세금.
+    const taxCells = within(table).getByRole("rowheader", { name: "예상 세금" }).parentElement!.querySelectorAll("td");
+    expect([...taxCells[0].querySelectorAll("p")].map((line) => line.textContent)).toEqual([
+      "상속 시점 기준 907,861,575원",
+      "낸 금액 합계 766,564,390원",
+      "증여세 232,800,000원",
+      "취득세 113,175,161원",
+      "양도세 0원",
+      "상속세 420,589,229원",
+    ]);
+    expect(within(taxCells[0]).getByText("상속 시점 기준 907,861,575원")).toHaveClass("font-semibold");
+    expect(within(taxCells[0]).getByText("낸 금액 합계 766,564,390원")).toHaveClass("text-xs");
+    expect(within(taxCells[2]).getByText("상속 시점 기준 947,407,960원")).toBeVisible();
+    expect(within(taxCells[2]).getByText("낸 금액 합계 936,413,428원")).toBeVisible();
+    expect(within(table).getByText("상속 시점(2038-10-21) 기준으로 맞춘 세금 합계가 가장 적어요(907,861,575원).")).toBeVisible();
+    expect(within(table).getByText("상속 시점 기준 세금 합계가 최선안보다 16,260,854원 많아요.")).toBeVisible();
+    expect(within(table).getByText("상속 시점 기준 세금 합계가 최선안보다 39,546,385원 많아요.")).toBeVisible();
     const cards = screen.getByRole("list", { name: "방안 비교 카드" });
-    expect(within(cards).getAllByRole("listitem").filter((item) => item.parentElement === cards)).toHaveLength(3);
+    const cardItems = within(cards).getAllByRole("listitem").filter((item) => item.parentElement === cards);
+    expect(cardItems).toHaveLength(3);
+    expect(within(cardItems[0]).getByText("상속 시점 기준 907,861,575원")).toHaveClass("font-semibold");
+    expect(within(cardItems[0]).getByText("낸 금액 합계 766,564,390원")).toBeVisible();
+    expect(within(cardItems[2]).getByText("이전 가능액을 지금 현금으로 증여")).toBeVisible();
+
+    const compare = screen.getByRole("region", { name: "방안 비교(상속 시점 기준 세금이 적은 순)" });
+    expect(within(compare).getByRole("heading", { level: 2 })).toHaveTextContent("방안 비교(상속 시점 기준 세금이 적은 순)");
+    expect(
+      within(compare).getByText(
+        "생활·간병비를 먼저 떼어 둔 뒤, 지금 내는 세금을 상속 시점(2038-10-21)까지 연 3%로 불려 상속세와 더한 금액이 가장 적은 방안을 최선안으로 골랐어요.",
+      ),
+    ).toBeVisible();
+    // 차트: 합계 막대는 상속 시점 기준, 범례 "세금 합계(상속 시점 기준)", 항목 막대는 낸 금액 그대로.
+    expect(within(compare).getByRole("img", { name: "방안별 상속 시점 기준 세금 합계와 항목" })).toBeInTheDocument();
+    expect(within(compare).getByText("세금 합계(상속 시점 기준)", { selector: "li span" })).toBeInTheDocument();
+    const chartTable = within(compare).getByRole("table", { name: "방안별 상속 시점 기준 세금 합계와 항목" });
+    expect(within(chartTable).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
+      "항목",
+      "세금 합계(상속 시점 기준)",
+      "증여세",
+      "취득세",
+      "양도세",
+      "상속세",
+    ]);
+    expect(within(chartTable).getAllByRole("row")[1].textContent).toBe(
+      ["1위 부동산+공제 분산", ...[907_861_575, 232_800_000, 113_175_161, 0, 420_589_229].map(formatKRWCompact)].join(""),
+    );
 
     const funding = screen.getByRole("region", { name: "이전 가능액" });
     expect(within(funding).getByText("277,335,141원")).toBeVisible();
     expect(within(funding).getByText(/통계 17.5년 × 건강 1.1 → 적용 19.3년/)).toBeVisible();
     expect(screen.queryByText(/생활·간병비가 현금보다/)).not.toBeInTheDocument();
 
-    const detail = screen.getByText(/^1위 부동산 증여 \+ 현금 10년 공제 한도 증여 상세/).closest("details")!;
+    const detail = screen.getByText("1위 부동산 증여 + 현금 10년 공제 한도 증여 상세 · 상속 시점 기준 세금 907,861,575원").closest("details")!;
     expect(detail).not.toHaveAttribute("open");
     await user.click(within(detail).getByText(/상세/));
     expect(detail).toHaveAttribute("open");
@@ -281,7 +324,33 @@ describe("검토용 요약", () => {
     expect(checklist).toHaveLength(11);
     expect(checklist[10]).toHaveTextContent("11. 기준일 이후 세법·규제지역 변경 여부");
     expect(screen.getAllByTestId("memo-line")).toHaveLength(5);
-    expect(screen.getByRole("table", { name: "방안 비교표(전체 순위)" })).toHaveTextContent("4위증여 없이 모두 상속");
+    const review = screen.getByRole("table", { name: "방안 비교표(전체 순위)" });
+    expect(within(review).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
+      "순위",
+      "방안",
+      "세금 합계(상속 시점 기준)",
+      "세금 합계(낸 금액)",
+      "증여세",
+      "취득세",
+      "양도세",
+      "상속세",
+      "부모님에게 남는 재산(지금)",
+    ]);
+    expect(within(review).getAllByRole("row")[1].textContent).toBe(
+      [
+        "1위",
+        "부동산 증여 + 현금 10년 공제 한도 증여",
+        "907,861,575원",
+        "766,564,390원",
+        "232,800,000원",
+        "113,175,161원",
+        "0원",
+        "420,589,229원",
+        "2,100,000,000원",
+      ].join(""),
+    );
+    expect(review).toHaveTextContent("3위이전 가능액을 지금 현금으로 증여947,407,960원936,413,428원");
+    expect(review).toHaveTextContent("4위부동산을 팔아 현금으로 지금 증여984,936,877원844,017,828원");
     expect(screen.getAllByText(/세금 계산 결과는 입력값과/).length).toBeGreaterThan(0);
     const printButton = screen.getByRole("button", { name: "인쇄·PDF로 저장" });
     expect(printButton.parentElement).toHaveClass("print:hidden");
