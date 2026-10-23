@@ -1,4 +1,4 @@
-"""스펙 22 6절 검증용 종합 사례 입력(JSON 계약 그대로)."""
+"""스펙 22 6절·20절 검증용 종합 사례 입력(JSON 계약 그대로)."""
 
 import copy
 
@@ -132,3 +132,7 @@ def case(base: dict, **changes) -> dict:
     data = copy.deepcopy(base)
     data.update(changes)
     return data
+
+
+# 20절 사례 C: 사례 A에서 월 수입만 4,000,000(남는 수입 0년차 12,000,000).
+CASE_C = case(CASE_A, monthlyIncome=4_000_000)
