@@ -428,7 +428,7 @@ def replay_gift_deductions(recipient: Recipient, gifts: list[PriorGift]) -> list
 3. **나와 형제자매**(1~10명): 이름(별칭 권장), 본인 여부(한 명), 나이(만), 세대 주택 수, 과거 증여받은 내역(날짜, 준 사람 부모님·조부모님, 금액, 낸 증여세. 추가·삭제).
 4. **가정값**: 4.4의 다섯 값과 근거 안내. "기본값으로 되돌리기".
 
-- 금액 입력은 06처럼 "1.2억원 · 12,000만원" 도우미를 붙인다.
+- 금액 입력은 06처럼 "1.2억원 · 12,000만원" 도우미를 붙인다(표기 규칙은 17절 `formatKRWHint`).
 - 민감정보 동의 상자(저장 버튼 위)
   - "[선택] 부모님 건강 상태(민감정보) 저장에 동의해요"
   - 내용: "수집 목적: 부모님 기대여명 추정과 이전 방안 계산 / 항목: 부모님 건강 상태 / 보유 기간: 동의를 철회하거나 계정을 삭제할 때까지 / 동의하지 않을 권리가 있고, 동의하지 않아도 계산할 수 있어요. 이 경우 건강 상태는 저장하지 않아요."
@@ -529,6 +529,26 @@ def replay_gift_deductions(recipient: Recipient, gifts: list[PriorGift]) -> list
 - 정책브리핑, 서울 전역·경기 12곳 조정대상지역 등 지정(2025-10): https://www.korea.kr/news/policyNewsView.do?newsId=148950973
 - 의약일보, 요양병원 간병비 월평균 보도: https://medicaldaily.co.kr/news/16686
 
+## 17. 금액 도우미 중복 표시 수정 (2026-10-23, 브랜치 `feature/22-succession-fix-1`)
+
+- 증상: 금액 입력 칸 아래 도우미가 "억 단위 · 만원 단위"를 항상 둘 다 붙여, 1억 원 미만이면 같은 말이 두 번 나온다(월 생활비 2,500,000 → "250만원 · 250만원"). 06 `/estate`의 금액 칸(`frontend/src/features/estate/components/shared.tsx`)도 같은 식이라 함께 고친다.
+- 공용 형식 함수 `formatKRWHint(value: number): string`을 `frontend/src/lib/format.ts`에 추가하고 두 화면이 쓴다. 22의 `moneyHint`(`features/succession/utils.ts`)는 지우고 `components/fields.tsx`가 `formatKRWHint`를 쓴다. 06 `shared.tsx`의 금액 도우미 한 줄도 `formatKRWHint(Number(value) || 0)`로 바꾼다. 입력이 비었을 때의 기존 문구("원 단위로 입력해 주세요." 등)는 그대로 둔다.
+- 규칙: `compact = formatKRWCompact(value)`, `manwon = (value / 10000).toLocaleString("ko-KR") + "만원"`(지금 두 화면의 둘째 표기 그대로). `value`가 0이면 `"0원"`, `compact === manwon`이면 `compact` 하나, 다르면 `` `${compact} · ${manwon}` ``.
+
+| 입력 | 결과 |
+| --- | --- |
+| 120,000,000 | `1.2억원 · 12,000만원` |
+| 100,000,000 | `1억원 · 10,000만원` |
+| 99,995,000 | `1억원 · 9,999.5만원` |
+| 2,500,000 | `250만원` |
+| 10,000 | `1만원` |
+| 12,345,678 | `1,235만원 · 1,234.568만원` |
+| 5,000 | `5,000원 · 0.5만원` |
+| 0 | `0원` |
+
+- 소유 파일: `frontend/src/lib/format.ts`(`formatKRWHint` 추가만), `frontend/src/features/succession/utils.ts`·`components/fields.tsx`, `frontend/src/features/estate/components/shared.tsx`(금액 도우미 한 줄), `frontend/tests/foundation/format.test.ts`(`formatKRWHint` 표 테스트 추가), `frontend/tests/succession/**`, `frontend/tests/estate/**`(도우미 표기 단언만), 이 문서 `## 구현 결과` 끝의 새 소절.
+- 확인: 프론트 공통 완료 기준. 위 표 전체를 단위 테스트로 고정한다. 22·06 화면 테스트에 1억 미만 금액이 한 번만 보이는 단언을 하나씩 둔다. 슬롯 22 서버에서 `/succession`(월 생활비 2,500,000, 현금 800,000,000)과 `/estate` 금액 칸의 도우미를 360·1280px에서 확인한다. 백엔드는 바꾸지 않는다.
+
 ## 구현 결과
 
 ### 구현한 것
@@ -581,3 +601,11 @@ def replay_gift_deductions(recipient: Recipient, gifts: list[PriorGift]) -> list
   - 응답 모델 검증 실패(`ResponseValidationError`)는 메시지에 입력값을 담지만, 건강 상태는 `Health` 리터럴로 검증한 값만 암호화해 저장하므로 정상 경로에서는 생기지 않는다.
 - 실행한 검증: develop `24cc017` 병합(스펙 문서 한 줄만 바뀌어 프론트는 `npm run test`만 실행). 백엔드 `uv run ruff check .`·`uv run ruff format --check .` 통과, `uv run pytest` 1,583개 통과(succession 61개). 프론트 `npm run test` 56개 파일 570개 통과. 슬롯 22 실서버(백엔드만, 합성 계정, 확인 뒤 계정 삭제)에 정상 요청, 두 재현 요청(각각 200, `healthFactor` 0.7·0.4로 poor·care 적용), 키 대소문자·`;` 구분·잘못된 값(422), `POST /plans` 잘못된 health(422), 다른 경로 `GET /api/health?probe=keep`을 보내 succession 접근 로그는 모두 `GET /api/succession/life-expectancy?*** HTTP/1.1`로만 남고 다른 경로는 그대로이며, 새 로그에 건강 상태 값·인코딩 키가 0건임을 확인했다.
 - 남은 일: 로컬 `backend/logs/dev-server.log.1`(저장소 밖)에는 수정 전 검증 때 보낸 합성 쿼리가 남아 있을 수 있다.
+
+### 금액 도우미 중복 표시 수정 (2026-10-23)
+
+- 구현: 17절 규칙대로 `frontend/src/lib/format.ts`에 `formatKRWHint(value: number): string`을 추가했다(0이면 `"0원"`, `formatKRWCompact` 결과와 만원 표기가 같으면 하나, 다르면 `"A · B"`). 22의 `moneyHint`(`features/succession/utils.ts`)를 지우고 `components/fields.tsx`의 `MoneyField`가 `formatKRWHint`를 쓴다. 06 `features/estate/components/shared.tsx`의 금액 도우미 한 줄은 `formatKRWHint(Number(value) || 0)`로 바꿨다. 입력이 비었을 때 문구("원 단위로 입력해 주세요.")와 다른 형식 함수는 그대로다. 06 금액 칸의 0원은 이제 `"0원 · 0만원"` 대신 `"0원"`으로 보인다(17절 규칙).
+- 테스트: `tests/foundation/format.test.ts`에 17절 표 8개 값을 `it.each` 표 테스트로 고정했다. `tests/succession/succession.test.tsx`는 기존 `"1.2억원 · 12,000만원"` 단언 뒤에 월 생활비 2,500,000 → `"250만원"` 한 번, `"250만원 · 250만원"` 없음을 더했다. `tests/estate/estate.test.tsx`의 증여세 계산 테스트에 증여 금액 2,500,000 → 같은 두 단언을 더하고, 계산 요청 본문 단언(1억 원)이 그대로 맞도록 금액을 100,000,000으로 되돌린 뒤 계산한다.
+- 스펙과 다른 점: 없다.
+- 실행한 검증: 프론트 `npm run lint`·`npx tsc --noEmit` 통과, `npm run test` 56개 파일 578개 통과, `npm run build` 성공. 백엔드는 바꾸지 않았다. 슬롯 22 서버와 독립 헤드리스 Chrome 컨텍스트(합성 계정, 확인 뒤 계정 삭제, localhost 밖 요청 차단)에서 360·1280px 각각 `/succession` 월 생활비 2,500,000 → `250만원`, 현금 800,000,000 → `8억원 · 80,000만원`, `/estate?tab=gift-tax` 증여 금액 기본 100,000,000 → `1억원 · 10,000만원`, 2,500,000 → `250만원`, 감정평가수수료 0 → `0원`, 두 화면 모두 `"250만원 · 250만원"` 없음과 가로 스크롤 없음을 확인했다(22항목 통과). 확인 뒤 `scripts/stop.sh`로 서버를 멈췄다.
+- 남은 일: 없다.

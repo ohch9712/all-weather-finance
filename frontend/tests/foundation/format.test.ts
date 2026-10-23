@@ -5,6 +5,7 @@ import {
   formatDateTime,
   formatKRW,
   formatKRWCompact,
+  formatKRWHint,
   formatPercent,
   formatSignedKRW,
 } from "@/lib/format";
@@ -48,6 +49,21 @@ describe("formatKRWCompact(스펙 01 9절 format_krw_compact와 같은 값)", ()
     [1_000_000_000_000, "10,000억원"],
   ])("%d → %s", (value, expected) => {
     expect(formatKRWCompact(value)).toBe(expected);
+  });
+});
+
+describe("formatKRWHint(스펙 22 17절 표)", () => {
+  it.each([
+    [120_000_000, "1.2억원 · 12,000만원"],
+    [100_000_000, "1억원 · 10,000만원"],
+    [99_995_000, "1억원 · 9,999.5만원"],
+    [2_500_000, "250만원"],
+    [10_000, "1만원"],
+    [12_345_678, "1,235만원 · 1,234.568만원"],
+    [5_000, "5,000원 · 0.5만원"],
+    [0, "0원"],
+  ])("%d → %s", (value, expected) => {
+    expect(formatKRWHint(value)).toBe(expected);
   });
 });
 

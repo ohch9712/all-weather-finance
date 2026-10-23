@@ -86,6 +86,14 @@ it("증여세 계산 단계표와 계산 가정", async () => {
   const { user } = render("gift-tax");
   await screen.findByRole("button", { name: "계산하기" });
   expect(screen.getAllByText(relativeScopeHint)[0]).toBeVisible();
+  // 금액 도우미: 1억 미만은 두 표기가 같아 한 번만 보인다(스펙 22 17절)
+  const amount = screen.getByLabelText(/증여 금액 \(원\)/);
+  await user.clear(amount);
+  await user.type(amount, "2500000");
+  expect(screen.getByText("250만원")).toBeVisible();
+  expect(screen.queryByText(/250만원 · 250만원/)).not.toBeInTheDocument();
+  await user.clear(amount);
+  await user.type(amount, "100000000");
   await user.click(screen.getByRole("button", { name: "계산하기" }));
   expect(await screen.findByRole("table", { name: "세금 계산 단계" })).toBeVisible();
   expect(screen.getByText("10% 구간")).toBeVisible();

@@ -3,9 +3,9 @@
 import { useId, type ReactNode } from "react";
 import { Controller, get, useFormContext, type Path } from "react-hook-form";
 import { Input } from "@/components/ui/input";
+import { formatKRWHint } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { parseInteger, type SuccessionForm } from "../form";
-import { moneyHint } from "../utils";
 
 type Name = Path<SuccessionForm>;
 
@@ -104,7 +104,7 @@ export function MoneyField({ name, label, hint, required, className }: Omit<Text
             hint={
               <>
                 <span className="block tabular-nums" aria-live="polite">
-                  {amount === null ? "원 단위로 입력해 주세요." : moneyHint(amount)}
+                  {amount === null ? "원 단위로 입력해 주세요." : formatKRWHint(amount)}
                 </span>
                 {hint}
               </>
